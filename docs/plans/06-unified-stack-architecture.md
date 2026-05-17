@@ -13,7 +13,7 @@
 ## Design Decisions (locked — agreed in design discussion)
 
 1. **`services/` = strictly Docker, `machines/` = strictly Orb VMs.** Hermes stays an Orb VM at `machines/hermes/`.
-2. **Single root `docker-compose.yaml`** = `name:` + `include:` only. Each `services/<svc>/compose.yaml` is **self-contained** (declares external `aitools-net` and any pinned volume it uses) so `cd services/<svc> && docker compose up` works *and* root `include:` merges cleanly.
+2. **Single root `docker-compose.yaml`** = `name:` + `include:` only. Each `services/<svc>/compose.yaml` declares its own external `aitools-net` + pinned volumes. **postgres/redis/litellm validate & run standalone** (`cd services/<svc> && docker compose ...`). **honcho is the deliberate exception:** it carries cross-file `depends_on` (pg/redis/litellm) for profile auto-pull + ordering, so it does NOT validate standalone (and running honcho without its backends is meaningless anyway) — honcho is validated/run via the root `include:` merged model, which is the supported path for it.
 3. **Profiles:** postgres + redis have **no `profiles:`** (always-on shared backends). litellm → `profiles: [litellm]`. honcho → `profiles: [honcho]` + `depends_on` postgres, redis, litellm. `COMPOSE_PROFILES` in `.stack/.env` is the only knob; `depends_on` auto-pulls dependency services even if their profile is inactive (Compose ≥ v2.20.3).
 4. **`.stack/` holds ALL runtime secrets, gitignored entirely.** `.stack/.env` = hand-edited core (provider keys, `LITELLM_MASTER_KEY`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `LITELLM_VIRTKEY_*_MODELS` allowlist *declarations*). `.stack/db.generated.env` = postgres-owned DB passwords. `.stack/litellm.generated.env` = litellm-owned minted virtual keys. The `.generated.` infix marks "machinery may truncate+rewrite this; never hand-edit."
 5. **`.stack/.env` is NOT auto-loaded** (it is not in the compose project root). The justfile always sets `COMPOSE_ENV_FILES=.stack/.env,<glob .stack/*.generated.env>` (`.env` first = lowest precedence). A bare `docker compose up` from repo root therefore fails fast (no vars) — this is the *desired* guard against accidental parent-chain `.env` walking when running a single service dir.
@@ -1217,7 +1217,7 @@ Expected: `staged content clean`, `.stack secrets ignored`, commit succeeds; `.s
 ## Acceptance criteria (verify ALL)
 
 - `just setup && just build && just start` brings the stack up with secrets ONLY in `.stack/` (`git status` shows no `.stack/` tracked; `git check-ignore` passes for all `.stack/*`).
-- Single root `docker-compose.yaml` (`include:`); each `services/<svc>/compose.yaml` also validates standalone (`cd services/<svc> && docker compose config -q`).
+- Single root `docker-compose.yaml` (`include:`) validates merged (`docker compose -f docker-compose.yaml config -q` with profiles) and contains all 5 services; postgres/redis/litellm also validate standalone; honcho validates only via the root include (by-design cross-file `depends_on`).
 - `COMPOSE_PROFILES` in `.stack/.env` is the only run-selection knob; `COMPOSE_PROFILES=honcho` auto-pulls litellm via `depends_on`.
 - Honcho memory + LiteLLM virtual keys **preserved** across the restructure (Task 7/Step 6 C nonzero, existing keys still authenticate, embed cols `vector(1024)`).
 - Hermes (Orb VM `hermes`) chats via LiteLLM `chatgpt/gpt-5.5` (streaming) and reaches Dockerized Honcho; logs visible in OrbStack console; LiteLLM spend logs grow on a Hermes-driven call.

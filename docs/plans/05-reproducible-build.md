@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # 05 — Fully Reproducible hermes-stack Build
 
 **Goal:** capture EVERYTHING done across this build so the entire stack —

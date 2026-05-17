@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # 01b — Clone `hermes-agent` → `hermes`
 
 **Goal:** Create the new production VM `hermes` as a clone of the frozen

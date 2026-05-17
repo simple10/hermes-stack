@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # 03 — aitools-services: Honcho Implementation Plan
 
 > Builds on Plan 01 (aitools-pg/redis, `honcho` DB+role, `HONCHO_DB_PASSWORD`

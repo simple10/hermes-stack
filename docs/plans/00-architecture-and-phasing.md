@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # hermes-stack — Architecture & Phasing Plan
 
 > Master planning doc. Per-phase bite-sized implementation plans (01–04)

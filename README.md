@@ -1,208 +1,164 @@
 # hermes-stack
 
-A fully reproducible personal AI stack: shared **Dockerized backends**
-(Postgres + Redis), **AI services** (LiteLLM proxy + Honcho memory), and a
-**Hermes agent** running in an isolated OrbStack Ubuntu machine — all wired
-together with LLM/embedding traffic flowing through LiteLLM for key rotation
-and observability.
+A composable personal AI stack: shared **Dockerized backends** (Postgres +
+Redis), **AI services** (LiteLLM proxy + Honcho memory), and an optional
+**Hermes agent** in an OrbStack Ubuntu machine — all LLM/embedding traffic
+flowing through LiteLLM for key rotation + observability. One root compose
+(`include:` per service), Orb VMs under `machines/`, and every runtime secret
+in one gitignored `.stack/` dir.
 
 ```
 hermes-stack/
-  secrets.env.example          # the ONLY values you must supply
-  build-stack.sh               # Docker side: backends -> services
-  build-hermes.sh [machine]    # provisions a fresh Hermes orb VM
-  justfile                     # up / down / hermes / status / logs
-  aitools-backends/            # pgvector/pgvector:pg18 + redis compose
-  aitools-services/            # LiteLLM + Honcho compose (honcho-src gitignored)
-  hermes-vm/
-    systemd/{hermes-dashboard,hermes-gateway,hermes-logtail}.service
-    bin/hermes-logtail.sh
-    config/honcho.json.tmpl
-    config/config.yaml.model.tmpl
-  docs/plans/                  # phase-by-phase implementation plans (00..05)
+  docker-compose.yaml          # name: hermes-stack + include: services/*/compose.yaml
+  justfile                     # setup | build | start | stop | status | logs | reconfigure
+  lib/                         # stacklib.sh (helpers), setup.sh, honcho-postup.sh
+  .stack/                      # ALL runtime secrets — gitignored (created by `just setup`)
+    .env  *.generated.env  .config-hashes/
+  .stack.env.example           # documents .stack/.env (the only hand-edited file)
+  services/
+    postgres/  redis/          # always-on backends (no profile); volume-pinned
+    litellm/                   # profile [litellm]; *.template -> *.runtime.* (bind-mounted)
+    honcho/                    # profile [honcho]; built from pinned _source/ (gitignored)
+  machines/
+    hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
+  docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
 ```
 
 ## Architecture
 
-- **`aitools-backends`** — `pgvector/pgvector:pg18` (`aitools-pg`, DBs
-  `honcho` + `litellm`, each its own least-priv role) + `redis:8.6.3`
-  (`aitools-redis`). On the external Docker network `aitools-net`,
-  unpublished (AI-tools-internal).
-- **`aitools-services`** — `aitools-litellm` (official
-  `ghcr.io/berriai/litellm-database` image) + `aitools-honcho-api` +
-  `aitools-honcho-deriver` (built from a **pinned** `plastic-labs/honcho`
-  commit). Joins `aitools-net`; reaches pg/redis by alias.
-- **Hermes** — runs natively in an isolated OrbStack Ubuntu machine. It
-  reaches the Dockerized services via `<container>.orb.local` names
-  (no host port publishing needed from the VM). Hermes's own agent brain
-  AND Honcho's LLM/embedding calls route through LiteLLM.
+- **postgres / redis** — `pgvector/pgvector:pg18` (`aitools-pg`; DBs `honcho`
+  + `litellm`, each a least-priv role) and `redis:8.6.3` (`aitools-redis`).
+  No Compose profile → always-on shared backends. On the external network
+  `aitools-net`.
+- **litellm** — `aitools-litellm`, official `litellm-database` image **pinned
+  by digest**. Profile `[litellm]`.
+- **honcho** — `aitools-honcho-api` + `aitools-honcho-deriver`, built from a
+  **pinned** `plastic-labs/honcho` commit. Profile `[honcho]`;
+  `depends_on` pg/redis/litellm so `COMPOSE_PROFILES=honcho` auto-pulls them.
+- **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
+  container. Reaches the Dockerized services via **bare**
+  `<container>.orb.local` DNS. Its own agent brain AND Honcho's
+  LLM/embedding calls route through LiteLLM.
 
-Traffic: `Hermes -> LiteLLM (chatgpt/gpt-5.5, streaming)` for the agent;
-`Hermes -> Honcho -> LiteLLM (glm/grok/voyage)` for memory.
+Traffic: `Hermes → LiteLLM (chatgpt/gpt-5.5, streaming)` for the agent;
+`Hermes → Honcho → LiteLLM (glm/grok/voyage)` for memory.
 
 ## Prerequisites
 
-- macOS with **OrbStack** (its Docker engine active; `orb` CLI on PATH).
-- `just` (optional, for the orchestration shortcuts), `git`, `openssl`,
-  `python3`.
+macOS + **OrbStack** (Docker engine active, `orb` CLI on PATH), `just`,
+`git`, `openssl`, `python3`. Docker Compose ≥ v2.20.3 (`include:`,
+`COMPOSE_ENV_FILES`, cross-profile `depends_on` auto-pull).
 
-## From-scratch procedure
-
-### 1. Provide secrets
+## Quickstart (from scratch)
 
 ```bash
-cp secrets.env.example secrets.env
-$EDITOR secrets.env     # fill OPENROUTER_API_KEY, VOYAGE_API_KEY, TELEGRAM_*
+just setup     # interactive — writes .stack/.env (the only hand-edited secrets)
+just build     # render configs, fetch pinned sources, gen DB passwords, provision machines
+just start     # staged bring-up + (first run) ChatGPT device-pair, then everything up
 ```
 
-`secrets.env` is the **only** thing you supply. Postgres passwords and
-LiteLLM virtual keys are generated by the scripts into gitignored files
-(`aitools-backends/.env`, `aitools-services/.env`,
-`aitools-services/keys.generated.env`). Leave `LITELLM_MASTER_KEY` blank to
-auto-generate it.
+- **`just setup`** prompts for the OpenRouter + Voyage keys, an optional
+  LiteLLM master key (blank → generated), Telegram (if `hermes` is enabled),
+  the Docker `COMPOSE_PROFILES`, and `STACK_MACHINES`. Everything else (DB
+  passwords, minted virtual keys) is machine-generated into
+  `.stack/*.generated.env`. To run only part of the stack, set
+  `COMPOSE_PROFILES` (e.g. `litellm` alone, or `honcho` — which auto-pulls
+  litellm). `.stack/.env` is intentionally **not** auto-loaded by Compose;
+  the `justfile` always passes it via `COMPOSE_ENV_FILES`, so a bare
+  `docker compose up` from the repo root fails fast by design (guards against
+  accidental parent-`.env` walking when running a single `services/<svc>`).
+- **`just build`** runs `services/postgres/build.sh` (generate/reuse DB
+  passwords), each enabled service's `build.sh` (render `*.template` →
+  gitignored `*.runtime.*`; clone+pin `services/honcho/_source`), and each
+  `STACK_MACHINES` machine's `build.sh`. A changed committed template only
+  **warns** (`just reconfigure <svc>` to re-render) — no migration system.
+- **`just start`** is **staged** (order is load-bearing): pg+redis → litellm
+  → `services/litellm/start.sh` mints/reconciles a virtual key per
+  `LITELLM_VIRTKEY_<ALIAS>_MODELS` into `.stack/litellm.generated.env` →
+  `lib/honcho-postup.sh` brings Honcho up correctly for a fresh **or**
+  reattached DB → settle `up -d` → `machines/<m>/start.sh` last (it needs the
+  minted `HERMES_VIRTUAL_KEY`).
 
-### 2. Bring up the Docker side
+First-ever start with no ChatGPT token: LiteLLM prints a device-pair code in
+`docker logs aitools-litellm` (visit the URL, enter the code once); the token
+then persists in the bind-mounted `services/litellm/chatgpt/` (gotcha #9).
 
-```bash
-just up            # or: ./build-stack.sh
-```
+### Migrating an existing two-project stack
 
-This:
-1. creates the external `aitools-net` network (idempotent);
-2. generates `aitools-backends/.env` (super/honcho/litellm passwords via
-   `openssl rand -hex 16`) — reused on re-run so it keeps matching the PG
-   volume;
-3. `docker compose up -d` aitools-backends, waits pg+redis healthy;
-4. writes `aitools-services/.env` (propagates the honcho/litellm DB
-   passwords, adds `LITELLM_MASTER_KEY` + the provider keys from
-   `secrets.env`);
-5. clones `plastic-labs/honcho` into the gitignored `honcho-src/` build
-   context and checks out the **pinned** commit
-   `8fcbb54a49292341dba79d606ee332c50778429b`, then removes its `.git`;
-6. brings up `aitools-litellm`, waits healthy (the `litellm-database`
-   image auto-runs Prisma migrations on first boot);
-7. mints two LiteLLM virtual keys (`honcho`, `hermes`) via `/key/generate`,
-   writes the gitignored `keys.generated.env`, and expands the **hermes**
-   key's model allowlist via `/key/update` to the `chatgpt/*` family +
-   `glm`/`grok` (Honcho's key deliberately gets `glm`/`grok`/`voyage`
-   only — see gotcha #5);
-8. brings up Honcho (the entrypoint runs `alembic upgrade` → schema lands
-   at the hardcoded **1536**), then alters the pgvector columns to **1024**
-   using the in-image venv interpreter
-   `/app/.venv/bin/python scripts/configure_embeddings.py --yes`
-   (**NOT `uv run`** — see gotcha #3), then force-recreates Honcho so the
-   boot `embedding_validator` passes (1024 == 1024);
-9. verifies: PG18 version, honcho/litellm role login, the
-   `documents`/`message_embeddings` columns are `vector(1024)`, and the
-   LiteLLM spend-log table is reachable.
+If you previously ran the old `aitools-backends`/`aitools-services` layout:
+`docker compose ... down` both old projects (volumes are kept), copy the old
+DB passwords into `.stack/db.generated.env`, the old virtual keys into
+`.stack/litellm.generated.env`, the provider/master/Telegram values into
+`.stack/.env`, and the ChatGPT `auth.json` into
+`services/litellm/chatgpt/auth.json` — **before** `just build` (a fresh
+`postgres/build.sh` would otherwise generate new passwords and lock out the
+reattached PG volume). The new compose reattaches the existing named volumes
+by explicit `volumes.*.name:`, so Honcho memory + LiteLLM keys survive
+untouched. See `docs/plans/06-*.md` Task 7 for the exact commands.
 
-### 3. Provision the Hermes VM
-
-```bash
-just hermes hermes-fresh        # or: ./build-hermes.sh hermes-fresh
-```
-
-This `orb create`s a fresh Ubuntu machine and, inside it:
-`apt-get install -y xz-utils` (gotcha #1) → installs Hermes → seeds
-`~/.hermes/.env` from `secrets.env` → writes `~/.hermes/honcho.json` from
-the template → patches the `model:` block of `~/.hermes/config.yaml` (with
-the `hermes` virtual key) → installs **only** the
-`hermes-dashboard`/`hermes-gateway`/`hermes-logtail` systemd units (no
-native honcho/postgres — Honcho is Dockerized) → enables them → verifies
-service state, Honcho reachability, and a streaming one-shot through
-LiteLLM.
-
-`build-hermes.sh` **refuses** to run against `hermes-agent` (the frozen
-original) or `hermes` (the current prod clone). Reproducible builds always
-start from a fresh `orb create`.
-
-> The captured `hermes-vm/systemd/*.service` units and
-> `hermes-vm/bin/hermes-logtail.sh` are the **exact** files from the running
-> clone (`hermes`); they contain no secrets.
-
-### 4. Orchestration shortcuts (`justfile`)
+### `justfile` targets
 
 | Target | Action |
 |--------|--------|
-| `just up` | `build-stack.sh` (Docker side) |
-| `just down` | `docker compose down` both projects (volumes kept) |
-| `just hermes [name]` | `build-hermes.sh [name]` (default `hermes-fresh`) |
+| `just setup` | interactive `.stack/.env` generator |
+| `just build` | render configs, fetch pinned sources, gen DB pw, provision machines |
+| `just start` | staged bring-up (mint keys → honcho → machines) |
+| `just stop` | `docker compose down --remove-orphans` (volumes kept; machines left running) |
 | `just status` | `aitools-*` container health + `orb list` |
-| `just logs [name]` | `orb logs <machine>` (OrbStack Logs tab) |
+| `just logs [machine]` | `orb logs <machine>` (OrbStack Logs tab = the console) |
+| `just reconfigure <svc>` | back up + re-render a service's runtime config from its template |
 
-## Validation note
+## Gotchas (hard-won — keep encoded)
 
-`build-stack.sh` is safe to run/re-run. **`build-hermes.sh` creates a new
-OrbStack VM** — it has not been executed end-to-end here (that would spin up
-a machine); it is lint-clean and internally consistent. A fresh-VM run
-(`./build-hermes.sh hermes-fresh`) is the user's final acceptance test:
-Hermes should chat via LiteLLM, Honcho memory should work, and logs should
-appear in the OrbStack Logs tab.
-
-## Gotchas (hard-won during this build)
-
-1. **`xz-utils` is required.** The Hermes installer extracts a Node.js
-   `.tar.xz`; minimal Ubuntu lacks `xz-utils` and the install fails without
-   it. `build-hermes.sh` installs it first. (Upstream installer bug —
-   PR https://github.com/NousResearch/hermes-agent/pull/11278.)
-
+1. **`xz-utils` required** — the Hermes installer extracts a Node `.tar.xz`;
+   minimal Ubuntu lacks it. `machines/hermes/build.sh` apt-installs it first.
 2. **Honcho config = `config.toml` + env; precedence `env > .env >
-   config.toml`.** Never commit secrets in `config.toml` — the DB URI and
-   the LiteLLM virtual key come from compose env; `config.toml` carries
-   placeholders / non-secret tuning only.
-
-3. **Voyage embeddings via LiteLLM.** Keep Honcho's
-   `embedding.dimensions_mode = "never"` (Voyage 400s on a `dimensions`
-   param; LiteLLM translates `dimensions` → Voyage `output_dimension`
-   anyway, so either shape works — keep `"never"`, it is the proven
-   minimal-change path). The pgvector columns **must** be 1024: run
-   `scripts/configure_embeddings.py --yes` with the in-image venv
-   interpreter (`/app/.venv/bin/python ...`), **NOT `uv run`** — `uv run`
-   rebuilds the project in-image and fails.
-
-4. **A Postgres major-version rebuild wipes the LiteLLM DB → virtual keys
-   vanish.** After any PG volume reset you must regenerate the virtual keys
-   and re-point Honcho's key. `build-stack.sh` regenerates the keys on every
-   run and rewrites `HONCHO_VIRTUAL_KEY` into `aitools-services/.env`, so a
-   re-run self-heals this.
-
-5. **`chatgpt/*` via LiteLLM: non-streaming completions fail (known LiteLLM
-   bug); streaming is fine.** Hermes streams → it works for the agent brain.
-   **Honcho must NOT use `chatgpt/*`** — its deriver / summary / dream /
-   dialectic tool-steps are non-streaming. Keep Honcho on
-   `glm`/`grok`/`voyage`; that is why the two virtual keys get different
-   model allowlists.
-
-6. **The OrbStack machine "Logs" tab IS the console (`/dev/console`), not
-   journald.** To surface Hermes logs there, `hermes-logtail` (running as
-   root) mirrors `~/.hermes/logs/{gateway,errors}.log` to `/dev/console`.
-   `agent.log` is deliberately excluded (DEBUG-spammy — it would flood the
-   tab).
-
-7. **`hermes-agent` is the frozen original — never modified.** The current
-   prod work lives in the clone `hermes`. Reproducible builds start from a
-   fresh `orb create` (not the clone), so `build-hermes.sh` hard-refuses
-   both `hermes-agent` and `hermes` as targets — this gotcha only matters
-   for the existing machines.
-
-8. **Pin everything.** LiteLLM image digest (`aitools-services/`
-   `.litellm-image-digest`), Honcho source commit
-   (`8fcbb54a49292341dba79d606ee332c50778429b`, pinned in `build-stack.sh`),
-   and the pg/redis image tags (`pgvector/pgvector:pg18`, `redis:8.6.3`) are
-   all pinned. Bump deliberately, via a commit.
+   config.toml`.** Templates carry placeholders only; the DB URI + virtual
+   key come from compose env. No secret in any committed/rendered config.
+3. **Voyage embeddings:** keep Honcho `embedding.dimensions_mode = "never"`.
+   pgvector columns must be `vector(1024)`; the fresh-DB fix runs
+   `scripts/configure_embeddings.py --yes` via the **in-image venv**
+   (`/app/.venv/bin/python`), **NOT `uv run`** (it rebuilds in-image + fails).
+4. **A PG major rebuild wipes the LiteLLM DB → virtual keys vanish.** This
+   stack avoids it by reattaching the existing volume; if it ever happens,
+   `services/litellm/start.sh` re-mints idempotently on the next `just start`.
+5. **`chatgpt/*` via LiteLLM: non-streaming completions fail (known bug);
+   streaming OK.** Hermes streams → fine. **Honcho must NEVER get
+   `chatgpt/*`** in its virtual-key allowlist (its deriver/summary/dream/
+   dialectic steps are non-streaming) — keep Honcho on glm/grok/voyage. This
+   is why the two virtual keys get different `LITELLM_VIRTKEY_*_MODELS`.
+6. **OrbStack machine "Logs" tab = the console (`/dev/console`), not
+   journald.** `hermes-logtail` (root) mirrors `~/.hermes/logs/{gateway,
+   errors}.log` there; `agent.log` excluded (DEBUG-spam).
+7. **`hermes-agent` is the frozen original — never modified.**
+   `machines/hermes/{build,start}.sh` hard-refuse it. The clone `hermes` is
+   the working machine.
+8. **`.stack/.env` is not auto-loaded by design.** Every compose call goes
+   through the `justfile`'s `COMPOSE_ENV_FILES` (`.stack/.env` first, then
+   `.stack/*.generated.env`).
+9. **ChatGPT `auth.json` is a required runtime artifact** (gitignored, in no
+   `.env`). Without it LiteLLM blocks on an interactive device-code prompt at
+   boot and never goes healthy. Migrate it like the DB passwords; on a fresh
+   install complete the device pairing once (it persists in the bind mount).
+10. **Hermes uses BARE OrbStack DNS** (`aitools-litellm.orb.local`,
+    `aitools-honcho-api.orb.local`) — never `<container>.<project>.orb.local`.
+    The project is `hermes-stack` (no per-file `name:`); a project-qualified
+    FQDN silently dies (Hermes brain → "Connection error").
 
 ## Secrets model
 
-`secrets.env.example` lists every value you supply; the real `secrets.env`
-is gitignored. All derived secrets land in gitignored files:
+Every runtime secret lives in `.stack/` (gitignored in full). Nothing secret
+is ever tracked in git.
 
-| File | Contents | Generated by |
-|------|----------|--------------|
-| `secrets.env` | provider keys, Telegram, optional master key | you |
-| `aitools-backends/.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD` | `build-stack.sh` |
-| `aitools-services/.env` | master key, DB passwords, provider keys, `HONCHO_VIRTUAL_KEY` | `build-stack.sh` |
-| `aitools-services/keys.generated.env` | `HONCHO_VIRTUAL_KEY`, `HERMES_VIRTUAL_KEY` | `build-stack.sh` |
+| File | Contents | Owner |
+|------|----------|-------|
+| `.stack/.env` | provider keys, master key, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `LITELLM_VIRTKEY_*_MODELS` declarations | you (`just setup`) |
+| `.stack/db.generated.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD` | `services/postgres/build.sh` |
+| `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values | `services/litellm/start.sh` |
+| `services/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |
 
-`.gitignore` excludes `**/.env`, `secrets.env`, `**/keys.generated.env`,
-`aitools-services/honcho-src/`, the LiteLLM ChatGPT `auth.json`, and
-`*.bak*`. No secret is ever tracked in git.
+`*.generated.env` is machine-owned — never hand-edit (it gets
+truncated/rewritten). Service config ships as committed `*.template`; the
+rendered `*.runtime.*` is gitignored and bind-mounted. `git check-ignore`
+covers `.stack/`, `**/*.generated.env`, `**/_source/`, `**/*.runtime.*`, and
+`services/litellm/chatgpt/auth.json`.

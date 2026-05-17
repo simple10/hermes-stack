@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # 01 — aitools-backends (Postgres + Redis) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use

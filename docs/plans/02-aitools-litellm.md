@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # 02 — aitools-services: LiteLLM Implementation Plan
 
 > REQUIRED SUB-SKILL: subagent-driven-development / executing-plans.

@@ -1,3 +1,5 @@
+> **SUPERSEDED by docs/plans/06-unified-stack-architecture.md** — kept for history only.
+
 # 04a — Hermes → Dockerized Honcho rewire (clone `hermes` only)
 
 > Operates ONLY on the clone VM **`hermes`** (the new prod). The original

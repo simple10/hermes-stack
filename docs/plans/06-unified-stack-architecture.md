@@ -19,7 +19,7 @@
 5. **`.stack/.env` is NOT auto-loaded** (it is not in the compose project root). The justfile always sets `COMPOSE_ENV_FILES=.stack/.env,<glob .stack/*.generated.env>` (`.env` first = lowest precedence). A bare `docker compose up` from repo root therefore fails fast (no vars) — this is the *desired* guard against accidental parent-chain `.env` walking when running a single service dir.
 6. **Config = `*.template` (committed) → rendered `*.runtime.*` (gitignored, bind-mounted).** Render = copy template→runtime **only if runtime absent** (never clobber a user-customized runtime). Templates contain **no secrets** — secrets stay placeholders the container resolves from env at runtime (LiteLLM `os.environ/...`; Honcho `env > config.toml` precedence). HARD RULE: no `.env` or rendered runtime config ever committed (per-service `.gitignore` + root globs).
 7. **Virtual-key timing:** `build` renders config + ensures the *declaration* exists in `.stack/.env`. `litellm/start.sh` (post-litellm-health) mints/reconciles each `LITELLM_VIRTKEY_<ALIAS>_MODELS` and writes `<ALIAS>_VIRTUAL_KEY` into `.stack/litellm.generated.env`. Honcho/Hermes consume those env vars and therefore start **after** mint. `just start` is **staged**, not one `compose up`.
-8. **Volume preservation:** the new project reattaches the EXISTING named volumes by explicit `name:` so the restructure does NOT rebuild PG → Honcho memory and LiteLLM virtual keys survive. Container names stay `aitools-pg`/`aitools-redis`/`aitools-litellm`/`aitools-honcho-api`/`aitools-honcho-deriver` so the Hermes VM's `<container>.orb.local` DNS is unchanged (no rewire).
+8. **Volume preservation:** the new project reattaches the EXISTING named volumes by explicit `name:` so the restructure does NOT rebuild PG → Honcho memory and LiteLLM virtual keys survive. Container names stay `aitools-pg`/`aitools-redis`/`aitools-litellm`/`aitools-honcho-api`/`aitools-honcho-deriver`. **The Hermes VM MUST use the BARE `<container>.orb.local` DNS**, never `<container>.<project>.orb.local` — the project name changed to `hermes-stack` (no per-file `name:`, per decision 2/C1), so a project-qualified FQDN breaks. honcho.json already uses the bare form; `config.yaml.model.tmpl` uses `http://aitools-litellm.orb.local:4000/v1`.
 9. **Template-drift = warn only.** Record template sha256 at render; `just build` warns if a committed template changed since the rendered file was produced. No migration system (user upgrades by hand, same as any standalone service).
 10. **`hermes-agent` is the frozen original — `machines/hermes/build.sh` MUST refuse it absolutely.** The `hermes` clone IS authorized for rebuild (user: "safe to rebuild as needed"). Default machine = `hermes`.
 
@@ -59,6 +59,8 @@ hermes-stack/
 6. **Pin everything**: litellm by digest (`services/litellm/.image-digest`), honcho by source commit, pg/redis by tag. Deliberate bumps via commits.
 7. **Voyage embeddings**: keep Honcho `embedding.dimensions_mode="never"` (Voyage 400s on `dimensions`); pgvector cols must be `vector(1024)`.
 8. **`.stack/.env` not auto-loaded by design** (decision 5) — every compose call goes through the justfile's `COMPOSE_ENV_FILES`.
+9. **ChatGPT `auth.json` is a required runtime artifact.** It is gitignored and lives in no `.env`. Without it (bind-mounted at `services/litellm/chatgpt/auth.json`) LiteLLM blocks on an interactive device-code prompt at boot and never goes healthy. Migrate it like the DB passwords; on a truly fresh install complete the device pairing once (`docker logs aitools-litellm` prints the code) — the token then persists in the bind-mounted dir.
+10. **Hermes must use BARE OrbStack DNS** (`aitools-litellm.orb.local`, `aitools-honcho-api.orb.local`), never `<container>.<project>.orb.local`. The Compose project is `hermes-stack` (no per-file `name:`); a project-qualified FQDN silently dies and Hermes's brain call fails with "Connection error" while Honcho (already bare) keeps working.
 
 ---
 
@@ -912,6 +914,11 @@ cp hermes-vm/systemd/*.service machines/hermes/systemd/
 cp hermes-vm/bin/hermes-logtail.sh machines/hermes/bin/
 cp hermes-vm/config/honcho.json.tmpl machines/hermes/config/
 cp hermes-vm/config/config.yaml.model.tmpl machines/hermes/config/
+# CORRECT the model template DNS: legacy used the project-qualified
+# `aitools-litellm.aitools-services.orb.local` which DIES under the new
+# `hermes-stack` project (decision 8). Use the bare, project-independent form:
+sed -i.bak 's#http://aitools-litellm\.aitools-services\.orb\.local:4000/v1#http://aitools-litellm.orb.local:4000/v1#' \
+  machines/hermes/config/config.yaml.model.tmpl && rm -f machines/hermes/config/config.yaml.model.tmpl.bak
 ```
 
 - [ ] **Step 2: Write `machines/hermes/build.sh`** (adapted from `build-hermes.sh`; reads `.stack/.env` + `.stack/litellm.generated.env`; refuses `hermes-agent` absolutely)
@@ -1035,9 +1042,13 @@ echo -n "honcho reachable: "; orb -m "$MACHINE" bash -lc 'curl -sS -m6 http://ai
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
 for f in systemd/hermes-dashboard.service systemd/hermes-gateway.service \
          systemd/hermes-logtail.service bin/hermes-logtail.sh \
-         config/honcho.json.tmpl config/config.yaml.model.tmpl; do
+         config/honcho.json.tmpl; do
   diff "hermes-vm/$f" "machines/hermes/$f" >/dev/null && echo "OK $f" || echo "DIFF $f"
 done
+# model.tmpl is INTENTIONALLY modified (bare DNS) — assert, don't diff:
+grep -q 'http://aitools-litellm.orb.local:4000/v1' machines/hermes/config/config.yaml.model.tmpl \
+  && ! grep -q 'aitools-services.orb.local' machines/hermes/config/config.yaml.model.tmpl \
+  && echo "OK config/config.yaml.model.tmpl (bare project-independent DNS)"
 bash -n machines/hermes/build.sh && bash -n machines/hermes/start.sh && echo "scripts ok"
 chmod +x machines/hermes/*.sh
 if ! ./machines/hermes/build.sh hermes-agent 2>/dev/null; then echo "refuses hermes-agent"; else echo "FAIL: did not refuse"; fi
@@ -1088,6 +1099,16 @@ mkdir -p .stack
   echo "HERMES_VIRTUAL_KEY=$(grep ^HERMES_VIRTUAL_KEY= aitools-services/keys.generated.env|cut -d= -f2-)";
 } > .stack/litellm.generated.env
 chmod 600 .stack/*.generated.env
+# MIGRATE the ChatGPT oauth token (gitignored, NOT in any .env) — without it
+# LiteLLM blocks on an interactive device-code prompt at boot and never goes
+# healthy. This is a required runtime artifact, like the DB passwords.
+if [ -f aitools-services/litellm/chatgpt/auth.json ]; then
+  cp -p aitools-services/litellm/chatgpt/auth.json services/litellm/chatgpt/auth.json
+  chmod 600 services/litellm/chatgpt/auth.json
+  echo "migrated ChatGPT auth.json ($(wc -c < services/litellm/chatgpt/auth.json) bytes, gitignored)"
+else
+  echo "WARN: no existing ChatGPT auth.json — first litellm boot will print a device-pair code in \`docker logs aitools-litellm\`; complete it once."
+fi
 ```
 
 - [ ] **Step 3: `just setup`** — create `.stack/.env`. Provide the real OpenRouter/Voyage keys and the existing `LITELLM_MASTER_KEY` (from `aitools-services/.env`) when prompted; profiles `litellm,honcho`; machines `hermes`; Telegram from `aitools-services`/secrets if present. (Interactive — run it, answer prompts.)

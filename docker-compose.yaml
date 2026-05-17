@@ -1,0 +1,11 @@
+# hermes-stack — unified compose. Run via `just` (it sets COMPOSE_ENV_FILES;
+# .stack/.env is intentionally NOT auto-loaded — see plan decision 5).
+# Each services/<svc>/compose.yaml is self-contained (own network/volume decls)
+# so it also runs standalone: `cd services/<svc> && docker compose up`.
+name: hermes-stack
+
+include:
+  - services/postgres/compose.yaml
+  - services/redis/compose.yaml
+  - services/litellm/compose.yaml
+  - services/honcho/compose.yaml

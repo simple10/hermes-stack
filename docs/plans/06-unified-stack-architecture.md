@@ -256,7 +256,10 @@ GRANT ALL ON SCHEMA public TO honcho;
 ```yaml
 # postgres (pgvector). No profile => always-on shared backend.
 # Volume pinned by explicit name to REATTACH existing data (no rebuild).
-name: aitools-backends   # keep project name so default volume name is stable too
+# NOTE: no `name:` here — under root `include:` a per-file name: is ignored
+# (top-level project name `hermes-stack` wins). Reattachment is guaranteed
+# SOLELY by the explicit `volumes.aitools-pg-data.name:` below — DO NOT remove
+# or change that literal or existing Honcho/LiteLLM data is lost.
 
 services:
   aitools-pg:
@@ -296,16 +299,20 @@ networks:
     external: true
 ```
 
-> **Why `name: aitools-backends` here too:** keeping the per-service project
-> name equal to the original means even Compose's default volume naming
-> (`<project>_<vol>`) lines up; combined with the explicit `volumes.*.name`
-> the existing data volume is reattached whether run standalone or via root
-> include. Redis file uses the same project name for the same reason.
+> **Volume reattachment is the explicit `volumes.aitools-pg-data.name:`
+> literal — nothing else.** Under root `include:`, a `name:` key inside an
+> included file is NOT honored as a project name (Compose uses the top-level
+> `hermes-stack`). Standalone (`cd services/postgres && docker compose up`)
+> the project name would default to the dir (`postgres`) but the explicit
+> `volumes.*.name:` still pins the exact existing volume, so reattachment
+> works both ways. This is a data-loss-critical invariant — never "simplify"
+> it away.
 
 - [ ] **Step 4: Write `services/redis/compose.yaml`** (self-contained; reattach existing redis volume)
 
 ```yaml
-name: aitools-backends
+# redis. No profile => always-on shared backend. No `name:` (see postgres
+# note); reattachment is the explicit volumes.aitools-redis-data.name: below.
 
 services:
   aitools-redis:
@@ -404,11 +411,13 @@ chatgpt/auth.json
 - [ ] **Step 3: Write `services/litellm/compose.yaml`** (profile `litellm`; bind-mounts the *rendered* runtime config)
 
 ```yaml
-name: aitools-services
+# litellm. profile [litellm]. No `name:` (see postgres note). Image PINNED by
+# digest (gotcha #6) — value mirrored in services/litellm/.image-digest;
+# bump deliberately via commit (update both).
 
 services:
   aitools-litellm:
-    image: ghcr.io/berriai/litellm-database:main-latest
+    image: ghcr.io/berriai/litellm-database@sha256:7bb80500033392233c79f74d4f99d43512da47626cdc9bf46e53df16803d88cd
     container_name: aitools-litellm
     profiles: [litellm]
     restart: unless-stopped
@@ -437,11 +446,9 @@ networks:
     external: true
 ```
 
-> `name: aitools-services` keeps litellm/honcho in their original Compose
-> project namespace (stable, harmless under root `include:` which merges by
-> `name:` consistently across files — all `services/*` files that share a
-> backend use one of the two original project names; this is intentional and
-> consistent).
+> No `name:` in this file (it would be ignored under `include:` anyway).
+> litellm holds no persistent data, so volume reattachment is N/A here; its
+> state lives in the `litellm` DB on the reattached `aitools-pg` volume.
 
 - [ ] **Step 4: Write `services/litellm/build.sh`** (render config from template + drift check)
 
@@ -517,8 +524,11 @@ bash -n services/litellm/build.sh && bash -n services/litellm/start.sh && echo "
   && echo "services/litellm compose valid" && rm -f config.runtime.yaml )
 git check-ignore -q services/litellm/config.runtime.yaml services/litellm/chatgpt/auth.json \
   && echo "runtime+auth correctly ignored"
+# image digest pinned consistently between compose and the mirrored record:
+grep -q "$(cut -d@ -f2 services/litellm/.image-digest)" services/litellm/compose.yaml \
+  && echo "litellm image digest pinned + matches .image-digest"
 ```
-Expected: byte-identical, `scripts ok`, `compose valid`, `runtime+auth correctly ignored`.
+Expected: byte-identical, `scripts ok`, `compose valid`, `runtime+auth correctly ignored`, `litellm image digest pinned + matches .image-digest`.
 
 - [ ] **Step 7: Commit**
 
@@ -548,7 +558,9 @@ printf 'config.runtime.toml\n_source/\n' > services/honcho/.gitignore
 - [ ] **Step 2: Write `services/honcho/compose.yaml`** (profile `honcho`; depends_on backends + litellm; bind-mounts rendered runtime config; builds from pinned `_source/`)
 
 ```yaml
-name: aitools-services
+# honcho api+deriver. profile [honcho]. No `name:` (see postgres note).
+# Honcho's persistent state is the `honcho` DB on the reattached aitools-pg
+# volume — there is no honcho-local volume to pin.
 
 services:
   aitools-honcho-api:
@@ -691,23 +703,29 @@ build:
      done; \
      echo "build complete"
 
-# Staged bring-up: backends+litellm -> mint keys -> rest -> machines.
+# Staged bring-up. ORDER IS LOAD-BEARING:
+#   pg+redis -> litellm -> mint virtual keys -> honcho-postup (brings honcho up
+#   correctly for fresh OR reattached DB) -> settle up -d -> machines.
+# Do NOT add a blanket `up -d` before honcho-postup: on a fresh DB honcho-api
+# crash-loops on the 1536/1024 validator until postup applies the dim fix.
 start:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
-     CEF="$(compose_env_files)"; export COMPOSE_ENV_FILES="$CEF"; \
+     export COMPOSE_ENV_FILES="$(compose_env_files)"; \
      source "{{root}}/.stack/.env"; \
      echo "COMPOSE_ENV_FILES=$COMPOSE_ENV_FILES  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}"; \
-     docker compose -f "{{root}}/docker-compose.yaml" up -d aitools-pg aitools-redis; \
+     DC="docker compose -f {{root}}/docker-compose.yaml"; \
+     $DC up -d aitools-pg aitools-redis; \
      if echo "${COMPOSE_PROFILES:-}" | grep -qw litellm || \
         echo "${COMPOSE_PROFILES:-}" | grep -qw honcho; then \
-       docker compose -f "{{root}}/docker-compose.yaml" up -d aitools-litellm; \
+       $DC up -d aitools-litellm; \
        bash "{{root}}/services/litellm/start.sh"; \
-       CEF="$(compose_env_files)"; export COMPOSE_ENV_FILES="$CEF"; \
-       source "{{root}}/.stack/litellm.generated.env" 2>/dev/null || true; \
+       export COMPOSE_ENV_FILES="$(compose_env_files)"; \
      fi; \
-     docker compose -f "{{root}}/docker-compose.yaml" up -d; \
-     bash "{{root}}/lib/honcho-postup.sh" || true; \
+     if echo "${COMPOSE_PROFILES:-}" | grep -qw honcho; then \
+       bash "{{root}}/lib/honcho-postup.sh"; \
+     fi; \
+     $DC up -d; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
        [ -n "$mch" ] && [ -x "{{root}}/machines/$mch/start.sh" ] && \
          bash "{{root}}/machines/$mch/start.sh" "$mch"; \
@@ -715,11 +733,14 @@ start:
      echo "start complete"
 
 # Stop containers (keep volumes). Machines left running.
+# Source the user's profiles so profiled services (litellm/honcho) are also
+# removed (`--profile "*"` is not valid for `down`).
 stop:
     @set -a; source "{{lib}}"; set +a; \
      export COMPOSE_ENV_FILES="$(compose_env_files)"; \
-     docker compose -f "{{root}}/docker-compose.yaml" --profile "*" down || \
-     docker compose -f "{{root}}/docker-compose.yaml" down
+     source "{{root}}/.stack/.env" 2>/dev/null || true; \
+     export COMPOSE_PROFILES="${COMPOSE_PROFILES:-litellm,honcho}"; \
+     docker compose -f "{{root}}/docker-compose.yaml" down --remove-orphans
 
 # Container health + machine list.
 status:
@@ -778,8 +799,8 @@ env_upsert "$ENVF" LITELLM_MASTER_KEY "$mk"
 read -rp "Enable Docker profiles (comma list) [litellm,honcho]: " prof
 env_upsert "$ENVF" COMPOSE_PROFILES "${prof:-litellm,honcho}"
 
-read -rp "Orb machines to manage (e.g. hermes; blank=none) [hermes]: " mch
-mch="${mch-hermes}"
+read -rp "Orb machines to manage (comma list; '-' for none) [hermes]: " mch
+mch="${mch:-hermes}"; [ "$mch" = "-" ] && mch=""   # empty input -> default hermes
 env_upsert "$ENVF" STACK_MACHINES "$mch"
 if echo "$mch" | grep -qw hermes; then
   ask TELEGRAM_BOT_TOKEN     "Telegram bot token (blank ok)"
@@ -799,37 +820,56 @@ log "setup complete. Review $ENVF, then: just build && just start"
 
 ```bash
 #!/usr/bin/env bash
-# honcho-postup.sh — runs after `docker compose up`. If the honcho DB is FRESH
-# (pgvector cols at the hardcoded 1536), alter to 1024 using the in-image venv
-# python (NOT `uv run` — it rebuilds in-image and fails), then recreate honcho.
-# No-op when reattached data is already vector(1024).
+# honcho-postup.sh — bring Honcho up correctly for BOTH fresh and reattached
+# DBs. Mirrors the PROVEN build-stack.sh step-8 sequence (do not "simplify"):
+#   1. up aitools-honcho-api  (its entrypoint runs `alembic upgrade` -> schema)
+#   2. TOLERANT wait for the `documents` table to exist (alembic finished) —
+#      NOT a health wait: on a fresh DB honcho-api is intentionally unhealthy
+#      (1536 cols vs configured 1024) until the dim fix below.
+#   3. read embedding col dims:
+#        vector(1024) => REATTACHED existing data; nothing to alter
+#        else (1536)  => FRESH db: alter to 1024 via the IN-IMAGE venv python
+#          (NOT `uv run` — it rebuilds in-image and fails), then force-recreate
+#   4. wait honcho-api healthy
+# Called by `just start` AFTER litellm keys are minted (honcho needs
+# HONCHO_VIRTUAL_KEY via COMPOSE_ENV_FILES) and BEFORE the final settle up -d.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/stacklib.sh"
 source "$STACK_DIR/.env"
 echo "${COMPOSE_PROFILES:-}" | grep -qw honcho || { log "honcho not in profiles — skip postup"; exit 0; }
-DBENV="$STACK_DIR/db.generated.env"
-HPW="$(env_get "$DBENV" HONCHO_DB_PASSWORD)"
+HPW="$(env_get "$STACK_DIR/db.generated.env" HONCHO_DB_PASSWORD)"
+[ -n "$HPW" ] || die "HONCHO_DB_PASSWORD missing in .stack/db.generated.env"
+export COMPOSE_ENV_FILES="$(compose_env_files)"
+DC="docker compose -f $STACK_ROOT/docker-compose.yaml"
+pgq() { docker run --rm --network aitools-net -e PGPASSWORD="$HPW" postgres:18 \
+          psql -h aitools-pg -U honcho -d honcho -tAc "$1" 2>/dev/null || true; }
 
-dims="$(docker run --rm --network aitools-net -e PGPASSWORD="$HPW" postgres:18 \
-  psql -h aitools-pg -U honcho -d honcho -tAc \
-  "SELECT format_type(atttypid,atttypmod) FROM pg_attribute WHERE attname='embedding' AND attrelid='documents'::regclass;" 2>/dev/null || echo "")"
+log "honcho: starting aitools-honcho-api (entrypoint runs alembic upgrade)"
+$DC up -d aitools-honcho-api
+
+log "honcho: waiting (tolerant, ~4min) for alembic to create the 'documents' table"
+for i in $(seq 1 48); do
+  [ "$(pgq "SELECT to_regclass('documents');" | tr -d '[:space:]')" = "documents" ] && break
+  sleep 5
+  [ "$i" = 48 ] && die "honcho: 'documents' table never appeared — alembic failed (check: docker logs aitools-honcho-api)"
+done
+
+dims="$(pgq "SELECT format_type(atttypid,atttypmod) FROM pg_attribute WHERE attname='embedding' AND attrelid='documents'::regclass;" | tr -d '[:space:]')"
 if echo "$dims" | grep -q '1024'; then
   log "honcho: embedding cols already vector(1024) (reattached data) — no dim fix"
-  exit 0
+else
+  log "honcho: FRESH db (cols='${dims:-unknown}') — applying 1024 dim fix via in-image venv"
+  $DC run --rm --entrypoint /app/.venv/bin/python \
+    aitools-honcho-api scripts/configure_embeddings.py --yes
+  $DC up -d --force-recreate aitools-honcho-api aitools-honcho-deriver
 fi
-log "honcho: fresh DB (cols='$dims') — applying 1024 dim fix via in-image venv"
-export COMPOSE_ENV_FILES="$(compose_env_files)"
-docker compose -f "$STACK_ROOT/docker-compose.yaml" run --rm \
-  --entrypoint /app/.venv/bin/python \
-  aitools-honcho-api scripts/configure_embeddings.py --yes
-docker compose -f "$STACK_ROOT/docker-compose.yaml" up -d --force-recreate \
-  aitools-honcho-api aitools-honcho-deriver
+
 for i in $(seq 1 36); do
   h=$(docker inspect -f '{{.State.Health.Status}}' aitools-honcho-api 2>/dev/null || echo none)
-  [ "$h" = healthy ] && { log "honcho-api healthy @1024"; exit 0; }
+  [ "$h" = healthy ] && { log "honcho-api healthy"; exit 0; }
   sleep 5
 done
-die "honcho-api unhealthy after dim fix"
+die "honcho-api unhealthy after postup (check: docker logs aitools-honcho-api)"
 ```
 
 - [ ] **Step 4: Verify**
@@ -923,7 +963,7 @@ orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json' <
 log "5. patch ~/.hermes/config.yaml model: block (key via stdin, never argv)"
 MODEL_BLOCK="$(sed "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
 printf '%s\n' "$MODEL_BLOCK" | orb -m "$MACHINE" bash -lc '
-  set -e; cfg=~/.hermes/config.yaml
+  set -e; umask 077; cfg=~/.hermes/config.yaml
   [ -f "$cfg" ] || hermes config init >/dev/null 2>&1 || touch "$cfg"
   cp "$cfg" "$cfg.bak.prebuild" 2>/dev/null || true
   nb="$(cat)"
@@ -1000,7 +1040,8 @@ for f in systemd/hermes-dashboard.service systemd/hermes-gateway.service \
 done
 bash -n machines/hermes/build.sh && bash -n machines/hermes/start.sh && echo "scripts ok"
 chmod +x machines/hermes/*.sh
-( ./machines/hermes/build.sh hermes-agent ; [ $? -ne 0 ] ) && echo "refuses hermes-agent" || echo "FAIL: did not refuse"
+if ! ./machines/hermes/build.sh hermes-agent 2>/dev/null; then echo "refuses hermes-agent"; else echo "FAIL: did not refuse"; fi
+if ! ./machines/hermes/start.sh hermes-agent 2>/dev/null; then echo "start.sh refuses hermes-agent"; else echo "FAIL: start.sh did not refuse"; fi
 ```
 Expected: six `OK` lines, `scripts ok`, `refuses hermes-agent`.
 
@@ -1062,9 +1103,17 @@ Expected: `.stack/.env` written (mode 600); `setup complete`.
 
 ```bash
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
+# C3 GUARD — db passwords MUST be migrated (Step 2) before build, else
+# postgres/build.sh generates FRESH passwords and the reattached pg volume
+# (old passwords baked at init, init script will NOT re-run on non-empty data)
+# rejects every login = total data lockout.
+{ [ -s .stack/db.generated.env ] && grep -q '^POSTGRES_SUPERPASS=' .stack/db.generated.env \
+  && grep -q '^HONCHO_DB_PASSWORD=' .stack/db.generated.env \
+  && grep -q '^LITELLM_DB_PASSWORD=' .stack/db.generated.env; } \
+  || { echo "FATAL: .stack/db.generated.env not migrated — run Step 2 FIRST"; exit 1; }
 just build
 ```
-Expected: `rendered services/litellm/config.runtime.yaml`, honcho `_source` present, `build complete`. (`hermes` machine reused/reconfigured — `hermes-agent` never touched.)
+Expected: guard passes silently, then `rendered services/litellm/config.runtime.yaml`, honcho `_source` present, `build complete`. (`hermes` machine reused/reconfigured — `hermes-agent` never touched.)
 
 - [ ] **Step 5: `just start`** (staged: backends → litellm → key reconcile → honcho → hermes machine)
 
@@ -1113,9 +1162,41 @@ done
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
 git rm -r --quiet aitools-backends aitools-services build-stack.sh build-hermes.sh \
   secrets.env.example hermes-vm hermes-config-snapshot
-# keep the now-untracked _README-JOE.md? superseded by README.md — remove from tree:
+# _README-JOE.md superseded by the rewritten README.md — remove from tree:
 git rm -q --cached _README-JOE.md 2>/dev/null || true; rm -f _README-JOE.md
 ```
+
+- [ ] **Step 9b: Rewrite `.gitignore`** (drop stale rules pointing at deleted paths; keep the unified-stack rules). Replace the entire file with:
+
+```
+# --- runtime secrets / generated / build (NEVER committed) ---
+# All runtime secrets live in .stack/ (templates live in service dirs).
+.stack/
+**/*.generated.env
+# Build-from-source clones (pinned commit, re-cloned by build scripts).
+**/_source/
+# Rendered runtime configs (templates are committed as *.template).
+**/*.runtime.toml
+**/*.runtime.yaml
+**/*.runtime.json
+# ChatGPT oauth token (LiteLLM codex auth).
+services/litellm/chatgpt/auth.json
+
+# --- editor / bak ---
+*.bak
+*.bak.*
+.bak/
+```
+Verify the example + templates stay trackable:
+```bash
+cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
+git check-ignore -v .stack.env.example services/litellm/config.yaml.template \
+  services/honcho/config.toml.template && echo "BUG: a tracked file is ignored" \
+  || echo "ok: example + templates trackable"
+git check-ignore -q .stack/.env .stack/db.generated.env \
+  services/litellm/config.runtime.yaml services/honcho/_source && echo "ok: secrets/runtime ignored"
+```
+Expected: `ok: example + templates trackable`, `ok: secrets/runtime ignored`.
 
 - [ ] **Step 10: Final secret-scan + commit**
 
@@ -1149,4 +1230,19 @@ Expected: `staged content clean`, `.stack secrets ignored`, commit succeeds; `.s
 
 **Placeholder scan:** every script/file given in full literal content; no "TBD"/"similar to"/"add error handling" — each step has exact commands + expected output. README (T7/Step7) is the one prose deliverable — its required contents are enumerated explicitly.
 
-**Type/name consistency:** env var names consistent across files (`HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD`, `POSTGRES_SUPERPASS`, `LITELLM_MASTER_KEY`, `HONCHO_VIRTUAL_KEY`, `HERMES_VIRTUAL_KEY`, `LITELLM_VIRTKEY_<ALIAS>_MODELS`); helper names (`env_upsert`, `env_get`, `render_template`, `compose_env_files`, `require_stack_env`, `die`, `log`, `warn`) defined once in `lib/stacklib.sh` and used identically; container/volume/network names unchanged from the live stack (`aitools-pg`, `aitools-redis`, `aitools-litellm`, `aitools-honcho-api`, `aitools-honcho-deriver`, `aitools-backends_aitools-{pg,redis}-data`, `aitools-net`); `name:` per-service project values are deliberately the two original project names (`aitools-backends`, `aitools-services`) and that rationale is documented inline.
+**Type/name consistency:** env var names consistent across files (`HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD`, `POSTGRES_SUPERPASS`, `LITELLM_MASTER_KEY`, `HONCHO_VIRTUAL_KEY`, `HERMES_VIRTUAL_KEY`, `LITELLM_VIRTKEY_<ALIAS>_MODELS`); helper names (`env_upsert`, `env_get`, `render_template`, `compose_env_files`, `require_stack_env`, `die`, `log`, `warn`) defined once in `lib/stacklib.sh` and used identically; container/volume/network names unchanged from the live stack (`aitools-pg`, `aitools-redis`, `aitools-litellm`, `aitools-honcho-api`, `aitools-honcho-deriver`, `aitools-backends_aitools-{pg,redis}-data`, `aitools-net`); per-service compose files carry NO `name:` (ignored under `include:`) — volume reattachment is the explicit `volumes.*.name:` literal only.
+
+## Independent review (resolved)
+
+A separate architect review was run against this plan. All findings resolved IN this document before implementation:
+
+- **C1 (Critical):** per-file `name:` is ignored under `include:`; the old "default volume naming lines up" rationale was false and a data-loss footgun. → Removed all per-file `name:`; corrected the inline rationale to "explicit `volumes.*.name:` is the sole reattachment mechanism." Also: litellm image was an unpinned `:main-latest` (violated gotcha #6). → Pinned to the `@sha256:` digest, mirrored in `.image-digest`, with a consistency check in Task 3/Step 6.
+- **C2 (Critical):** the fresh-DB Honcho 1024 sequence was racy/broken (blanket `up -d` before postup → honcho-api crash-loops on the validator; postup queried `documents` before alembic created it). → `just start` no longer does a blanket `up -d` before postup; `lib/honcho-postup.sh` rewritten to mirror the proven build-stack.sh step-8 flow: up honcho-api → tolerant poll for the `documents` table → branch on dims (1024 reattach vs 1536 fresh→venv fix→force-recreate) → wait healthy.
+- **C3 (Critical):** running `just build` before the DB-password migration would generate fresh passwords and lock out the reattached pg volume. → Hard guard added to Task 7/Step 4 asserting `.stack/db.generated.env` is migrated first.
+- **I1 (Important):** `stop` recipe `--profile "*"` is invalid and would leave profiled containers running. → Rewrote to source `.stack/.env` profiles + `down --remove-orphans`.
+- **I2 (Important):** VM-local `config.yaml.bak.prebuild` could be world-readable. → `umask 077` added before the backup.
+- **M1:** `${mch-hermes}` (unset-only) skipped hermes on empty input. → `${mch:-hermes}` + explicit `-`=none.
+- **M3:** fragile refuse-test in Task 6/Step 4. → `if ! ...; then` form; also tests `start.sh` refusal.
+- **M5:** stale `.gitignore` rules referenced deleted paths. → Task 7/Step 9b rewrites `.gitignore`, with trackable/ignored verification.
+
+Plan is final and ready for subagent-driven implementation.

@@ -1,0 +1,33 @@
+# litellm. profile [litellm]. No `name:` (see postgres note). Image PINNED by
+# digest (gotcha #6) — value mirrored in services/litellm/.image-digest;
+# bump deliberately via commit (update both).
+
+services:
+  aitools-litellm:
+    image: ghcr.io/berriai/litellm-database@sha256:7bb80500033392233c79f74d4f99d43512da47626cdc9bf46e53df16803d88cd
+    container_name: aitools-litellm
+    profiles: [litellm]
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@aitools-pg:5432/litellm
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY}
+      REDIS_URL: redis://aitools-redis:6379
+      CHATGPT_TOKEN_DIR: /root/.codex/chatgpt
+      CHATGPT_AUTH_FILE: auth.json
+      CHATGPT_DEFAULT_INSTRUCTIONS: " "
+    volumes:
+      - ./config.runtime.yaml:/app/config.yaml:ro
+      - ./chatgpt:/root/.codex/chatgpt
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=3).status==200 else 1)\""]
+      interval: 10s
+      timeout: 6s
+      retries: 18
+    networks: [aitools-net]
+
+networks:
+  aitools-net:
+    external: true

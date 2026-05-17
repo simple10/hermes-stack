@@ -1,0 +1,27 @@
+**/.env
+# Top-level real secrets file (only secrets.env.example is tracked).
+secrets.env
+**/secrets.env
+**/keys.generated.env
+aitools-services/honcho-src/
+
+# LiteLLM ChatGPT auth.json
+aitools-services/litellm/chatgpt/auth.json
+
+# Ignore bak files & dirs
+*.bak.*
+*.bak
+.bak/
+
+# --- unified-stack architecture ---
+# All runtime secrets live here; never committed (templates live in service dirs).
+.stack/
+# Machine-owned generated secret files (db passwords, minted virtual keys).
+**/*.generated.env
+# Build-from-source clones (pinned commit, re-cloned by build scripts).
+**/_source/
+# Rendered runtime configs (templates are committed as *.template).
+**/*.runtime.toml
+**/*.runtime.yaml
+**/*.runtime.json
+.stack/.config-hashes/

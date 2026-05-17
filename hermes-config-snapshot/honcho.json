@@ -1,0 +1,19 @@
+{
+  "hosts": {
+    "hermes": {
+      "peerName": "joe",
+      "aiPeer": "hermes",
+      "workspace": "hermes",
+      "observationMode": "directional",
+      "writeFrequency": "async",
+      "recallMode": "hybrid",
+      "dialecticCadence": 2,
+      "dialecticReasoningLevel": "low",
+      "sessionStrategy": "per-session",
+      "enabled": true,
+      "saveMessages": true,
+      "pinPeerName": true
+    }
+  },
+  "baseUrl": "http://aitools-honcho-api.orb.local:8000"
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=joe
+Group=joe
+WorkingDirectory=/home/joe
+ExecStart=/home/joe/.local/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

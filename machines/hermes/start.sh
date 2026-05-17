@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# machines/hermes/start.sh [machine=hermes] — enable + (re)start hermes units.
+# Re-applies the virtual key in case it was re-minted (idempotent).
+set -euo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
+MACHINE="${1:-hermes}"
+[ "$MACHINE" = "hermes-agent" ] && die "REFUSING: 'hermes-agent' is the frozen original."
+GEN="$STACK_DIR/litellm.generated.env"
+HK="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
+D="$(dirname "${BASH_SOURCE[0]}")"
+if [ -n "$HK" ]; then
+  MB="$(sed "s|\${HERMES_VIRTUAL_KEY}|$HK|" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
+  printf '%s\n' "$MB" | orb -m "$MACHINE" bash -lc '
+    cfg=~/.hermes/config.yaml; nb="$(cat)"
+    python3 - "$cfg" <<PY
+import sys,os
+p=sys.argv[1]; nb="""$nb"""
+lines=open(p).read().splitlines() if os.path.exists(p) else []
+out=[]; i=0; n=len(lines); rep=False
+while i<n:
+    ln=lines[i]
+    if ln.rstrip()=="model:" or ln.startswith("model:"):
+        i+=1
+        while i<n and (lines[i].startswith(" ") or lines[i].strip()==""): i+=1
+        out.append(nb.rstrip()); rep=True; continue
+    out.append(ln); i+=1
+if not rep: out.insert(0, nb.rstrip())
+open(p,"w").write("\n".join(out)+"\n")
+PY'
+fi
+orb -m "$MACHINE" bash -lc 'sudo systemctl daemon-reload && sudo systemctl enable --now hermes-dashboard hermes-gateway hermes-logtail && sudo systemctl restart hermes-gateway hermes-logtail'
+echo -n "services: "; orb -m "$MACHINE" bash -lc 'systemctl is-active hermes-dashboard hermes-gateway hermes-logtail | tr "\n" " "; echo'
+echo -n "honcho reachable: "; orb -m "$MACHINE" bash -lc 'curl -sS -m6 http://aitools-honcho-api.orb.local:8000/health || true'; echo

@@ -61,7 +61,31 @@ lcr_harness() {
 }
 ```
 
-Teardown after each use: `docker compose -p <name> down -v --remove-orphans; rm -rf /tmp/<name>`. Acceptance gates that the original plan ran "on the live stack" are now run inside `H_CLONE` (existing data) and/or `H_FRESH`; their pass/fail criteria are unchanged.
+Teardown after each use: `docker compose -p <name> down -v --remove-orphans; rm -rf /tmp/<name>`. Acceptance gates that the original plan ran "on the live stack" are now run inside `H_CLONE` (existing data) and/or `H_FRESH`.
+
+### Real validation signal (CORRECTED — supersedes every `*_AUTH ok` psql probe below)
+
+A `psql -h 127.0.0.1 -U <svc>` probe is a **false positive**: the
+`pgvector/pgvector:pg18` image's `pg_hba` trusts that connection, so it
+returns `1` regardless of the role's password (verified empirically: both an
+empty and the real password "passed"). **Ignore the `*_AUTH ok` lines in the
+task snippets below.** The authoritative pass criteria for every
+provisioner/auth gate are the three real signals:
+
+1. **Provisioner log clean:** `docker logs <proj>-<svc>-provision-1` contains
+   **no** `is not a valid password` notice (that notice ⇒ `:'pw'` was empty
+   ⇒ `ALTER ROLE … PASSWORD ''` cleared the password).
+2. **Password actually set:** as superuser,
+   `SELECT bool_and(rolpassword IS NOT NULL) FROM pg_authid WHERE rolname IN
+   ('litellm','honcho','hindsight')` → `t`.
+3. **End-to-end truth:** the consuming service container reaches
+   **`healthy`** (litellm/honcho/hindsight healthy ⇒ their own
+   prisma/alembic/app authenticated for real with the per-service password —
+   the only signal that can't be faked by `pg_hba` trust).
+
+Any of: an `is not a valid password` notice, `rolpassword IS NULL`, or a
+service stuck not-healthy ⇒ **STOP** (the password wiring is broken and would
+break auth on the live stack too).
 
 ---
 

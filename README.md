@@ -84,12 +84,16 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   `127.0.0.1:${CLIPROXY_HOST_PORT:-8317}`. Health at `/healthz`; the **admin
   UI is `/management.html`** (downloaded SPA; enter `CLIPROXY_MANAGEMENT_KEY`
   when prompted — `/` only returns API-info JSON). OAuth tokens persist in the
-  `cliproxyapi-auth` volume. ⚠️ CLIProxyAPI
-  **hardcodes its OAuth callback to `http://127.0.0.1:<port>`** (no
-  config/env override), so do the **one-time provider OAuth login at
-  `http://127.0.0.1:8317/management.html`** — that's why 8317 is
-  loopback-published (127.0.0.1 only, never LAN; still key-gated). Not yet
-  wired into Hermes.
+  `cliproxyapi-auth` volume. ⚠️ CLIProxyAPI's
+  OAuth callbacks are **fixed loopback URLs** (providers' pre-registered
+  redirect URIs — no config/env override). Do the **one-time login at
+  `http://127.0.0.1:8317/management.html`**; ChatGPT/Codex's callback is the
+  **fixed port `1455`** (also loopback-published — that's the chatgpt/*
+  replacement target). The other provider callback ports
+  (8085 Gemini / 51121 Antigravity / 54545,11451 xAI·Claude) are listed but
+  **commented out** in `services/cliproxyapi/compose.yaml` — uncomment only
+  the one for a provider you log in. All `127.0.0.1`-only, never LAN; still
+  key-gated. Not yet wired into Hermes.
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,

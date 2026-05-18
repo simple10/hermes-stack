@@ -35,6 +35,9 @@ ask VOYAGE_API_KEY     "Voyage API key" secret
 mk="$(env_get "$ENVF" LITELLM_MASTER_KEY)"
 [ -n "$mk" ] || { mk="sk-$(openssl rand -hex 24)"; log "generated LITELLM_MASTER_KEY"; }
 env_upsert "$ENVF" LITELLM_MASTER_KEY "$mk"
+ams="$(env_get "$ENVF" AGENTMEMORY_SECRET)"
+[ -n "$ams" ] || { ams="$(openssl rand -hex 32)"; log "generated AGENTMEMORY_SECRET"; }
+env_upsert "$ENVF" AGENTMEMORY_SECRET "$ams"
 
 read -rp "Enable Docker profiles (comma list) [litellm,honcho]: " prof
 env_upsert "$ENVF" COMPOSE_PROFILES "${prof:-litellm,honcho}"
@@ -49,7 +52,7 @@ if echo "$mch" | grep -qw hermes; then
 fi
 
 # Seed virtual-key allowlist declarations from the example if absent.
-for k in LITELLM_VIRTKEY_HONCHO_MODELS LITELLM_VIRTKEY_HERMES_MODELS; do
+for k in LITELLM_VIRTKEY_HONCHO_MODELS LITELLM_VIRTKEY_HERMES_MODELS LITELLM_VIRTKEY_AGENTMEMORY_MODELS; do
   [ -n "$(env_get "$ENVF" "$k")" ] || env_upsert "$ENVF" "$k" "$(env_get "$EX" "$k")"
 done
 chmod 600 "$ENVF"

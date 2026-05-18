@@ -1,11 +1,13 @@
 #!/bin/sh
-# Vendored from rohitg00/agentmemory deploy/coolify/entrypoint.sh.
-# agentmemory first-boot entrypoint. Runs as root so it can:
+# agentmemory first-boot entrypoint (adapted from rohitg00/agentmemory
+# deploy/coolify). Runs as root so it can:
 #   1. Overwrite the npm-bundled iii-config.yaml (binds 127.0.0.1, relative
 #      ./data) with a deploy-tuned one (binds 0.0.0.0, absolute /data paths).
 #   2. chown the mounted /data volume to the runtime `node` user.
-#   3. Generate the HMAC secret on first boot -> /data/.hmac (chmod 600,
-#      persisted on the volume). It is printed ONCE to the logs.
+#   3. HMAC secret: if AGENTMEMORY_SECRET is injected via env (.stack/.env ->
+#      compose `environment:`), that value is AUTHORITATIVE — persist it to
+#      /data/.hmac so it survives, but never silently diverge from .stack.
+#      Only if NOTHING is provided do we generate one (and print it once).
 # Then execs the agentmemory CLI under gosu as the unprivileged `node` user.
 
 set -eu
@@ -72,22 +74,48 @@ workers:
 EOF
 chown "$RUN_AS" "$III_CONFIG"
 
-if [ ! -s "$HMAC_FILE" ]; then
+if [ -n "${AGENTMEMORY_SECRET:-}" ]; then
+  umask 077
+  printf '%s\n' "$AGENTMEMORY_SECRET" > "$HMAC_FILE"
+  chmod 600 "$HMAC_FILE"; chown "$RUN_AS" "$HMAC_FILE"
+  echo "agentmemory: using injected AGENTMEMORY_SECRET (.stack/.env authoritative)"
+elif [ ! -s "$HMAC_FILE" ]; then
   SECRET="$(openssl rand -hex 32)"
   umask 077
   printf '%s\n' "$SECRET" > "$HMAC_FILE"
-  chmod 600 "$HMAC_FILE"
-  chown "$RUN_AS" "$HMAC_FILE"
+  chmod 600 "$HMAC_FILE"; chown "$RUN_AS" "$HMAC_FILE"
   echo "================================================================"
   echo "agentmemory: generated HMAC secret on first boot"
   echo "AGENTMEMORY_SECRET=$SECRET"
-  echo "Copy this value now. It will not be printed again."
-  echo "Stored at: $HMAC_FILE (chmod 600)"
-  echo "To rotate: delete $HMAC_FILE on the persistent volume and restart."
+  echo "Copy into .stack/.env to make it stable across volume resets."
   echo "================================================================"
+  AGENTMEMORY_SECRET="$SECRET"
+else
+  AGENTMEMORY_SECRET="$(cat "$HMAC_FILE")"
 fi
-
-AGENTMEMORY_SECRET="$(cat "$HMAC_FILE")"
 export AGENTMEMORY_SECRET
+
+# agentmemory >=0.9.18 runs an interactive first-run wizard whenever
+# ~/.agentmemory/preferences.json is missing / firstRunAt is null. On a
+# non-TTY (container) that wizard process.exit(0)s -> crash loop. Pre-seed
+# preferences as "onboarding already completed" so the CLI goes straight to
+# starting the server. Provider/config still come from env (process.env).
+NODE_HOME="$(getent passwd node | cut -d: -f6)"; NODE_HOME="${NODE_HOME:-/home/node}"
+PREFS_DIR="$NODE_HOME/.agentmemory"
+mkdir -p "$PREFS_DIR"
+cat > "$PREFS_DIR/preferences.json" <<'EOF'
+{
+  "schemaVersion": 1,
+  "lastAgent": null,
+  "lastAgents": [],
+  "lastProvider": "openai",
+  "skipSplash": true,
+  "skipNpxHint": true,
+  "skipGlobalInstall": true,
+  "skipConsoleInstall": true,
+  "firstRunAt": "1970-01-01T00:00:00.000Z"
+}
+EOF
+chown -R "$RUN_AS" "$PREFS_DIR"
 
 exec gosu "$RUN_AS" agentmemory "$@"

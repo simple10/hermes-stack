@@ -78,11 +78,13 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   **streaming-correct ChatGPT/Codex responses proxy** to sidestep LiteLLM's
   non-streaming `chatgpt/*` bug (gotcha #5). Config is file-based: committed
   `config.yaml.template` → gitignored `config.runtime.yaml` (build.sh injects
-  `CLIPROXY_API_KEY` + `CLIPROXY_MANAGEMENT_KEY` from `.stack/.env`). API +
-  management panel at `cliproxyapi.<project>.orb.local:8317`; OAuth tokens
-  persist in the `cliproxyapi-auth` volume. ⚠️ Needs a **one-time provider
-  OAuth login via the management panel** (key-gated) before it has upstreams.
-  Not yet wired into Hermes.
+  `CLIPROXY_API_KEY` + `CLIPROXY_MANAGEMENT_KEY` from `.stack/.env`). OpenAI/
+  Codex API at `cliproxyapi.<project>.orb.local:8317` (api-key gated); health
+  at `/healthz`; the **admin UI is `/management.html`** (a downloaded SPA;
+  enter `CLIPROXY_MANAGEMENT_KEY` when it prompts — `/` only returns API-info
+  JSON). OAuth tokens persist in the `cliproxyapi-auth` volume. ⚠️ Needs a
+  **one-time provider OAuth login via `/management.html`** before it has any
+  upstreams. Not yet wired into Hermes.
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,

@@ -27,11 +27,10 @@ services:
       - ./config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
       - cliproxyapi-auth:/root/.cli-proxy-api
     healthcheck:
-      # alpine image has busybox wget (no curl) whose exit codes differ from
-      # GNU wget. /v1/models is api-key-gated (401 -> busybox exit 1, can't
-      # distinguish "up" from "down"). GET / is the unauthenticated control-
-      # panel landing -> 200 when the server is up, so busybox wget exits 0.
-      test: ["CMD-SHELL", "wget -q -O /dev/null -T3 http://127.0.0.1:8317/ 2>/dev/null"]
+      # /healthz is the dedicated unauthenticated health route -> 200
+      # {"status":"ok"} when up. busybox wget (alpine; no curl) exits 0 on
+      # 200, non-zero only on connect failure -> correct liveness.
+      test: ["CMD-SHELL", "wget -q -O /dev/null -T3 http://127.0.0.1:8317/healthz 2>/dev/null"]
       interval: 15s
       timeout: 5s
       start_period: 30s

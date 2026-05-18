@@ -11,11 +11,13 @@ COPY _source/ ./
 # Default-endpoint patch: OpenConcho has no config mechanism for a default
 # Honcho URL — the first-run form falls back to a hardcoded
 # "http://localhost:8000". Rewrite that literal (in src/, NOT src/test/) to
-# this stack's honcho-api so the connect form opens PRE-FILLED. Only the
-# default/placeholder/fallback change; the token field is untouched (still
-# empty, entered in-app — never injected). Deterministic, parameterized per
-# project (multi-stack safe); _source/ stays pristine/pinned. Same
-# build-time render-and-inject philosophy as the other services.
+# the same-origin Honcho proxy (HONCHO_BASE_URL, see nginx.conf — Honcho's
+# CORS allowlist is hardcoded so a direct cross-origin call is blocked) so
+# the connect form opens PRE-FILLED. Only the default/placeholder/fallback
+# change; the token field is untouched (still empty, entered in-app — never
+# injected). Deterministic, parameterized per project (multi-stack safe);
+# _source/ stays pristine/pinned. Same build-time render-and-inject
+# philosophy as the other services.
 ARG HONCHO_BASE_URL=
 RUN if [ -n "$HONCHO_BASE_URL" ]; then \
       find packages/web/src \( -path 'packages/web/src/test' \) -prune -o \

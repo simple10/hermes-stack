@@ -5,22 +5,26 @@
 #
 # Stateless static SPA: NO database, NO secrets, NO model/env levers.
 # Connection config lives in the browser's localStorage (OpenConcho's
-# designed flow). The base URL is build-time patched to this stack's
-# honcho-api (HONCHO_BASE_URL arg, project-scoped) so the first-run form
-# opens PRE-FILLED — the user only adds the token (if any) and clicks Save.
-# The token is NEVER injected (it stays a manual in-app field).
+# designed flow). nginx ALSO reverse-proxies Honcho under /honcho/ on this
+# same origin: Honcho hardcodes its CORS allowlist (no knob) so a direct
+# cross-origin browser call is blocked — same-origin proxying sidesteps CORS
+# entirely (see nginx.conf). The base URL is build-time patched to that
+# same-origin path (HONCHO_BASE_URL arg, project-scoped) so the first-run
+# form opens PRE-FILLED — the user only adds the token (if any) and clicks
+# Save. The token is NEVER injected (it stays a manual in-app field).
 #
 # depends_on honcho-api so COMPOSE_PROFILES=honcho-ui auto-pulls Honcho's API
 # (the Honcho pattern). Plain list = service_started only: the static server
-# must not block on (or crash-loop with) honcho-api health — the browser
-# connects to Honcho later, on demand. For the deriver/dream features also
+# must not block on (or crash-loop with) honcho-api health — nginx resolves
+# honcho-api lazily at request time. For the deriver/dream features also
 # enable the `honcho` profile.
 #
 # nginx listens on :80, so from the host it's a clean URL with NO port:
 #   http://honcho-ui.<project>.orb.local
-# The first-run form is pre-filled with http://honcho-api.<project>.orb.local
-# :8000 (Honcho runs USE_AUTH=false here, so the token can be left blank) —
-# just click Save.
+# The first-run form is pre-filled with the same-origin Honcho proxy
+#   http://honcho-ui.<project>.orb.local/honcho
+# (Honcho runs USE_AUTH=false here, so the token can be left blank) — just
+# click Save.
 
 services:
   honcho-ui:
@@ -28,9 +32,11 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Project-scoped so multi-stack stays correct; default keeps a plain
-        # `docker compose build` working outside `just`.
-        HONCHO_BASE_URL: http://honcho-api.${COMPOSE_PROJECT_NAME:-aitools}.orb.local:8000
+        # Same-origin Honcho proxy (see nginx.conf — avoids Honcho's
+        # hardcoded CORS allowlist). Project-scoped so multi-stack stays
+        # correct; default keeps a plain `docker compose build` working
+        # outside `just`.
+        HONCHO_BASE_URL: http://honcho-ui.${COMPOSE_PROJECT_NAME:-aitools}.orb.local/honcho
     profiles: [honcho-ui]
     restart: unless-stopped
     expose:

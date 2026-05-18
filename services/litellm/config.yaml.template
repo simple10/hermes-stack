@@ -71,6 +71,40 @@ model_list:
     litellm_params:
       model: chatgpt/gpt-5.3-codex-spark
 
+  # CLIProxyAPI-routed ChatGPT/Codex subscription models. Plain openai-
+  # compatible upstream (NOT model_info.mode: responses) so LiteLLM uses the
+  # standard chat/completions client — it never touches the chatgpt/*
+  # responses bridge, so the non-streaming bug (gotcha #5) does NOT apply,
+  # AND full SpendLogs/prompt logging + streaming work. cliproxy reached by
+  # sibling service name on the project network; CLIPROXY_API_KEY from env.
+  # This is the streaming-correct replacement for the chatgpt/* entries above
+  # (kept for A/B + rollback).
+  - model_name: cliproxy/gpt-5.5
+    litellm_params:
+      model: openai/gpt-5.5
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
+  - model_name: cliproxy/gpt-5.4
+    litellm_params:
+      model: openai/gpt-5.4
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
+  - model_name: cliproxy/gpt-5.4-mini
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
+  - model_name: cliproxy/gpt-5.3-codex
+    litellm_params:
+      model: openai/gpt-5.3-codex
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
+  - model_name: cliproxy/gpt-5.3-codex-spark # lighter/faster codex variant
+    litellm_params:
+      model: openai/gpt-5.3-codex-spark
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
+
 litellm_settings:
   drop_params: true # tolerate caller params a provider doesn't take
 

@@ -14,6 +14,9 @@ services:
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@pg:5432/litellm
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY}
+      # Auth for the cliproxy/* model_list entries -> http://cliproxyapi:8317
+      # (CLIProxyAPI-routed ChatGPT/Codex; streaming-correct, observable).
+      CLIPROXY_API_KEY: ${CLIPROXY_API_KEY}
       REDIS_URL: redis://redis:6379
       # ChatGPT Subscription Proxy Config — see chatgpt/README.md.
       # CHATGPT_DEFAULT_INSTRUCTIONS must be >= a single space to stop LiteLLM

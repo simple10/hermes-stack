@@ -89,14 +89,21 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   completes the token exchange (no browser->container reachability needed).
   The alternative loopback-publish approach + per-provider fixed callback-port
   map is documented in `services/cliproxyapi/README.md` should we ever want to
-  drop the copy/paste step. Not yet wired into Hermes.
+  drop the copy/paste step. **Wired into Hermes**: the agent brain is
+  `cliproxy/gpt-5.5` (LiteLLM `model_list` openai-compatible entry →
+  `http://cliproxyapi:8317/v1`, `CLIPROXY_API_KEY`), streaming-correct and
+  fully observable in LiteLLM SpendLogs — the replacement for the broken
+  `chatgpt/*` responses bridge (kept for rollback).
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,
   `honcho-api.aitools.orb.local`). Its own agent brain AND Honcho's
   LLM/embedding calls route through LiteLLM.
 
-Traffic: `Hermes → LiteLLM (chatgpt/gpt-5.5, streaming)` for the agent;
+Traffic: `Hermes → LiteLLM (cliproxy/gpt-5.5) → CLIProxyAPI → ChatGPT
+subscription` for the agent — streaming-correct + fully logged (SpendLogs
+records it as `openai/gpt-5.5` for the `hermes` key; the old `chatgpt/*`
+LiteLLM responses-bridge entries are kept for one-line rollback);
 `Hermes → Honcho → LiteLLM (glm/grok/voyage)` for memory.
 
 ## Prerequisites

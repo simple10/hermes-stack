@@ -23,6 +23,7 @@ hermes-stack/
     litellm/                   # profile [litellm]; *.template -> *.runtime.* (bind-mounted)
     honcho/                    # profile [honcho]; built from pinned _source/ (gitignored)
     agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
+    hindsight/                 # profile [hindsight] (opt-in); pinned image; pg-backed; LiteLLM-wired
   machines/
     hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
   docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
@@ -61,6 +62,13 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   it any time by setting `AGENTMEMORY_EXPOSE_VIEWER=0` in `.stack/.env` and
   recreating (no edit to the git-tracked compose; `:3113` then stays
   loopback-only). Not yet wired into Hermes (next step).
+- **hindsight** — service `hindsight` (optional), prebuilt
+  `vectorize-io/hindsight` all-in-one image **pinned by digest**. Profile
+  `[hindsight]`; `depends_on` pg/litellm so `COMPOSE_PROFILES=hindsight`
+  auto-pulls them. LLM + embeddings via LiteLLM (glm/grok + voyage; never
+  `chatgpt/*`, gotcha #5). API `:8888`, Control-Plane UI `:9999`. Seeds its
+  own pg role/db (fresh `<project>_pg-data` volume only). Not yet wired into
+  Hermes.
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,
@@ -204,7 +212,7 @@ is ever tracked in git.
 | File | Contents | Owner |
 |------|----------|-------|
 | `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, `AGENTMEMORY_SECRET`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `LITELLM_VIRTKEY_*_MODELS` declarations | you (`just setup`) |
-| `.stack/db.generated.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD` | `services/postgres/build.sh` |
+| `.stack/db.generated.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD`, `HINDSIGHT_DB_PASSWORD` | `services/postgres/build.sh` |
 | `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values | `services/litellm/start.sh` |
 | `services/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |
 

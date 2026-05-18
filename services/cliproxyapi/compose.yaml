@@ -21,35 +21,12 @@ services:
     image: eceasy/cli-proxy-api:${CLIPROXY_VERSION:-v7.1.11}
     profiles: [cliproxyapi]
     restart: unless-stopped
+    # No host ports — orb-DNS only (stack convention). The OAuth callback
+    # "failing" in the browser is EXPECTED: paste that URL into the panel's
+    # callback field and the server completes it. See ./README.md for the
+    # (unused) loopback-publish approach if zero-copy/paste is ever wanted.
     expose:
       - "8317"
-    # CLIProxyAPI's OAuth callbacks are FIXED loopback URLs (the providers'
-    # pre-registered redirect URIs — no config/env override). The browser is
-    # hard-redirected to http://127.0.0.1:<provider-port> after auth, so that
-    # port must reach the container on the Mac's loopback. These mirror
-    # CLIProxyAPI's own docker-compose.yml port set, kept 127.0.0.1-ONLY
-    # (never 0.0.0.0/LAN; still api-key + management-key gated). orb DNS
-    # (cliproxyapi.<project>.orb.local:8317) keeps working for in-OrbStack
-    # clients regardless. Only the port(s) for providers you actually
-    # OAuth-login need to be live — uncomment as needed to keep the host
-    # surface minimal.
-    ports:
-      # API + management panel + the /v0-management-based OAuth callbacks
-      # (anthropic/google/codex/xai/antigravity). Host port configurable
-      # (container always listens on 8317).
-      - "127.0.0.1:${CLIPROXY_HOST_PORT:-8317}:8317"
-      # ChatGPT/Codex OAuth callback. FIXED at 1455 — OpenAI's pre-registered
-      # Codex redirect URI is http://localhost:1455/...; NOT configurable
-      # (changing it breaks the OAuth flow). LIVE (the chatgpt/* replacement).
-      - "127.0.0.1:1455:1455"
-      # Gemini CLI (Google) OAuth callback — geminiAuth.DefaultCallbackPort:
-      # - "127.0.0.1:8085:8085"
-      # Antigravity OAuth callback — antigravity.CallbackPort:
-      # - "127.0.0.1:51121:51121"
-      # Other provider/flow/version OAuth callback ports upstream publishes
-      # (xAI/Grok, Claude variants); uncomment if a login's callback uses one:
-      # - "127.0.0.1:54545:54545"
-      # - "127.0.0.1:11451:11451"
     volumes:
       - ./config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
       - cliproxyapi-auth:/root/.cli-proxy-api

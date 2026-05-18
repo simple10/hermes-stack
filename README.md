@@ -79,21 +79,17 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   non-streaming `chatgpt/*` bug (gotcha #5). Config is file-based: committed
   `config.yaml.template` → gitignored `config.runtime.yaml` (build.sh injects
   `CLIPROXY_API_KEY` + `CLIPROXY_MANAGEMENT_KEY` from `.stack/.env`). OpenAI/
-  Codex API reachable in-OrbStack at `cliproxyapi.<project>.orb.local:8317`
-  (api-key gated) **and** on the Mac loopback
-  `127.0.0.1:${CLIPROXY_HOST_PORT:-8317}`. Health at `/healthz`; the **admin
+  Codex API at `cliproxyapi.<project>.orb.local:8317` (api-key gated; orb-DNS
+  only, no host ports — stack convention). Health at `/healthz`; the **admin
   UI is `/management.html`** (downloaded SPA; enter `CLIPROXY_MANAGEMENT_KEY`
-  when prompted — `/` only returns API-info JSON). OAuth tokens persist in the
-  `cliproxyapi-auth` volume. ⚠️ CLIProxyAPI's
-  OAuth callbacks are **fixed loopback URLs** (providers' pre-registered
-  redirect URIs — no config/env override). Do the **one-time login at
-  `http://127.0.0.1:8317/management.html`**; ChatGPT/Codex's callback is the
-  **fixed port `1455`** (also loopback-published — that's the chatgpt/*
-  replacement target). The other provider callback ports
-  (8085 Gemini / 51121 Antigravity / 54545,11451 xAI·Claude) are listed but
-  **commented out** in `services/cliproxyapi/compose.yaml` — uncomment only
-  the one for a provider you log in. All `127.0.0.1`-only, never LAN; still
-  key-gated. Not yet wired into Hermes.
+  when prompted; `/` only returns API-info JSON). OAuth tokens persist in the
+  `cliproxyapi-auth` volume. The provider OAuth callback **failing in the
+  browser is EXPECTED** — by design you copy that failed callback URL from the
+  address bar and paste it into the panel's callback field; the server
+  completes the token exchange (no browser->container reachability needed).
+  The alternative loopback-publish approach + per-provider fixed callback-port
+  map is documented in `services/cliproxyapi/README.md` should we ever want to
+  drop the copy/paste step. Not yet wired into Hermes.
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,

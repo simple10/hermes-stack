@@ -52,7 +52,13 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   engine binary. LLM + embeddings routed through LiteLLM. Config split:
   committed non-secret `services/agentmemory/.env` (deviations from upstream
   defaults documented inline) + secrets via Compose `environment:` from
-  `.stack/.env`. Not yet wired into Hermes (next step).
+  `.stack/.env`. REST API at `agentmemory.<project>.orb.local:3111`; the
+  **viewer web UI at `:3113`** (upstream binds it 127.0.0.1-only, so an
+  in-container `socat` forwards the container's external IP:3113 → loopback
+  and `VIEWER_ALLOWED_HOSTS` allowlists the orb host). ⚠️ The viewer is an
+  unauthenticated admin surface — reachable only within OrbStack's local
+  network (your Mac + your orb VMs), never the LAN/public internet. Not yet
+  wired into Hermes (next step).
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,

@@ -67,11 +67,12 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   build-time patches the hardcoded `http://localhost:8000` default to that
   same-origin proxy path (`HONCHO_BASE_URL` build arg, project-scoped via
   `COMPOSE_PROJECT_NAME`; `_source/` stays pristine). The **token is never
-  injected** — it remains a manual in-app field. nginx listens on `:80`, so
-  it's a clean **no-port** URL from the host:
-  `http://honcho-ui.<project>.orb.local`. The first-run form opens
-  **pre-filled** with `http://honcho-ui.<project>.orb.local/honcho` (Honcho
-  runs `USE_AUTH=false` here → token can stay blank) — just click Save.
+  injected** — it remains a manual in-app field. nginx listens on `:80` and
+  OrbStack fronts it with auto-HTTPS, so the canonical URL is
+  `https://honcho-ui.<project>.orb.local`. The first-run form opens
+  **pre-filled** with `https://honcho-ui.<project>.orb.local/honcho` — same
+  scheme as the page OrbStack serves, so no CORS / mixed-content (Honcho
+  runs `USE_AUTH=false` here → token can stay blank). Just click Save.
 - **agentmemory** — service `agentmemory`, persistent agent memory. Profile
   `[agentmemory]`; standalone (file-based state on its own volume — no
   pg/redis). No published image: built from a Dockerfile that npm-installs

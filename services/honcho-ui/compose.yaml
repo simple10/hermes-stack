@@ -19,12 +19,13 @@
 # honcho-api lazily at request time. For the deriver/dream features also
 # enable the `honcho` profile.
 #
-# nginx listens on :80, so from the host it's a clean URL with NO port:
-#   http://honcho-ui.<project>.orb.local
+# nginx listens on :80; OrbStack fronts it with auto-HTTPS, so the canonical
+# URL is https (no port):
+#   https://honcho-ui.<project>.orb.local
 # The first-run form is pre-filled with the same-origin Honcho proxy
-#   http://honcho-ui.<project>.orb.local/honcho
-# (Honcho runs USE_AUTH=false here, so the token can be left blank) — just
-# click Save.
+#   https://honcho-ui.<project>.orb.local/honcho
+# (same scheme as the page = no CORS / no mixed-content; Honcho runs
+# USE_AUTH=false here, so the token can be left blank) — just click Save.
 
 services:
   honcho-ui:
@@ -32,11 +33,12 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Same-origin Honcho proxy (see nginx.conf — avoids Honcho's
-        # hardcoded CORS allowlist). Project-scoped so multi-stack stays
-        # correct; default keeps a plain `docker compose build` working
+        # Same-origin Honcho proxy over OrbStack's auto-HTTPS (see nginx.conf
+        # — avoids Honcho's hardcoded CORS allowlist; https matches the page
+        # OrbStack serves, so no mixed-content). Project-scoped so multi-stack
+        # stays correct; default keeps a plain `docker compose build` working
         # outside `just`.
-        HONCHO_BASE_URL: http://honcho-ui.${COMPOSE_PROJECT_NAME:-aitools}.orb.local/honcho
+        HONCHO_BASE_URL: https://honcho-ui.${COMPOSE_PROJECT_NAME:-aitools}.orb.local/honcho
     profiles: [honcho-ui]
     restart: unless-stopped
     expose:

@@ -11,3 +11,4 @@ include:
   - services/redis/compose.yaml
   - services/litellm/compose.yaml
   - services/honcho/compose.yaml
+  - services/agentmemory/compose.yaml

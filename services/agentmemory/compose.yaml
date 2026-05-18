@@ -1,0 +1,50 @@
+# agentmemory (rohitg00/agentmemory) — persistent memory server for AI agents.
+# profile [agentmemory]. Project-scoped (no container_name / no shared net).
+#
+# Architecture: the `iii` engine runs the @agentmemory/agentmemory worker.
+# State is file-based KV on the project-scoped `agentmemory-data` volume
+# (/data/state_store.db, /data/stream_store) — NO Postgres/Redis/LLM needed.
+# Out of the box: noop LLM + local 384-dim embeddings (Xenova all-MiniLM),
+# zero external keys. (Later we can point its OPENAI_BASE_URL at LiteLLM and
+# wire it into Hermes — not done here.)
+#
+# No published image exists; built from the vendored Dockerfile (iii binary
+# from iiidev/iii + npm @agentmemory/agentmemory). Versions PINNED (gotcha #6)
+# — bump deliberately here.
+#
+# REST API on :3111 (health /agentmemory/livez), streams :3112. Not published
+# to the host; reachable on the project network as `agentmemory:3111` and
+# from the Hermes VM at agentmemory.<project>.orb.local:3111. The HMAC secret
+# is auto-generated on first boot into the volume (/data/.hmac) and printed
+# ONCE in the logs — `just logs`/`docker logs` to capture it if needed.
+
+services:
+  agentmemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENTMEMORY_VERSION: "0.9.12"
+        III_VERSION: "0.11.2"
+        III_SDK_VERSION: "0.11.2"
+    profiles: [agentmemory]
+    restart: unless-stopped
+    expose:
+      - "3111"
+      - "3112"
+    volumes:
+      - agentmemory-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3111/agentmemory/livez || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  agentmemory-data:

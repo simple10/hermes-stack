@@ -45,6 +45,12 @@ services:
       # viewer's Host-header allowlist accept the OrbStack DNS name so the
       # web UI is reachable at agentmemory.<project>.orb.local:3113.
       VIEWER_ALLOWED_HOSTS: agentmemory.${COMPOSE_PROJECT_NAME}.orb.local:3113
+      # Admin-UI (viewer :3113) exposure toggle. Default 1 (on). To DISABLE
+      # the unauthenticated admin web UI, set AGENTMEMORY_EXPOSE_VIEWER=0 in
+      # .stack/.env (NOT here — this file is git-tracked). When 0 the
+      # entrypoint skips the socat forwarder and the viewer stays
+      # 127.0.0.1-only inside the container (unreachable via orb DNS).
+      AGENTMEMORY_EXPOSE_VIEWER: ${AGENTMEMORY_EXPOSE_VIEWER:-1}
     expose:
       - "3111"
       - "3112"

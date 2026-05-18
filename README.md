@@ -57,8 +57,10 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   in-container `socat` forwards the container's external IP:3113 → loopback
   and `VIEWER_ALLOWED_HOSTS` allowlists the orb host). ⚠️ The viewer is an
   unauthenticated admin surface — reachable only within OrbStack's local
-  network (your Mac + your orb VMs), never the LAN/public internet. Not yet
-  wired into Hermes (next step).
+  network (your Mac + your orb VMs), never the LAN/public internet. Disable
+  it any time by setting `AGENTMEMORY_EXPOSE_VIEWER=0` in `.stack/.env` and
+  recreating (no edit to the git-tracked compose; `:3113` then stays
+  loopback-only). Not yet wired into Hermes (next step).
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,

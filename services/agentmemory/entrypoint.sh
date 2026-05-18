@@ -126,13 +126,22 @@ chown -R "$RUN_AS" "$PREFS_DIR"
 # external IP (not 0.0.0.0) lets it coexist with the loopback listener.
 # Host-allowlist for the orb DNS name is granted via VIEWER_ALLOWED_HOSTS
 # (set in compose from COMPOSE_PROJECT_NAME).
-CIP="$(getent hosts "$(cat /etc/hostname)" 2>/dev/null | awk '{print $1; exit}')"
-[ -n "$CIP" ] || CIP="$(hostname -i 2>/dev/null | awk '{print $1}')"
-if [ -n "$CIP" ]; then
-  socat "TCP-LISTEN:3113,bind=${CIP},fork,reuseaddr" TCP:127.0.0.1:3113 &
-  echo "agentmemory: viewer forwarder ${CIP}:3113 -> 127.0.0.1:3113 (web UI)"
-else
-  echo "agentmemory: WARN could not resolve container IP — viewer stays loopback-only"
-fi
+# Toggle: AGENTMEMORY_EXPOSE_VIEWER=0/false/no in .stack/.env disables the
+# admin-UI forwarding entirely (viewer stays 127.0.0.1-only in-container).
+case "$(printf '%s' "${AGENTMEMORY_EXPOSE_VIEWER:-1}" | tr 'A-Z' 'a-z')" in
+  1|true|yes|on)
+    CIP="$(getent hosts "$(cat /etc/hostname)" 2>/dev/null | awk '{print $1; exit}')"
+    [ -n "$CIP" ] || CIP="$(hostname -i 2>/dev/null | awk '{print $1}')"
+    if [ -n "$CIP" ]; then
+      socat "TCP-LISTEN:3113,bind=${CIP},fork,reuseaddr" TCP:127.0.0.1:3113 &
+      echo "agentmemory: viewer forwarder ${CIP}:3113 -> 127.0.0.1:3113 (web UI ENABLED)"
+    else
+      echo "agentmemory: WARN could not resolve container IP — viewer stays loopback-only"
+    fi
+    ;;
+  *)
+    echo "agentmemory: admin viewer DISABLED (AGENTMEMORY_EXPOSE_VIEWER=${AGENTMEMORY_EXPOSE_VIEWER:-}) — :3113 stays loopback-only"
+    ;;
+esac
 
 exec gosu "$RUN_AS" agentmemory "$@"

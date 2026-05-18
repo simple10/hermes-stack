@@ -26,12 +26,24 @@ services:
       - "9999"
     environment:
       HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD}@pg:5432/hindsight
-      HINDSIGHT_API_LLM_PROVIDER: litellm
-      HINDSIGHT_API_LITELLM_API_BASE: http://litellm:4000
+      # LLM: LiteLLM is OpenAI-compatible. provider=litellm feeds the bare
+      # alias to the litellm SDK which can't resolve a provider for a custom
+      # proxy alias ("LLM Provider NOT provided"); the documented path for an
+      # OpenAI-compatible endpoint is provider=openai + LLM_BASE_URL (alias
+      # passed through, LiteLLM resolves it).
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_BASE_URL: http://litellm:4000
       HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
       HINDSIGHT_API_LLM_MODEL: glm-4.7-flash
+      # Embeddings: the litellm provider does a raw POST to <base>/embeddings
+      # and only sends Authorization if its OWN key is set. It reads
+      # EMBEDDINGS_LITELLM_API_KEY, falling back to the shared
+      # LITELLM_API_KEY — it does NOT read LLM_API_KEY. Without it LiteLLM
+      # (key-enforced) returns 401 and startup aborts.
       HINDSIGHT_API_EMBEDDINGS_PROVIDER: litellm
       HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL: voyage-4-lite
+      HINDSIGHT_API_LITELLM_API_BASE: http://litellm:4000
+      HINDSIGHT_API_LITELLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
     depends_on:
       pg: { condition: service_healthy }
       litellm: { condition: service_healthy }

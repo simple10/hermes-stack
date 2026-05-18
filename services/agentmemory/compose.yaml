@@ -35,11 +35,13 @@ services:
     env_file:
       - ./.env
     environment:
-      # Secrets only — resolved from .stack/.env + .stack/*.generated.env.
-      # OPENAI_API_KEY = the LiteLLM virtual key minted from
-      # LITELLM_VIRTKEY_AGENTMEMORY_MODELS (scoped glm/grok/voyage).
+      # From .stack/.env + .stack/*.generated.env (the single lever surface).
+      # OPENAI_API_KEY = the unrestricted agentmemory LiteLLM virtual key.
       OPENAI_API_KEY: ${AGENTMEMORY_VIRTUAL_KEY}
       AGENTMEMORY_SECRET: ${AGENTMEMORY_SECRET}
+      # Model levers (namespaced .stack/.env vars; default -> STACK_LLM_MODEL*).
+      OPENAI_MODEL: ${AGENTMEMORY_MODEL}
+      OPENAI_EMBEDDING_MODEL: ${AGENTMEMORY_EMBEDDING_MODEL}
       # Non-secret, but project-scoped (needs COMPOSE_PROJECT_NAME
       # interpolation, so it lives here not in the static .env). Lets the
       # viewer's Host-header allowlist accept the OrbStack DNS name so the

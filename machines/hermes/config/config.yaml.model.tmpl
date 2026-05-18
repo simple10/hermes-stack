@@ -6,13 +6,14 @@
 # <service>.<project>.orb.local; the scripts substitute __STACK_PROJECT__ with
 # COMPOSE_PROJECT_NAME from .stack/.env (default aitools -> litellm.aitools).
 #
-# default = cliproxy/gpt-5.5: LiteLLM routes this as a plain openai-compatible
-# upstream to CLIProxyAPI (ChatGPT/Codex subscription). This is the
-# streaming-correct + fully-observable replacement for the old chatgpt/*
-# LiteLLM responses-bridge (gotcha #5 non-streaming bug). To roll back, set
-# default: chatgpt/gpt-5.5 (the bridge entries are kept in litellm config).
+# default model = the HERMES_MODEL lever in .stack/.env (the scripts
+# substitute __HERMES_MODEL__; defaults to STACK_LLM_MODEL = cliproxy/gpt-5.5).
+# LiteLLM routes cliproxy/* as a plain openai-compatible upstream to
+# CLIProxyAPI (ChatGPT/Codex sub) — streaming-correct + fully observable,
+# the replacement for the old chatgpt/* responses-bridge (gotcha #5). To roll
+# back, set HERMES_MODEL=chatgpt/gpt-5.5 in .stack/.env (no git edit).
 model:
-  default: cliproxy/gpt-5.5
+  default: __HERMES_MODEL__
   provider: custom
   base_url: http://litellm.__STACK_PROJECT__.orb.local:4000/v1
   api_key: ${HERMES_VIRTUAL_KEY}

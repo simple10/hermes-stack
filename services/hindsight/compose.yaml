@@ -6,8 +6,9 @@
 # Reaches pg + litellm by sibling service name on the Compose default
 # network. depends_on pg+litellm so COMPOSE_PROFILES=hindsight auto-pulls
 # them (Honcho pattern). LLM + embeddings route through LiteLLM on the
-# minted HINDSIGHT_VIRTUAL_KEY (glm/grok + voyage; NEVER chatgpt/* —
-# gotcha #5, non-streaming). The hindsight DB role/db is seeded by
+# (unrestricted) HINDSIGHT_VIRTUAL_KEY; the actual models are the
+# HINDSIGHT_MODEL / HINDSIGHT_EMBEDDING_MODEL levers in .stack/.env
+# (default cliproxy/* + voyage). The hindsight DB role/db is seeded by
 # services/postgres/pg-init/00-init.sql (FRESH pg volume only — adding this
 # to a live stack needs the <project>_pg-data volume recreated).
 #
@@ -34,14 +35,15 @@ services:
       HINDSIGHT_API_LLM_PROVIDER: openai
       HINDSIGHT_API_LLM_BASE_URL: http://litellm:4000
       HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
-      HINDSIGHT_API_LLM_MODEL: glm-4.7-flash
+      # Model lever (namespaced .stack/.env var; default -> STACK_LLM_MODEL).
+      HINDSIGHT_API_LLM_MODEL: ${HINDSIGHT_MODEL}
       # Embeddings: the litellm provider does a raw POST to <base>/embeddings
       # and only sends Authorization if its OWN key is set. It reads
       # EMBEDDINGS_LITELLM_API_KEY, falling back to the shared
       # LITELLM_API_KEY — it does NOT read LLM_API_KEY. Without it LiteLLM
       # (key-enforced) returns 401 and startup aborts.
       HINDSIGHT_API_EMBEDDINGS_PROVIDER: litellm
-      HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL: voyage-4-lite
+      HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL: ${HINDSIGHT_EMBEDDING_MODEL}
       HINDSIGHT_API_LITELLM_API_BASE: http://litellm:4000
       HINDSIGHT_API_LITELLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
     depends_on:

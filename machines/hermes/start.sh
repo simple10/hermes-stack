@@ -8,9 +8,12 @@ MACHINE="${1:-hermes}"
 GEN="$STACK_DIR/litellm.generated.env"
 HK="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
 PROJ="$(stack_project)"
+# bash-source .stack/.env so HERMES_MODEL=${STACK_LLM_MODEL} expands.
+set -a; . "$STACK_DIR/.env"; set +a
+HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"
 D="$(dirname "${BASH_SOURCE[0]}")"
 if [ -n "$HK" ]; then
-  MB="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HK|" -e "s/__STACK_PROJECT__/$PROJ/g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
+  MB="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HK|" -e "s/__STACK_PROJECT__/$PROJ/g" -e "s|__HERMES_MODEL__|$HM|g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
   printf '%s\n' "$MB" | orb -m "$MACHINE" bash -lc '
     cfg=~/.hermes/config.yaml; nb="$(cat)"
     python3 - "$cfg" <<PY

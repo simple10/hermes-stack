@@ -107,6 +107,16 @@ model_list:
 
 litellm_settings:
   drop_params: true # tolerate caller params a provider doesn't take
+  # Centralized fallback: if a cliproxy/* model errors (ChatGPT-sub quota/
+  # 429/5xx) LiteLLM transparently retries on glm-4.7-flash (OpenRouter,
+  # cheap/unmetered). Defined once here so EVERY consumer (Hermes, Honcho,
+  # agentmemory, hindsight) inherits it — no per-service fallback config.
+  fallbacks:
+    - cliproxy/gpt-5.5: [glm-4.7-flash]
+    - cliproxy/gpt-5.4: [glm-4.7-flash]
+    - cliproxy/gpt-5.4-mini: [glm-4.7-flash]
+    - cliproxy/gpt-5.3-codex: [glm-4.7-flash]
+    - cliproxy/gpt-5.3-codex-spark: [glm-4.7-flash]
 
 general_settings:
   store_model_in_db: true

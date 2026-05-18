@@ -48,7 +48,8 @@ sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/honcho.json.tmpl" \
   | orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json'
 
 log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
-MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
+HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env
+MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" -e "s|__HERMES_MODEL__|$HM|g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
 printf '%s\n' "$MODEL_BLOCK" | orb -m "$MACHINE" bash -lc '
   set -e; umask 077; cfg=~/.hermes/config.yaml
   [ -f "$cfg" ] || hermes config init >/dev/null 2>&1 || touch "$cfg"

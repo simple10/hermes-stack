@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # litellm/start.sh — run AFTER the `litellm` service is up. Idempotently mints
-# (or reconciles) a virtual key per LITELLM_VIRTKEY_<ALIAS>_MODELS declaration
-# and writes <ALIAS>_VIRTUAL_KEY into .stack/litellm.generated.env.
+# one UNRESTRICTED virtual key per LITELLM_VIRTKEYS alias and writes
+# <ALIAS>_VIRTUAL_KEY into .stack/litellm.generated.env.
 #
 # Multi-stack safe: talks to LiteLLM via `docker compose exec` into THIS
 # stack's `litellm` service (project-scoped — no fixed container name, no
@@ -34,25 +34,30 @@ print(urllib.request.urlopen(req,timeout=15).read().decode())
 PY
 }
 
-grep -E '^LITELLM_VIRTKEY_[A-Z0-9]+_MODELS=' "$ENVF" | while IFS= read -r line; do
-  alias_uc="$(echo "$line" | sed -E 's/^LITELLM_VIRTKEY_([A-Z0-9]+)_MODELS=.*/\1/')"
-  csv="$(echo "$line" | cut -d= -f2-)"
-  models_json="$(python3 -c 'import sys,json;print(json.dumps([s for s in sys.argv[1].split(",") if s]))' "$csv")"
-  out_var="${alias_uc}_VIRTUAL_KEY"
-  alias_lc="$(echo "$alias_uc" | tr 'A-Z' 'a-z')"
+# One key per LITELLM_VIRTKEYS alias, minted UNRESTRICTED (models: [] = all
+# proxy models). Per-key model scoping is intentionally dropped — each
+# service's model is set explicitly via the .stack/.env levers, so key-level
+# allowlists added only clutter + misconfig risk. Distinct keys are kept for
+# per-consumer SpendLogs attribution + rotation.
+aliases="$(env_get "$ENVF" LITELLM_VIRTKEYS)"
+[ -n "$aliases" ] || die "LITELLM_VIRTKEYS empty in .stack/.env (run: just setup)"
+echo "$aliases" | tr ',' '\n' | while IFS= read -r a; do
+  alias_lc="$(echo "$a" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+  [ -n "$alias_lc" ] || continue
+  out_var="$(echo "$alias_lc" | tr 'a-z' 'A-Z')_VIRTUAL_KEY"
   existing="$(env_get "$GEN" "$out_var")"
   mint() {
     local k
-    k="$(llm_api POST /key/generate "{\"key_alias\":\"$alias_lc\",\"models\":$models_json}" \
+    k="$(llm_api POST /key/generate "{\"key_alias\":\"$alias_lc\",\"models\":[]}" \
         | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')"
     [ -n "$k" ] || die "litellm: failed to mint key for $alias_lc"
     env_upsert "$GEN" "$out_var" "$k"
   }
   if [ -n "$existing" ]; then
-    # Reconcile the allowlist. If the key isn't valid in THIS db (fresh /
-    # rotated / recreated stack), re-mint instead of failing (gotcha #4).
-    if llm_api POST /key/update "{\"key\":\"$existing\",\"models\":$models_json}" >/dev/null 2>&1; then
-      log "litellm: reconciled allowlist for $alias_lc key"
+    # Ensure the key is still valid in THIS db + unrestricted (models: []).
+    # If it's gone (fresh/rotated/recreated db), re-mint (gotcha #4).
+    if llm_api POST /key/update "{\"key\":\"$existing\",\"models\":[]}" >/dev/null 2>&1; then
+      log "litellm: $alias_lc key present (unrestricted)"
     else
       warn "litellm: $alias_lc key not in this db (fresh/rotated) — re-minting"
       mint; log "litellm: re-minted $out_var (alias=$alias_lc)"

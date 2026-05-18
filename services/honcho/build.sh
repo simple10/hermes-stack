@@ -13,4 +13,17 @@ else
   git -C "$D/_source" checkout "$HONCHO_PIN"
   rm -rf "$D/_source/.git"
 fi
-render_template "$D/config.toml.template" "$D/config.runtime.toml" honcho
+# Render config.runtime.toml from the template, injecting the per-module
+# model levers from .stack/.env. Bash-source so the ${STACK_LLM_MODEL*} refs
+# in .stack/.env expand (presets defined above the per-service lines). Secret
+# placeholders (CONNECTION_URI / HONCHO_VIRTUAL_KEY) stay as-is — resolved at
+# container runtime via env, never written to the file. Deterministic each
+# build (generated file; gitignored).
+set -a; . "$STACK_DIR/.env"; set +a
+sed -e "s|__HONCHO_DERIVER_MODEL__|${HONCHO_DERIVER_MODEL:-cliproxy/gpt-5.4-mini}|g" \
+    -e "s|__HONCHO_SUMMARY_MODEL__|${HONCHO_SUMMARY_MODEL:-cliproxy/gpt-5.4-mini}|g" \
+    -e "s|__HONCHO_DREAM_MODEL__|${HONCHO_DREAM_MODEL:-cliproxy/gpt-5.4-mini}|g" \
+    -e "s|__HONCHO_DIALECTIC_MODEL__|${HONCHO_DIALECTIC_MODEL:-cliproxy/gpt-5.5}|g" \
+    -e "s|__HONCHO_EMBEDDING_MODEL__|${HONCHO_EMBEDDING_MODEL:-voyage-4-lite}|g" \
+    "$D/config.toml.template" > "$D/config.runtime.toml"
+log "honcho: rendered config.runtime.toml (models: deriver=${HONCHO_DERIVER_MODEL:-} dialectic=${HONCHO_DIALECTIC_MODEL:-} embed=${HONCHO_EMBEDDING_MODEL:-})"

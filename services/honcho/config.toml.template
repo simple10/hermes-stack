@@ -72,7 +72,7 @@ MAX_TOKENS_PER_REQUEST = 300000
 
 [embedding.model_config]
 transport = "openai"
-model = "voyage-4-lite"
+model = "__HONCHO_EMBEDDING_MODEL__"
 dimensions_mode = "never"
 [embedding.model_config.overrides]
 base_url = "http://litellm:4000"
@@ -100,7 +100,7 @@ FLUSH_ENABLED = false  # Bypass batch token threshold, process work immediately
 
 [deriver.model_config]
 transport = "openai"
-model = "glm-4.7-flash"
+model = "__HONCHO_DERIVER_MODEL__"
 max_output_tokens = 8192
 [deriver.model_config.overrides]
 base_url = "http://litellm:4000"
@@ -147,7 +147,7 @@ TOOL_CHOICE = "auto"
 
 [dialectic.levels.minimal.model_config]
 transport = "openai"
-model = "glm-4.7-flash"
+model = "__HONCHO_DIALECTIC_MODEL__"
 [dialectic.levels.minimal.model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
@@ -158,7 +158,7 @@ TOOL_CHOICE = "auto"
 
 [dialectic.levels.low.model_config]
 transport = "openai"
-model = "glm-4.7-flash"
+model = "__HONCHO_DIALECTIC_MODEL__"
 [dialectic.levels.low.model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
@@ -168,7 +168,7 @@ MAX_TOOL_ITERATIONS = 2
 
 [dialectic.levels.medium.model_config]
 transport = "openai"
-model = "grok-4.3"
+model = "__HONCHO_DIALECTIC_MODEL__"
 [dialectic.levels.medium.model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
@@ -178,7 +178,7 @@ MAX_TOOL_ITERATIONS = 4
 
 [dialectic.levels.high.model_config]
 transport = "openai"
-model = "grok-4.3"
+model = "__HONCHO_DIALECTIC_MODEL__"
 [dialectic.levels.high.model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
@@ -188,7 +188,7 @@ MAX_TOOL_ITERATIONS = 10
 
 [dialectic.levels.max.model_config]
 transport = "openai"
-model = "glm-5"
+model = "__HONCHO_DIALECTIC_MODEL__"
 [dialectic.levels.max.model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
@@ -207,7 +207,7 @@ MAX_TOKENS_LONG = 8192
 
 [summary.model_config]
 transport = "openai"
-model = "glm-4.7-flash"
+model = "__HONCHO_SUMMARY_MODEL__"
 [summary.model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
@@ -230,14 +230,14 @@ HISTORY_TOKEN_LIMIT = 16384
 
 [dream.deduction_model_config]
 transport = "openai"
-model = "glm-5"
+model = "__HONCHO_DREAM_MODEL__"
 [dream.deduction_model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"
 
 [dream.induction_model_config]
 transport = "openai"
-model = "glm-5"
+model = "__HONCHO_DREAM_MODEL__"
 [dream.induction_model_config.overrides]
 base_url = "http://litellm:4000"
 api_key_env = "HONCHO_VIRTUAL_KEY"

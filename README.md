@@ -45,14 +45,19 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
 - **honcho** — services `honcho-api` + `honcho-deriver`, built from a
   **pinned** `plastic-labs/honcho` commit. Profile `[honcho]`;
   `depends_on` pg/redis/litellm so `COMPOSE_PROFILES=honcho` auto-pulls them.
+  LLM via cliproxy through LiteLLM (deriver/summary/dream →
+  `HONCHO_*_MODEL`/`STACK_LLM_MODEL_FAST`, dialectic → `HONCHO_DIALECTIC_MODEL`/
+  `STACK_LLM_MODEL`); embeddings Voyage. Models are `.stack/.env` levers
+  injected into the rendered `config.runtime.toml` by `honcho/build.sh`.
 - **agentmemory** — service `agentmemory`, persistent agent memory. Profile
   `[agentmemory]`; standalone (file-based state on its own volume — no
   pg/redis). No published image: built from a Dockerfile that npm-installs
   the **pinned, maintainer-tested** `@agentmemory/agentmemory` release
   (`AGENTMEMORY_VERSION`, bump for newer "stable" code) + the pinned iii
-  engine binary. LLM + embeddings routed through LiteLLM. Config split:
-  committed non-secret `services/agentmemory/.env` (deviations from upstream
-  defaults documented inline) + secrets via Compose `environment:` from
+  engine binary. LLM via cliproxy through LiteLLM (`AGENTMEMORY_MODEL` lever)
+  + Voyage embeddings (`AGENTMEMORY_EMBEDDING_MODEL`). Config split: committed
+  non-secret `services/agentmemory/.env` (flags only — no model/secret) +
+  Compose `environment:` injecting the model levers + secrets from
   `.stack/.env`. REST API at `agentmemory.<project>.orb.local:3111`; the
   **viewer web UI at `:3113`** (upstream binds it 127.0.0.1-only, so an
   in-container `socat` forwards the container's external IP:3113 → loopback
@@ -65,10 +70,10 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
 - **hindsight** — service `hindsight` (optional), prebuilt
   `vectorize-io/hindsight` all-in-one image **pinned by digest**. Profile
   `[hindsight]`; `depends_on` pg/litellm so `COMPOSE_PROFILES=hindsight`
-  auto-pulls them. LLM + embeddings via LiteLLM (glm/grok + voyage; never
-  `chatgpt/*`, gotcha #5). API `:8888`, Control-Plane UI `:9999`. Seeds its
-  own pg role/db (fresh `<project>_pg-data` volume only). Not yet wired into
-  Hermes.
+  auto-pulls them. LLM via cliproxy through LiteLLM (`HINDSIGHT_MODEL`
+  lever) + Voyage embeddings (`HINDSIGHT_EMBEDDING_MODEL`). API `:8888`,
+  Control-Plane UI `:9999`. Seeds its own pg role/db (fresh
+  `<project>_pg-data` volume only). Not yet wired into Hermes.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
   via the prebuilt `eceasy/cli-proxy-api` image **pinned by tag**
   (`CLIPROXY_VERSION`, bump deliberately). Profile `[cliproxyapi]`;
@@ -100,11 +105,15 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   `honcho-api.aitools.orb.local`). Its own agent brain AND Honcho's
   LLM/embedding calls route through LiteLLM.
 
-Traffic: `Hermes → LiteLLM (cliproxy/gpt-5.5) → CLIProxyAPI → ChatGPT
-subscription` for the agent — streaming-correct + fully logged (SpendLogs
-records it as `openai/gpt-5.5` for the `hermes` key; the old `chatgpt/*`
-LiteLLM responses-bridge entries are kept for one-line rollback);
-`Hermes → Honcho → LiteLLM (glm/grok/voyage)` for memory.
+Traffic: **everything chat-LLM → LiteLLM → CLIProxyAPI → ChatGPT
+subscription** (Hermes brain, Honcho, agentmemory, hindsight), streaming +
+non-streaming both verified; **embeddings → LiteLLM → Voyage** (unchanged).
+Every call is in LiteLLM SpendLogs attributed per consumer key
+(`hermes`/`honcho`/`agentmemory`/`hindsight`); the resolved model logs as
+`openai/<model>` (cliproxy entries) or `voyage/<model>`. Centralized
+fallback: any `cliproxy/*` error (ChatGPT-sub quota/429) transparently
+retries on `glm-4.7-flash` (OpenRouter). Old `chatgpt/*` responses-bridge
+entries kept for rollback.
 
 ## Prerequisites
 
@@ -137,8 +146,8 @@ just start     # staged bring-up + (first run) ChatGPT device-pair, then everyth
   `STACK_MACHINES` machine's `build.sh`. A changed committed template only
   **warns** (`just reconfigure <svc>` to re-render) — no migration system.
 - **`just start`** is **staged** (order is load-bearing): pg+redis → litellm
-  → `services/litellm/start.sh` mints/reconciles a virtual key per
-  `LITELLM_VIRTKEY_<ALIAS>_MODELS` into `.stack/litellm.generated.env` →
+  → `services/litellm/start.sh` mints one **unrestricted** virtual key per
+  `LITELLM_VIRTKEYS` alias into `.stack/litellm.generated.env` →
   `lib/honcho-postup.sh` brings Honcho up correctly (fresh DB → applies the
   1024 dim fix) → settle `up -d` → `machines/<m>/start.sh` last. `build.sh`
   does **not** require the minted `HERMES_VIRTUAL_KEY` (it doesn't exist until
@@ -198,11 +207,14 @@ recreating from scratch is the supported model — `just stop` then remove the
    `/key/update` and, if the key isn't valid in this DB, re-mints and
    overwrites `.stack/litellm.generated.env`. So recreating a stack from
    scratch just works on the next `just start`.
-5. **`chatgpt/*` via LiteLLM: non-streaming completions fail (known bug);
-   streaming OK.** Hermes streams → fine. **Honcho must NEVER get
-   `chatgpt/*`** in its virtual-key allowlist (its deriver/summary/dream/
-   dialectic steps are non-streaming) — keep Honcho on glm/grok/voyage. This
-   is why the two virtual keys get different `LITELLM_VIRTKEY_*_MODELS`.
+5. **The LiteLLM `chatgpt/*` responses-bridge is non-streaming-broken (known
+   bug)** — those entries are kept ONLY for rollback. Everything now uses
+   `cliproxy/*` (plain openai-compatible upstream → CLIProxyAPI), which is
+   verified working for **both** streaming (Hermes) and non-streaming
+   (Honcho/agentmemory/hindsight). The constraint is now enforced not by
+   per-key model allowlists (virtual keys are unrestricted) but by the
+   explicit per-service `.stack/.env` model levers — never set a service's
+   `*_MODEL` lever to a `chatgpt/*` value.
 6. **OrbStack machine "Logs" tab = the console (`/dev/console`), not
    journald.** `hermes-logtail` (root) mirrors `~/.hermes/logs/{gateway,
    errors}.log` there; `agent.log` excluded (DEBUG-spam).
@@ -237,9 +249,22 @@ recreating from scratch is the supported model — `just stop` then remove the
 Every runtime secret lives in `.stack/` (gitignored in full). Nothing secret
 is ever tracked in git.
 
+**Model levers (single surface).** `.stack/.env` is the *only* place models
+are chosen. Presets `STACK_LLM_MODEL` / `STACK_LLM_MODEL_FAST` /
+`STACK_LLM_EMBEDDING_MODEL` feed explicit namespaced per-service vars
+(`HERMES_MODEL`, `AGENTMEMORY_MODEL`, `HONCHO_DERIVER_MODEL`,
+`HONCHO_DIALECTIC_MODEL`, `HINDSIGHT_MODEL`, … + the `*_EMBEDDING_MODEL`
+ones). `.stack/.env` is bash-sourced by `just`, so `FOO=${STACK_LLM_MODEL}`
+expands (presets must stay above refs). Service `compose.yaml`/templates
+reference **only** the namespaced vars — never `STACK_*` — so any model change
+is a one-line `.stack/.env` edit with **zero git-tracked file changes / no
+`git pull` conflicts**. honcho's per-module values are injected into the
+gitignored `config.runtime.toml` by `honcho/build.sh`; agentmemory/hindsight
+read theirs via Compose `environment:`; Hermes via `machines/hermes`.
+
 | File | Contents | Owner |
 |------|----------|-------|
-| `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, `AGENTMEMORY_SECRET`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `LITELLM_VIRTKEY_*_MODELS` declarations | you (`just setup`) |
+| `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, `AGENTMEMORY_SECRET`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, model levers (`STACK_LLM_MODEL*` + per-service `*_MODEL`), `LITELLM_VIRTKEYS` | you (`just setup`) |
 | `.stack/db.generated.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD`, `HINDSIGHT_DB_PASSWORD` | `services/postgres/build.sh` |
 | `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values | `services/litellm/start.sh` |
 | `services/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |

@@ -57,8 +57,18 @@ if echo "$mch" | grep -qw hermes; then
   ask TELEGRAM_HOME_CHANNEL  "Telegram home channel (blank ok)"
 fi
 
-# Seed virtual-key allowlist declarations from the example if absent.
-for k in LITELLM_VIRTKEY_HONCHO_MODELS LITELLM_VIRTKEY_HERMES_MODELS LITELLM_VIRTKEY_AGENTMEMORY_MODELS; do
+# Seed model levers + virtual-key list from the example if absent. ORDER
+# MATTERS: presets must land in .stack/.env ABOVE the per-service ${...} refs
+# (the file is bash-sourced; refs expand against earlier definitions). The
+# literal "${STACK_LLM_MODEL}" value is copied verbatim — that indirection is
+# intentional and resolves on source.
+for k in \
+  STACK_LLM_MODEL STACK_LLM_MODEL_FAST STACK_LLM_EMBEDDING_MODEL \
+  HERMES_MODEL AGENTMEMORY_MODEL AGENTMEMORY_EMBEDDING_MODEL \
+  HINDSIGHT_MODEL HINDSIGHT_EMBEDDING_MODEL \
+  HONCHO_DERIVER_MODEL HONCHO_SUMMARY_MODEL HONCHO_DREAM_MODEL \
+  HONCHO_DIALECTIC_MODEL HONCHO_EMBEDDING_MODEL \
+  LITELLM_VIRTKEYS; do
   [ -n "$(env_get "$ENVF" "$k")" ] || env_upsert "$ENVF" "$k" "$(env_get "$EX" "$k")"
 done
 chmod 600 "$ENVF"

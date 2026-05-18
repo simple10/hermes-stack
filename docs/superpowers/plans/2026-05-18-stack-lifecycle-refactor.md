@@ -845,3 +845,37 @@ Then report to the user: implementation complete; from-scratch (`H_FRESH`) and e
 **Placeholder scan:** no TBD/TODO; the spec's deferred psql quoting is resolved concretely in T3/T4 Step 1 (role created password-less + `ALTER ROLE … :'pw'`, literal role/db names — footgun sidestepped) with a no-op acceptance gate.
 
 **Type/name consistency:** `com.stack.role=provisioner`, `<svc>-provision`, `SVC_DB_PASSWORD`/`PGPASSWORD`/`:'pw'`, `STACK_AUTO_REMOVE_PROVISIONERS`, `services/<svc>/{preflight,prestart,poststart}.sh` used consistently across tasks and match the spec.
+
+---
+
+## As-built resolution (2026-05-18 — supersedes Task 5; authoritative)
+
+Executed and **validated green on both H_FRESH and H_CLONE**. Material
+changes vs the task list (full rationale in the spec's "As-built" section):
+
+- **Task 5 REVERSED.** `services/honcho/poststart.sh` was created then
+  **deleted**. The blanket `dc up -d` aborts on fresh-DB honcho-api
+  crash-looping the 1536/1024 validator before any poststart can run, and a
+  post-start vector-column resize is unsafe. Replaced by a second
+  compose-ordered honcho one-shot **`honcho-schema`** (honcho image:
+  `provision_db.py` then `configure_embeddings.py --yes`), ordered
+  `pg → honcho-provision → honcho-schema → honcho-api/honcho-deriver`.
+  `configure_embeddings.py` only ALTERs **empty** columns (refuses populated,
+  no-ops when matching) → safe & idempotent. `EMBEDDING_VECTOR_DIMENSIONS=1024`
+  set on honcho-api/deriver/schema (validator must match).
+- **Provisioner `command`** (T3/T4): `sh -c` + **`$$SVC_DB_PASSWORD`**
+  (single `$` was compose-interpolated to blank → cleared role passwords)
+  **+ psql retry ×30/2 s** (fresh-pg readiness race for the first
+  provisioner).
+- **Verification venue (T8/T9):** isolated `H_FRESH` + `H_CLONE` only —
+  never live `aitools`; pass criteria are the real signals (provisioner log
+  clean, `pg_authid.rolpassword IS NOT NULL`, container `healthy`), not the
+  false-positive `psql -h 127.0.0.1` trust-probe. See "Incident & deviation".
+- **Live-stack note:** the original "verify on the live stack" steps were
+  unsafe from a worktree and were never used for the final design; live
+  `aitools` (9 containers) was untouched by the validated implementation.
+
+**Validated:** `start complete` both venues; `documents`/`message_embeddings`
+`embedding` = `vector(1024)`; all provisioners + `honcho-schema` exit 0;
+`rolpassword` set; litellm + honcho-api `healthy`, 0 dim-validator errors;
+H_CLONE = safe no-op on populated clone.

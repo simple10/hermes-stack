@@ -196,10 +196,11 @@ just start     # staged bring-up + (first run) ChatGPT device-pair, then everyth
   up litellm + mints one **unrestricted** virtual key per `LITELLM_VIRTKEYS`
   alias into `.stack/litellm.generated.env`) → recompute `COMPOSE_ENV_FILES`
   → each `services/<p>/prestart.sh` (fail-loud config validation) →
-  `dc up -d` (each service's one-shot **provisioner** creates its
-  role/db/extension, ordered by `depends_on`) → each
-  `services/<p>/poststart.sh` (e.g. `honcho/poststart.sh` applies the fresh-DB
-  1024 dim fix) → `machines/<m>/start.sh` → optional `just start-cleanup`.
+  `dc up -d` (each service's one-shot **provisioner**(s) create its
+  role/db/extension/schema, ordered by `depends_on` — e.g. honcho:
+  `pg → honcho-provision → honcho-schema → honcho-api`) → each
+  `services/<p>/poststart.sh` (generic hook; currently unused) →
+  `machines/<m>/start.sh` → optional `just start-cleanup`.
   `build.sh` does **not** require the minted `HERMES_VIRTUAL_KEY` (it doesn't
   exist until `start` mints it); `machines/hermes/start.sh` applies it
   post-mint and restarts the gateway. `litellm/preflight.sh` self-heals: if a
@@ -253,8 +254,8 @@ generically by `just` (no service names in `lib/`/`justfile` beyond the
 | `services/<svc>/build.sh` | `just build` (offline, no Docker) | render configs, gen/rotate secrets (incl. own `<SVC>_DB_PASSWORD`), fetch sources |
 | `services/<svc>/preflight.sh` | `just start`, before main `up` | host script; may `dc up -d <dep>` + mint/edit `.stack/` (e.g. LiteLLM keys) |
 | `services/<svc>/prestart.sh` | `just start`, after preflight | host script; validate env/config, **fail loud** before the heavy `up` |
-| **provisioner** in `compose.yaml` (`com.stack.role=provisioner`) | Compose `up` (`depends_on`) | one-shot; idempotent role/db/extension |
-| `services/<svc>/poststart.sh` | after main `up -d` | needs something serving (e.g. honcho dim-fix) |
+| **provisioner**(s) in `compose.yaml` (`com.stack.role=provisioner`) | Compose `up` (`depends_on`) | one-shot; idempotent role/db/extension/schema. A service may chain >1 (honcho: `honcho-provision` role/db → `honcho-schema` migrate+`configure_embeddings`@1024) |
+| `services/<svc>/poststart.sh` | after main `up -d` | generic hook for steps needing something serving — **currently unused** (honcho's old dim-fix is now the pre-start `honcho-schema` one-shot) |
 | `machines/<m>/start.sh` | after stack up | bring up the VM/agent |
 
 **Container vs host-script principle:** if a step must be ordered *within*
@@ -272,10 +273,19 @@ provisions, `poststart` finalizes.
 2. **Honcho config = `config.toml` + env; precedence `env > .env >
    config.toml`.** Templates carry placeholders only; the DB URI + virtual
    key come from compose env. No secret in any committed/rendered config.
-3. **Voyage embeddings:** keep Honcho `embedding.dimensions_mode = "never"`.
-   pgvector columns must be `vector(1024)`; the fresh-DB fix runs
+3. **Honcho embedding dim is set BEFORE honcho-api serves, by the
+   `honcho-schema` one-shot — never resized post-start.** Alembic hardcodes
+   `vector(1536)`; `honcho-schema` runs `provision_db.py` then
    `scripts/configure_embeddings.py --yes` via the **in-image venv**
-   (`/app/.venv/bin/python`), **NOT `uv run`** (it rebuilds in-image + fails).
+   (`/app/.venv/bin/python`, **NOT `uv run`** — it rebuilds in-image + fails),
+   which ALTERs the **empty** `documents`/`message_embeddings` columns to
+   `EMBEDDING_VECTOR_DIMENSIONS` (set to `1024` as env on
+   honcho-api/deriver/schema; honcho settings precedence is env > TOML, and
+   the startup validator refuses to serve unless the physical dim matches).
+   `configure_embeddings.py` **refuses a populated column** and **no-ops when
+   the dim already matches** → safe & idempotent every start. In-place resize
+   of a *populated* column is out of scope (needs an out-of-band re-embed
+   migration), never automated.
 4. **A PG rebuild / fresh project wipes the LiteLLM DB → stored virtual keys
    become invalid.** `services/litellm/preflight.sh` self-heals: it tries
    `/key/update` and, if the key isn't valid in this DB, re-mints and
@@ -324,9 +334,12 @@ provisions, `poststart` finalizes.
     last-wins) and ships a `provision.sql` + a one-shot
     **`com.stack.role=provisioner`** Compose service (`depends_on: pg
     healthy`; the real service `depends_on: <svc>-provision
-    service_completed_successfully`). Provisioners run **every `just start`**,
+    service_completed_successfully`). A service may chain more than one (e.g.
+    honcho: `honcho-provision` role/db/ext → `honcho-schema`
+    migrate+`configure_embeddings`). Provisioners run **every `just start`**,
     idempotently (role-if-absent + `ALTER ROLE … PASSWORD` re-sync + db-if-
-    absent + `CREATE EXTENSION IF NOT EXISTS`) — a no-op on existing data.
+    absent + `CREATE EXTENSION IF NOT EXISTS`; psql retried ×30 for the
+    fresh-pg readiness race) — a no-op on existing data.
     `STACK_AUTO_REMOVE_PROVISIONERS=true` reaps their `Exited (0)` containers.
 13. **`pg` extension binaries / `shared_preload_libraries` / global
     `ALTER SYSTEM` are the surgical bucket — never a provisioner's job.**

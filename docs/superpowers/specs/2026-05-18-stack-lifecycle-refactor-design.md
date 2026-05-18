@@ -467,3 +467,56 @@ shared-stack" op, distinct from the everyday additive provisioner path.
 - `just start-cleanup` only ever removes **this** project's exited
   provisioners.
 - No regression to honcho / litellm / hindsight / agentmemory / cliproxyapi.
+
+## As-built (2026-05-18, validated end-to-end — supersedes the design where noted)
+
+Implemented on `worktree-feat+stack-lifecycle-refactor`, validated in
+**isolated** projects only. The design's live-stack verification (Delivery
+steps 3–6 "verify on the live stack") proved unsafe from a worktree — a fresh
+git worktree lacks the gitignored rendered `config.runtime.*`, so
+`litellm/preflight.sh`'s `dc up -d litellm` (with `.stack/` symlinked to live
+secrets) recreated **live `aitools-litellm-1`** against a missing config and
+broke it twice; restored from the main checkout, **zero data loss**. All
+verification was moved to isolated `H_FRESH` (fresh volumes) + `H_CLONE`
+(clone of live `aitools_pg-data`) — see the plan's "Incident & deviation" +
+"Verification venue". The live `aitools` stack was never mutated by the
+final design.
+
+**Deltas from the design (all proven by isolated H_FRESH + H_CLONE green):**
+
+1. **Honcho dim handling — Delivery step 5 (`poststart.sh`) is REVERSED;
+   `services/honcho/poststart.sh` is DELETED.** A single blanket `dc up -d`
+   aborts on fresh-DB honcho-api crash-looping the 1536/1024 validator
+   *before* any poststart runs, and a post-start column resize is unsafe.
+   Replaced with **two compose-ordered one-shots**: `honcho-provision`
+   (pgvector image: role/db/`vector`) → **`honcho-schema`** (honcho image:
+   `provision_db.py` [alembic, hardcoded `vector(1536)`] then
+   `configure_embeddings.py --yes`, which ALTERs the **empty** embedding
+   columns to `EMBEDDING_VECTOR_DIMENSIONS`). Ordering: `pg(healthy) →
+   honcho-provision → honcho-schema → honcho-api/honcho-deriver`.
+   `configure_embeddings.py` **refuses** a populated column and **no-ops**
+   when the dim already matches → safe, idempotent every start, never
+   corrupts vectors. This **resolves** the design's "eliminate the dim-fix"
+   *non-goal* — properly, before honcho-api serves.
+2. **`EMBEDDING_VECTOR_DIMENSIONS=1024`** env on `honcho-api`/`honcho-deriver`
+   /`honcho-schema` (honcho settings precedence is env > TOML; the startup
+   validator refuses to serve unless the physical column dim equals it).
+   In-place resize of a *populated* column stays out of scope (custom
+   re-embed migration).
+3. **Provisioner command** is `sh -c` with **`$$SVC_DB_PASSWORD`** (compose
+   was interpolating a single-`$` form to blank, silently clearing role
+   passwords — caught only by a real-auth signal, not the design's env-file
+   compare) **and a psql retry ×30 / 2 s** (the first provisioner to hit a
+   freshly-initialized pg can race `pg_isready`).
+4. **Validation venue & signals:** all gates run in `H_FRESH`/`H_CLONE`
+   (isolated), never `aitools`; pass criteria are the *real* signals
+   (provisioner log clean, `pg_authid.rolpassword IS NOT NULL`, service
+   container `healthy`) — the original `psql -h 127.0.0.1` probe was a false
+   positive (the image trusts that connection).
+
+**Validated outcome (both venues, `aitools` 9 containers untouched):**
+`start complete`; `documents.embedding` + `message_embeddings.embedding` =
+`vector(1024)`; all `*-provision` + `honcho-schema` exit 0; `rolpassword`
+set for litellm/honcho/hindsight; litellm + honcho-api `healthy` with **0**
+dim-validator errors; H_CLONE = safe no-op on the populated clone
+("already at dim 1024, skipping ALTER").

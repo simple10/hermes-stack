@@ -48,7 +48,9 @@ services:
     healthcheck:
       # 127.0.0.1 (not localhost): BusyBox wget resolves localhost to ::1
       # first and nginx only listens on IPv4 :80 -> false "unhealthy".
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      # /healthz carries no https-redirect guard (loopback has no XFP), so
+      # the force-HTTPS rule never bounces the healthcheck.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
       interval: 10s
       timeout: 6s
       start_period: 10s

@@ -118,4 +118,21 @@ cat > "$PREFS_DIR/preferences.json" <<'EOF'
 EOF
 chown -R "$RUN_AS" "$PREFS_DIR"
 
+# The agentmemory viewer (web UI, REST port + 2 = 3113) is hardcoded upstream
+# to listen on 127.0.0.1 only (anti-DNS-rebinding; it's the admin surface).
+# To reach it from outside the container WITHOUT host-publishing (our OrbStack
+# DNS model), run an in-container socat that listens on the container's
+# EXTERNAL ip:3113 and forwards to the viewer's 127.0.0.1:3113. Binding the
+# external IP (not 0.0.0.0) lets it coexist with the loopback listener.
+# Host-allowlist for the orb DNS name is granted via VIEWER_ALLOWED_HOSTS
+# (set in compose from COMPOSE_PROJECT_NAME).
+CIP="$(getent hosts "$(cat /etc/hostname)" 2>/dev/null | awk '{print $1; exit}')"
+[ -n "$CIP" ] || CIP="$(hostname -i 2>/dev/null | awk '{print $1}')"
+if [ -n "$CIP" ]; then
+  socat "TCP-LISTEN:3113,bind=${CIP},fork,reuseaddr" TCP:127.0.0.1:3113 &
+  echo "agentmemory: viewer forwarder ${CIP}:3113 -> 127.0.0.1:3113 (web UI)"
+else
+  echo "agentmemory: WARN could not resolve container IP — viewer stays loopback-only"
+fi
+
 exec gosu "$RUN_AS" agentmemory "$@"

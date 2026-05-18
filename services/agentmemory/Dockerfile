@@ -18,7 +18,7 @@ ARG III_VERSION=0.11.2
 ARG III_SDK_VERSION=0.11.2
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssl ca-certificates tini gosu curl \
+ && apt-get install -y --no-install-recommends openssl ca-certificates tini gosu curl socat \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=iii /app/iii /usr/local/bin/iii

@@ -182,3 +182,54 @@ matching Honcho). Hindsight's local default (`BAAI/bge-small-en-v1.5`,
   proxy on the minted `HINDSIGHT_VIRTUAL_KEY`).
 - Stack with `hindsight` absent from `COMPOSE_PROFILES` is unaffected.
 - No regression to Honcho / LiteLLM / agentmemory.
+
+## As-built (resolved 2026-05-17, verified end-to-end)
+
+The design's env block (`HINDSIGHT_API_LLM_PROVIDER=litellm` + a single
+`HINDSIGHT_API_LITELLM_API_BASE`/`HINDSIGHT_API_LLM_API_KEY`) **does not
+work** against an auth-enforcing LiteLLM proxy with custom aliases. Two
+root causes were found (v0.6.2 source + LiteLLM boundary tests) and fixed
+in `services/hindsight/compose.yaml`:
+
+- **LLM:** `provider=litellm` passes the bare alias to the litellm **SDK**,
+  which can't resolve a provider for a custom proxy alias →
+  `litellm.BadRequestError: LLM Provider NOT provided`. Fix: use Hindsight's
+  documented OpenAI-compatible path — `HINDSIGHT_API_LLM_PROVIDER=openai`
+  + `HINDSIGHT_API_LLM_BASE_URL=http://litellm:4000` (alias passed through;
+  LiteLLM resolves it).
+- **Embeddings (fatal):** the `litellm` embeddings provider POSTs to
+  `<base>/embeddings` and sends `Authorization` **only if its own key is
+  set**. It reads `HINDSIGHT_API_EMBEDDINGS_LITELLM_API_KEY`, falling back
+  to the shared `HINDSIGHT_API_LITELLM_API_KEY` — it never reads
+  `HINDSIGHT_API_LLM_API_KEY`. Missing → LiteLLM 401 → startup abort. Fix:
+  add `HINDSIGHT_API_LITELLM_API_KEY=${HINDSIGHT_VIRTUAL_KEY}` (and keep
+  `HINDSIGHT_API_LITELLM_API_BASE` for the embeddings provider).
+
+As-built env: `LLM_PROVIDER=openai`, `LLM_BASE_URL=http://litellm:4000`,
+`LLM_API_KEY=${HINDSIGHT_VIRTUAL_KEY}`, `LLM_MODEL=glm-4.7-flash`;
+`EMBEDDINGS_PROVIDER=litellm`, `EMBEDDINGS_LITELLM_MODEL=voyage-4-lite`,
+`LITELLM_API_BASE=http://litellm:4000`,
+`LITELLM_API_KEY=${HINDSIGHT_VIRTUAL_KEY}`.
+
+Risk outcomes:
+1. **Auto-migration — RESOLVED, no contingency.** Hindsight runs its own
+   schema/migration on startup (`hindsight_api.migrations`: creates tables,
+   alters vector dims, builds HNSW). No `lib/hindsight-postup.sh` / staged
+   step needed.
+2. **Voyage 1024-dim — RESOLVED.** Hindsight detected `dim: 1024` and
+   migrated pgvector columns 384→1024 + HNSW indexes automatically.
+3. **glm structured output — RESOLVED in practice.** Startup *verification
+   probe* logs a benign WARNING (`empty message content,
+   finish_reason=length`) because GLM-4.7-flash is a reasoning model and the
+   probe uses a tiny token budget; **real** retain/reflect (max_tokens=4096)
+   works — `retain`→`recall` round-trips, `usage` ~5k tokens. Model left as
+   `glm-4.7-flash` (mirrors Honcho); switch to `grok-4.3` only if the
+   cosmetic startup warning is undesirable.
+
+Verified: container `healthy`; `retain`→`recall` round-trip HTTP 200;
+LiteLLM SpendLogs under the `hindsight` key show `openrouter/z-ai/
+glm-4.7-flash` (LLM) + `voyage/voyage-4-lite` (embeddings) only — gotcha #5
+honored. Surgical (non-destructive) verify used: `hindsight` role/db seeded
+into the live pg, only the `hindsight` container started (no stack
+teardown). The plan's Task 9 volume-recreate remains valid for clean-room
+installs.

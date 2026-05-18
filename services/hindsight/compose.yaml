@@ -46,6 +46,15 @@ services:
       HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL: ${HINDSIGHT_EMBEDDING_MODEL}
       HINDSIGHT_API_LITELLM_API_BASE: http://litellm:4000
       HINDSIGHT_API_LITELLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
+      # Reranker (HINDSIGHT_RERANKER lever: local|litellm|rrf). The litellm-*
+      # vars are inert unless provider=litellm; with it, reranking runs via
+      # LiteLLM (/v1/rerank -> Voyage) instead of the in-process ~600 MB Torch
+      # cross-encoder, and shows up in SpendLogs. local = best quality;
+      # rrf = no model/API/RAM, weakest.
+      HINDSIGHT_API_RERANKER_PROVIDER: ${HINDSIGHT_RERANKER}
+      HINDSIGHT_API_RERANKER_LITELLM_API_BASE: http://litellm:4000
+      HINDSIGHT_API_RERANKER_LITELLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
+      HINDSIGHT_API_RERANKER_LITELLM_MODEL: ${HINDSIGHT_RERANK_MODEL}
     depends_on:
       pg: { condition: service_healthy }
       litellm: { condition: service_healthy }

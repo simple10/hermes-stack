@@ -71,9 +71,16 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   `vectorize-io/hindsight` all-in-one image **pinned by digest**. Profile
   `[hindsight]`; `depends_on` pg/litellm so `COMPOSE_PROFILES=hindsight`
   auto-pulls them. LLM via cliproxy through LiteLLM (`HINDSIGHT_MODEL`
-  lever) + Voyage embeddings (`HINDSIGHT_EMBEDDING_MODEL`). API `:8888`,
-  Control-Plane UI `:9999`. Seeds its own pg role/db (fresh
-  `<project>_pg-data` volume only). Not yet wired into Hermes.
+  lever) + Voyage embeddings (`HINDSIGHT_EMBEDDING_MODEL`). **Reranker** is
+  the `HINDSIGHT_RERANKER` lever: `local` (in-process Torch cross-encoder,
+  best quality, ~600 MB RAM), `litellm` (rerank via LiteLLM →
+  `HINDSIGHT_RERANK_MODEL`, default the `rerank-voyage` model →
+  Voyage `rerank-2.5-lite`; **no Torch, ~300 MB saved**, observable in
+  SpendLogs, small per-rerank API cost), or `rrf` (rank-fusion; no
+  model/API/RAM, weakest). `.stack.env.example` defaults `local`; the lever
+  switches with no git edits. API `:8888`, Control-Plane UI `:9999`. Seeds
+  its own pg role/db (fresh `<project>_pg-data` volume only). Not yet wired
+  into Hermes.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
   via the prebuilt `eceasy/cli-proxy-api` image **pinned by tag**
   (`CLIPROXY_VERSION`, bump deliberately). Profile `[cliproxyapi]`;

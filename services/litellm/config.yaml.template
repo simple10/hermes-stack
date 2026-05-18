@@ -40,6 +40,16 @@ model_list:
       model: voyage/voyage-law-2
       api_key: os.environ/VOYAGE_API_KEY
 
+  # Voyage reranker — lets hindsight's reranker run via LiteLLM (/v1/rerank)
+  # instead of an in-process Torch cross-encoder (~600 MB). Observable in
+  # SpendLogs like everything else. HINDSIGHT_RERANK_MODEL points here.
+  - model_name: rerank-voyage
+    litellm_params:
+      model: voyage/rerank-2.5-lite
+      api_key: os.environ/VOYAGE_API_KEY
+    model_info:
+      mode: rerank
+
   # ChatGPT Subscription Models - via codex
   # These models require auth.json in ~/.config/litellm/chatgpt/ or whatever CHATGPT_TOKEN_DIR is set to
   # On first usage, if auth.json is not present, litellm prints the device pairing code in the logs

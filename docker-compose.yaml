@@ -12,3 +12,4 @@ include:
   - services/litellm/compose.yaml
   - services/honcho/compose.yaml
   - services/agentmemory/compose.yaml
+  - services/hindsight/compose.yaml

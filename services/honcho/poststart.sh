@@ -14,11 +14,11 @@
 # Called by `just start` AFTER litellm keys are minted and BEFORE the final
 # settle up -d.
 set -euo pipefail
-. "$(dirname "${BASH_SOURCE[0]}")/stacklib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 source "$STACK_DIR/.env"
 echo "${COMPOSE_PROFILES:-}" | grep -qw honcho || { log "honcho not in profiles — skip postup"; exit 0; }
-HPW="$(env_get "$STACK_DIR/db.generated.env" HONCHO_DB_PASSWORD)"
-[ -n "$HPW" ] || die "HONCHO_DB_PASSWORD missing in .stack/db.generated.env"
+HPW="$(env_get "$STACK_DIR/honcho.generated.env" HONCHO_DB_PASSWORD)"
+[ -n "$HPW" ] || die "HONCHO_DB_PASSWORD missing in .stack/honcho.generated.env"
 export COMPOSE_ENV_FILES="$(compose_env_files)"
 
 # pgq SQL -> result. Runs psql INSIDE this stack's pg container (project-scoped).

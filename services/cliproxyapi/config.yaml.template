@@ -1,0 +1,51 @@
+# CLIProxyAPI config TEMPLATE (committed). build.sh renders this ->
+# config.runtime.yaml (gitignored, bind-mounted) and substitutes the
+# __CLIPROXY_*__ placeholders with values from .stack/.env. CLIProxyAPI reads
+# api-keys / management secret from this FILE (no env support), so the rendered
+# runtime file holds them — that file is gitignored (the only hard rule is no
+# secret in git; runtime config is gitignored, the documented exception to the
+# env-only guideline). Trimmed from upstream config.example.yaml to essentials.
+
+# Bind all interfaces so the API is reachable on the Compose project network
+# / OrbStack DNS (cliproxyapi.<project>.orb.local:8317).
+host: ""
+port: 8317
+
+tls:
+  enable: false
+
+# OAuth tokens for the wrapped CLIs (ChatGPT/Codex, Gemini, Claude, Grok) land
+# here after a one-time login via the management panel. Mounted as a
+# project-scoped volume so they survive recreates.
+auth-dir: "/root/.cli-proxy-api"
+
+# Client API key(s) required to call the proxy. Injected from .stack/.env.
+api-keys:
+  - "__CLIPROXY_API_KEY__"
+
+# Management API + bundled control panel (used to OAuth-login the upstream
+# providers). Key required for every management call; allow-remote:true so the
+# panel is reachable from the host via OrbStack DNS (still key-gated, and only
+# on OrbStack's local network — never LAN/public).
+remote-management:
+  allow-remote: true
+  secret-key: "__CLIPROXY_MGMT_KEY__"
+  disable-control-panel: false
+
+debug: false
+logging-to-file: false          # stdout -> captured by Docker/OrbStack logs
+usage-statistics-enabled: false
+request-retry: 3
+
+quota-exceeded:
+  switch-project: true
+  switch-preview-model: true
+
+routing:
+  strategy: "round-robin"
+
+# Upstream providers (ChatGPT/Codex, Gemini, Claude, Grok) are added by
+# OAuth login through the management panel after first start — their tokens
+# persist in auth-dir. Static api-key providers (gemini-api-key,
+# codex-api-key, claude-api-key, openai-compatibility, ...) can be added here
+# later if desired; see upstream config.example.yaml.

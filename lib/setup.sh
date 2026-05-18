@@ -38,6 +38,12 @@ env_upsert "$ENVF" LITELLM_MASTER_KEY "$mk"
 ams="$(env_get "$ENVF" AGENTMEMORY_SECRET)"
 [ -n "$ams" ] || { ams="$(openssl rand -hex 32)"; log "generated AGENTMEMORY_SECRET"; }
 env_upsert "$ENVF" AGENTMEMORY_SECRET "$ams"
+cpk="$(env_get "$ENVF" CLIPROXY_API_KEY)"
+[ -n "$cpk" ] || { cpk="sk-$(openssl rand -hex 24)"; log "generated CLIPROXY_API_KEY"; }
+env_upsert "$ENVF" CLIPROXY_API_KEY "$cpk"
+cpm="$(env_get "$ENVF" CLIPROXY_MANAGEMENT_KEY)"
+[ -n "$cpm" ] || { cpm="$(openssl rand -hex 32)"; log "generated CLIPROXY_MANAGEMENT_KEY"; }
+env_upsert "$ENVF" CLIPROXY_MANAGEMENT_KEY "$cpm"
 
 read -rp "Enable Docker profiles (comma list) [litellm,honcho]: " prof
 env_upsert "$ENVF" COMPOSE_PROFILES "${prof:-litellm,honcho}"

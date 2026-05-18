@@ -1,0 +1,46 @@
+# cliproxyapi (router-for-me/CLIProxyAPI) — wraps ChatGPT Codex / Gemini CLI /
+# Claude Code / Grok OAuth subscriptions as an OpenAI/Gemini/Claude/Codex-
+# compatible API. profile [cliproxyapi]. Project-scoped (no container_name /
+# no shared net). STANDALONE — it is an ALTERNATIVE upstream proxy, NOT a
+# LiteLLM consumer (no pg/redis/litellm deps, no virtual key).
+#
+# Intended use: a streaming-correct OpenAI/Codex (responses) proxy for the
+# ChatGPT subscription, until LiteLLM fixes its non-streaming chatgpt/* bug
+# (gotcha #5). Not yet wired into Hermes — that + the one-time provider OAuth
+# login (via the management panel) are the documented follow-up.
+#
+# Published image PINNED to a release tag (gotcha #6); bump via CLIPROXY_VERSION
+# in .stack/.env. Config is FILE-based (no env support) -> rendered by
+# build.sh into the gitignored config.runtime.yaml with secrets injected.
+# OAuth tokens persist in the project-scoped cliproxyapi-auth volume.
+# API + management panel on :8317; reachable at
+# cliproxyapi.<project>.orb.local:8317 (not host-published).
+
+services:
+  cliproxyapi:
+    image: eceasy/cli-proxy-api:${CLIPROXY_VERSION:-v7.1.11}
+    profiles: [cliproxyapi]
+    restart: unless-stopped
+    expose:
+      - "8317"
+    volumes:
+      - ./config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
+      - cliproxyapi-auth:/root/.cli-proxy-api
+    healthcheck:
+      # alpine image has busybox wget (no curl) whose exit codes differ from
+      # GNU wget. /v1/models is api-key-gated (401 -> busybox exit 1, can't
+      # distinguish "up" from "down"). GET / is the unauthenticated control-
+      # panel landing -> 200 when the server is up, so busybox wget exits 0.
+      test: ["CMD-SHELL", "wget -q -O /dev/null -T3 http://127.0.0.1:8317/ 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  cliproxyapi-auth:

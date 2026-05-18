@@ -19,6 +19,7 @@ services:
       pg: { condition: service_healthy }
       redis: { condition: service_healthy }
       litellm: { condition: service_healthy }
+      honcho-provision: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)\""]
       interval: 10s
@@ -41,3 +42,23 @@ services:
       pg: { condition: service_healthy }
       redis: { condition: service_healthy }
       honcho-api: { condition: service_healthy }
+      honcho-provision: { condition: service_completed_successfully }
+
+  # One-shot DB provisioner (replaces honcho's 00-init.sql lines + vector ext).
+  honcho-provision:
+    image: pgvector/pgvector:pg18
+    profiles: [honcho]
+    restart: "no"
+    labels:
+      com.stack.role: provisioner
+    environment:
+      PGPASSWORD: ${POSTGRES_SUPERPASS}
+      SVC_DB_PASSWORD: ${HONCHO_DB_PASSWORD}
+    depends_on:
+      pg: { condition: service_healthy }
+    volumes:
+      - ./provision.sql:/provision.sql:ro
+    command:
+      - sh
+      - -c
+      - 'psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$SVC_DB_PASSWORD" -f /provision.sql'

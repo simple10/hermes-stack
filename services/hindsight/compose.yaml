@@ -8,9 +8,9 @@
 # them (Honcho pattern). LLM + embeddings route through LiteLLM on the
 # (unrestricted) HINDSIGHT_VIRTUAL_KEY; the actual models are the
 # HINDSIGHT_MODEL / HINDSIGHT_EMBEDDING_MODEL levers in .stack/.env
-# (default cliproxy/* + voyage). The hindsight DB role/db is seeded by
-# services/postgres/pg-init/00-init.sql (FRESH pg volume only — adding this
-# to a live stack needs the <project>_pg-data volume recreated).
+# (default cliproxy/* + voyage). The hindsight DB role/db/`vector` ext is
+# provisioned idempotently every start by the hindsight-provision one-shot
+# (depends_on: pg healthy) — additive, no <project>_pg-data recreate needed.
 #
 # All-in-one image runs the API (:8888, health GET /health) + the
 # Control-Plane Web UI (:9999). Not published to the host; reachable on the
@@ -58,6 +58,7 @@ services:
     depends_on:
       pg: { condition: service_healthy }
       litellm: { condition: service_healthy }
+      hindsight-provision: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8888/health || exit 1"]
       interval: 10s
@@ -69,3 +70,22 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # One-shot DB provisioner (replaces hindsight's 00-init.sql lines + vector).
+  hindsight-provision:
+    image: pgvector/pgvector:pg18
+    profiles: [hindsight]
+    restart: "no"
+    labels:
+      com.stack.role: provisioner
+    environment:
+      PGPASSWORD: ${POSTGRES_SUPERPASS}
+      SVC_DB_PASSWORD: ${HINDSIGHT_DB_PASSWORD}
+    depends_on:
+      pg: { condition: service_healthy }
+    volumes:
+      - ./provision.sql:/provision.sql:ro
+    command:
+      - sh
+      - -c
+      - 'psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$SVC_DB_PASSWORD" -f /provision.sql'

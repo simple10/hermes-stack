@@ -27,3 +27,14 @@ sed -e "s|__HONCHO_DERIVER_MODEL__|${HONCHO_DERIVER_MODEL:-cliproxy/gpt-5.4-mini
     -e "s|__HONCHO_EMBEDDING_MODEL__|${HONCHO_EMBEDDING_MODEL:-voyage-4-lite}|g" \
     "$D/config.toml.template" > "$D/config.runtime.toml"
 log "honcho: rendered config.runtime.toml (models: deriver=${HONCHO_DERIVER_MODEL:-} dialectic=${HONCHO_DIALECTIC_MODEL:-} embed=${HONCHO_EMBEDDING_MODEL:-})"
+
+# Own HONCHO_DB_PASSWORD (decentralized). Read existing live value first;
+# mirror into db.generated.env until step 6 (honcho-postup still reads it
+# until Task 5 repoints it).
+GEN="$STACK_DIR/honcho.generated.env"
+pw="$(env_get "$GEN" HONCHO_DB_PASSWORD)"
+[ -n "$pw" ] || pw="$(env_get "$STACK_DIR/db.generated.env" HONCHO_DB_PASSWORD)"
+[ -n "$pw" ] || pw="$(openssl rand -hex 16)"
+env_upsert "$GEN" HONCHO_DB_PASSWORD "$pw"
+env_upsert "$STACK_DIR/db.generated.env" HONCHO_DB_PASSWORD "$pw"
+log "honcho: HONCHO_DB_PASSWORD owned in honcho.generated.env (mirrored)"

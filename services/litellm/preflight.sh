@@ -14,6 +14,12 @@ ENVF="$STACK_DIR/.env"
 GEN="$STACK_DIR/litellm.generated.env"
 export COMPOSE_ENV_FILES="$(compose_env_files)"
 
+# Bring up litellm ourselves (the justfile no longer does this for us).
+# `pg` is already running from the start pipeline's backends-first step;
+# from the Task 3 provisioner edge this also pulls litellm-provision.
+log "litellm/preflight: dc up -d litellm"
+dc up -d litellm
+
 # Wait for litellm to actually serve (exec fails until the container runs).
 ok=
 for i in $(seq 1 48); do

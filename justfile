@@ -32,34 +32,47 @@ build:
      done; \
      echo "build complete"
 
-# Staged bring-up. ORDER IS LOAD-BEARING:
-#   pg+redis -> litellm -> mint virtual keys -> honcho-postup (brings honcho up
-#   correctly for fresh DB) -> settle up -d -> machines.
-# Do NOT add a blanket `up -d` before honcho-postup: on a fresh DB honcho-api
-# crash-loops on the 1536/1024 validator until postup applies the dim fix.
+# Staged bring-up. ORDER: backends -> per-profile preflight.sh (+ env
+# recompute) -> per-profile prestart.sh -> dc up -d (provisioners ordered by
+# depends_on) -> per-profile poststart.sh -> machines -> optional cleanup.
+# Generic: no service names except the pg/redis backend substrate.
 start:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
      export COMPOSE_ENV_FILES="$(compose_env_files)"; \
-     echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}  COMPOSE_ENV_FILES=$COMPOSE_ENV_FILES"; \
+     echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}"; \
      dc up -d pg redis; \
-     if echo "${COMPOSE_PROFILES:-}" | grep -qw litellm || \
-        echo "${COMPOSE_PROFILES:-}" | grep -qw honcho || \
-        echo "${COMPOSE_PROFILES:-}" | grep -qw hindsight; then \
-       dc up -d litellm; \
-       bash "{{root}}/services/litellm/start.sh"; \
-       export COMPOSE_ENV_FILES="$(compose_env_files)"; \
-     fi; \
-     if echo "${COMPOSE_PROFILES:-}" | grep -qw honcho; then \
-       bash "{{root}}/lib/honcho-postup.sh"; \
-     fi; \
+     for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
+       [ -n "$p" ] && [ -x "{{root}}/services/$p/preflight.sh" ] && \
+         { echo "== preflight: $p =="; bash "{{root}}/services/$p/preflight.sh"; }; \
+     done; \
+     export COMPOSE_ENV_FILES="$(compose_env_files)"; \
+     for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
+       [ -n "$p" ] && [ -x "{{root}}/services/$p/prestart.sh" ] && \
+         { echo "== prestart: $p =="; bash "{{root}}/services/$p/prestart.sh"; }; \
+     done; \
      dc up -d; \
+     for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
+       [ -n "$p" ] && [ -x "{{root}}/services/$p/poststart.sh" ] && \
+         { echo "== poststart: $p =="; bash "{{root}}/services/$p/poststart.sh"; }; \
+     done; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
        [ -n "$mch" ] && [ -x "{{root}}/machines/$mch/start.sh" ] && \
          bash "{{root}}/machines/$mch/start.sh" "$mch"; \
      done; \
+     if [ "${STACK_AUTO_REMOVE_PROVISIONERS:-false}" = "true" ]; then just start-cleanup; fi; \
      echo "start complete"
+
+# Remove this project's exited provisioner containers (multi-stack-safe).
+start-cleanup:
+    @set -a; source "{{lib}}"; set +a; \
+     ids="$(docker ps -aq \
+       --filter "label=com.stack.role=provisioner" \
+       --filter "label=com.docker.compose.project=$(stack_project)" \
+       --filter "status=exited")"; \
+     if [ -n "$ids" ]; then docker rm $ids || true; fi; \
+     echo "start-cleanup done"
 
 # Stop containers (keep volumes). Machines left running.
 stop:

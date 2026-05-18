@@ -14,7 +14,7 @@ OrbStack exposes each at `<service>.<project>.orb.local`.
 hermes-stack/
   docker-compose.yaml          # NO name: (project = COMPOSE_PROJECT_NAME); include: services/*
   justfile                     # setup | build | start | stop | status | logs | reconfigure
-  lib/                         # stacklib.sh (helpers incl. dc/stack_project), setup.sh, honcho-postup.sh
+  lib/                         # stacklib.sh (helpers incl. dc/stack_project), setup.sh
   .stack/                      # ALL runtime secrets — gitignored (created by `just setup`)
     .env  *.generated.env  .config-hashes/
   .stack.env.example           # documents .stack/.env (the only hand-edited file)
@@ -184,20 +184,27 @@ just start     # staged bring-up + (first run) ChatGPT device-pair, then everyth
   the `justfile` always passes it via `COMPOSE_ENV_FILES`, so a bare
   `docker compose up` from the repo root fails fast by design (guards against
   accidental parent-`.env` walking when running a single `services/<svc>`).
-- **`just build`** runs `services/postgres/build.sh` (generate/reuse DB
-  passwords), each enabled service's `build.sh` (render `*.template` →
-  gitignored `*.runtime.*`; clone+pin `services/honcho/_source`), and each
+- **`just build`** runs `services/postgres/build.sh` (generate/reuse only
+  `POSTGRES_SUPERPASS`), each enabled service's `build.sh` (render
+  `*.template` → gitignored `*.runtime.*`; clone+pin `services/honcho/_source`;
+  **own its `<SVC>_DB_PASSWORD`** in `.stack/<svc>.generated.env`), and each
   `STACK_MACHINES` machine's `build.sh`. A changed committed template only
   **warns** (`just reconfigure <svc>` to re-render) — no migration system.
-- **`just start`** is **staged** (order is load-bearing): pg+redis → litellm
-  → `services/litellm/start.sh` mints one **unrestricted** virtual key per
-  `LITELLM_VIRTKEYS` alias into `.stack/litellm.generated.env` →
-  `lib/honcho-postup.sh` brings Honcho up correctly (fresh DB → applies the
-  1024 dim fix) → settle `up -d` → `machines/<m>/start.sh` last. `build.sh`
-  does **not** require the minted `HERMES_VIRTUAL_KEY` (it doesn't exist until
-  `start` mints it); `machines/hermes/start.sh` applies it post-mint and
-  restarts the gateway. `litellm/start.sh` self-heals: if a stored key isn't
-  valid in this DB (fresh/rotated/recreated), it re-mints instead of failing.
+- **`just start`** is a **generic pipeline** (no service names beyond the
+  `pg redis` backend substrate): `dc up -d pg redis` → each enabled
+  profile's `services/<p>/preflight.sh` (e.g. `litellm/preflight.sh` brings
+  up litellm + mints one **unrestricted** virtual key per `LITELLM_VIRTKEYS`
+  alias into `.stack/litellm.generated.env`) → recompute `COMPOSE_ENV_FILES`
+  → each `services/<p>/prestart.sh` (fail-loud config validation) →
+  `dc up -d` (each service's one-shot **provisioner**(s) create its
+  role/db/extension/schema, ordered by `depends_on` — e.g. honcho:
+  `pg → honcho-provision → honcho-schema → honcho-api`) → each
+  `services/<p>/poststart.sh` (generic hook; currently unused) →
+  `machines/<m>/start.sh` → optional `just start-cleanup`.
+  `build.sh` does **not** require the minted `HERMES_VIRTUAL_KEY` (it doesn't
+  exist until `start` mints it); `machines/hermes/start.sh` applies it
+  post-mint and restarts the gateway. `litellm/preflight.sh` self-heals: if a
+  stored key isn't valid in this DB (fresh/rotated/recreated), it re-mints.
 
 First-ever start with no ChatGPT token: LiteLLM prints a device-pair code in
 `docker logs $(docker compose -p <project> ps -q litellm)` (visit the URL,
@@ -229,11 +236,35 @@ recreating from scratch is the supported model — `just stop` then remove the
 |--------|--------|
 | `just setup` | interactive `.stack/.env` generator |
 | `just build` | render configs, fetch pinned sources, gen DB pw, provision machines |
-| `just start` | staged bring-up (mint keys → honcho → machines) |
+| `just start` | generic pipeline: backends → `preflight.sh` (mint) → `prestart.sh` (validate) → `up -d` (provisioners) → `poststart.sh` → machines |
+| `just start-cleanup` | remove this project's exited provisioner containers (auto-run by `start` when `STACK_AUTO_REMOVE_PROVISIONERS=true`) |
 | `just stop` | `docker compose down --remove-orphans` (volumes kept; machines left running) |
 | `just status` | this project's container health + `orb list` |
 | `just logs [machine]` | `orb logs <machine>` (OrbStack Logs tab = the console) |
 | `just reconfigure <svc>` | back up + re-render a service's runtime config from its template |
+
+## Service lifecycle
+
+Each service owns its lifecycle via per-service artifacts, discovered
+generically by `just` (no service names in `lib/`/`justfile` beyond the
+`pg redis` backend substrate):
+
+| Artifact | Phase | One job |
+|---|---|---|
+| `services/<svc>/build.sh` | `just build` (offline, no Docker) | render configs, gen/rotate secrets (incl. own `<SVC>_DB_PASSWORD`), fetch sources |
+| `services/<svc>/preflight.sh` | `just start`, before main `up` | host script; may `dc up -d <dep>` + mint/edit `.stack/` (e.g. LiteLLM keys) |
+| `services/<svc>/prestart.sh` | `just start`, after preflight | host script; validate env/config, **fail loud** before the heavy `up` |
+| **provisioner**(s) in `compose.yaml` (`com.stack.role=provisioner`) | Compose `up` (`depends_on`) | one-shot; idempotent role/db/extension/schema. A service may chain >1 (honcho: `honcho-provision` role/db → `honcho-schema` migrate+`configure_embeddings`@1024) |
+| `services/<svc>/poststart.sh` | after main `up -d` | generic hook for steps needing something serving — **currently unused** (honcho's old dim-fix is now the pre-start `honcho-schema` one-shot) |
+| `machines/<m>/start.sh` | after stack up | bring up the VM/agent |
+
+**Container vs host-script principle:** if a step must be ordered *within*
+the main `up` relative to a service → it's a **provisioner container** (only
+Compose `depends_on: service_completed_successfully` can express that gate);
+if it must run *before* the main `up` to produce inputs the up consumes
+(minted keys in env) → it's a **host `preflight.sh`**. `build` produces,
+`preflight` prepares inputs, `prestart` validates, the provisioner
+provisions, `poststart` finalizes.
 
 ## Gotchas (hard-won — keep encoded)
 
@@ -242,12 +273,21 @@ recreating from scratch is the supported model — `just stop` then remove the
 2. **Honcho config = `config.toml` + env; precedence `env > .env >
    config.toml`.** Templates carry placeholders only; the DB URI + virtual
    key come from compose env. No secret in any committed/rendered config.
-3. **Voyage embeddings:** keep Honcho `embedding.dimensions_mode = "never"`.
-   pgvector columns must be `vector(1024)`; the fresh-DB fix runs
+3. **Honcho embedding dim is set BEFORE honcho-api serves, by the
+   `honcho-schema` one-shot — never resized post-start.** Alembic hardcodes
+   `vector(1536)`; `honcho-schema` runs `provision_db.py` then
    `scripts/configure_embeddings.py --yes` via the **in-image venv**
-   (`/app/.venv/bin/python`), **NOT `uv run`** (it rebuilds in-image + fails).
+   (`/app/.venv/bin/python`, **NOT `uv run`** — it rebuilds in-image + fails),
+   which ALTERs the **empty** `documents`/`message_embeddings` columns to
+   `EMBEDDING_VECTOR_DIMENSIONS` (set to `1024` as env on
+   honcho-api/deriver/schema; honcho settings precedence is env > TOML, and
+   the startup validator refuses to serve unless the physical dim matches).
+   `configure_embeddings.py` **refuses a populated column** and **no-ops when
+   the dim already matches** → safe & idempotent every start. In-place resize
+   of a *populated* column is out of scope (needs an out-of-band re-embed
+   migration), never automated.
 4. **A PG rebuild / fresh project wipes the LiteLLM DB → stored virtual keys
-   become invalid.** `services/litellm/start.sh` self-heals: it tries
+   become invalid.** `services/litellm/preflight.sh` self-heals: it tries
    `/key/update` and, if the key isn't valid in this DB, re-mints and
    overwrites `.stack/litellm.generated.env`. So recreating a stack from
    scratch just works on the next `just start`.
@@ -287,6 +327,28 @@ recreating from scratch is the supported model — `just stop` then remove the
     config still comes from env. (Verified empirically: the generic
     `iiidev/iii` image alone 404s every `/agentmemory/*` route — agentmemory
     must be npm-installed into the image, hence the build.)
+12. **Adding a pg-using service is purely additive — no `00-init.sql`, no
+    volume recreate.** Each service owns its `<SVC>_DB_PASSWORD` in
+    `.stack/<svc>.generated.env` (its `build.sh`, read-or-gen — never
+    blind-regen, which would shadow a live pw via `*.generated.env`
+    last-wins) and ships a `provision.sql` + a one-shot
+    **`com.stack.role=provisioner`** Compose service (`depends_on: pg
+    healthy`; the real service `depends_on: <svc>-provision
+    service_completed_successfully`). A service may chain more than one (e.g.
+    honcho: `honcho-provision` role/db/ext → `honcho-schema`
+    migrate+`configure_embeddings`). Provisioners run **every `just start`**,
+    idempotently (role-if-absent + `ALTER ROLE … PASSWORD` re-sync + db-if-
+    absent + `CREATE EXTENSION IF NOT EXISTS`; psql retried ×30 for the
+    fresh-pg readiness race) — a no-op on existing data.
+    `STACK_AUTO_REMOVE_PROVISIONERS=true` reaps their `Exited (0)` containers.
+13. **`pg` extension binaries / `shared_preload_libraries` / global
+    `ALTER SYSTEM` are the surgical bucket — never a provisioner's job.**
+    Postgres data lives in the `<project>_pg-data` volume, independent of
+    image/config: changing the git-tracked `services/postgres/` definition
+    and `dc up -d pg` recreates **only** the `pg` container, re-mounting the
+    volume — **non-destructive within a PG major** (a major-version bump is
+    the only data-destructive change; out of scope). In-database
+    role/db/extension stays in the per-service provisioner.
 
 ## Secrets model
 
@@ -309,8 +371,9 @@ read theirs via Compose `environment:`; Hermes via `machines/hermes`.
 | File | Contents | Owner |
 |------|----------|-------|
 | `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, `AGENTMEMORY_SECRET`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `HERMES_MEMORY`, model levers (`STACK_LLM_MODEL*` + per-service `*_MODEL`), `LITELLM_VIRTKEYS` | you (`just setup`) |
-| `.stack/db.generated.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD`, `HINDSIGHT_DB_PASSWORD` | `services/postgres/build.sh` |
-| `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values | `services/litellm/start.sh` |
+| `.stack/db.generated.env` | `POSTGRES_SUPERPASS` only (per-service DB passwords are decentralized) | `services/postgres/build.sh` |
+| `.stack/<svc>.generated.env` | that service's `<SVC>_DB_PASSWORD` (e.g. `litellm`, `honcho`, `hindsight`) | `services/<svc>/build.sh` |
+| `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values (+ `LITELLM_DB_PASSWORD`) | `services/litellm/{build,preflight}.sh` |
 | `services/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |
 
 `*.generated.env` is machine-owned — never hand-edit (it gets

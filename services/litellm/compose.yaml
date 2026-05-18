@@ -27,8 +27,31 @@ services:
     volumes:
       - ./config.runtime.yaml:/app/config.yaml:ro
       - ./chatgpt:/root/.codex/chatgpt
+    depends_on:
+      litellm-provision: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=3).status==200 else 1)\""]
       interval: 10s
       timeout: 6s
       retries: 18
+
+  # One-shot DB provisioner (replaces this service's 00-init.sql lines).
+  # sh -c so the CONTAINER expands $SVC_DB_PASSWORD (compose-interpolated in
+  # the environment: map); a bare command would pass psql the literal token.
+  litellm-provision:
+    image: pgvector/pgvector:pg18
+    profiles: [litellm]
+    restart: "no"
+    labels:
+      com.stack.role: provisioner
+    environment:
+      PGPASSWORD: ${POSTGRES_SUPERPASS}
+      SVC_DB_PASSWORD: ${LITELLM_DB_PASSWORD}
+    depends_on:
+      pg: { condition: service_healthy }
+    volumes:
+      - ./provision.sql:/provision.sql:ro
+    command:
+      - sh
+      - -c
+      - 'for i in $$(seq 1 30); do psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$$SVC_DB_PASSWORD" -f /provision.sql && exit 0; echo "pg not ready (attempt $$i/30), retrying"; sleep 2; done; echo "provision: pg unreachable after retries"; exit 1'

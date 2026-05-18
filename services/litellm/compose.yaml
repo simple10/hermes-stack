@@ -15,9 +15,13 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY}
       REDIS_URL: redis://aitools-redis:6379
+      # ChatGPT Subscription Proxy Config
+      # LiteLLM supports using ChatGPT subscriptions over the codex endpoints by acting as a codex client.
+      # See chatgpt/README.md
+      # CHATGPT_DEFAULT_INSTRUCTIONS must be set to at least a single space to prevent LiteLLM from injecting the codex system prompt.
+      CHATGPT_DEFAULT_INSTRUCTIONS: " "
       CHATGPT_TOKEN_DIR: /root/.codex/chatgpt
       CHATGPT_AUTH_FILE: auth.json
-      CHATGPT_DEFAULT_INSTRUCTIONS: " "
     volumes:
       - ./config.runtime.yaml:/app/config.yaml:ro
       - ./chatgpt:/root/.codex/chatgpt

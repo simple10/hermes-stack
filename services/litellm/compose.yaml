@@ -54,4 +54,4 @@ services:
     command:
       - sh
       - -c
-      - 'psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$$SVC_DB_PASSWORD" -f /provision.sql'
+      - 'for i in $$(seq 1 30); do psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$$SVC_DB_PASSWORD" -f /provision.sql && exit 0; echo "pg not ready (attempt $$i/30), retrying"; sleep 2; done; echo "provision: pg unreachable after retries"; exit 1'

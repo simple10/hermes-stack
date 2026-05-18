@@ -22,6 +22,7 @@ hermes-stack/
     postgres/  redis/          # always-on backends (no profile); project-scoped volumes
     litellm/                   # profile [litellm]; *.template -> *.runtime.* (bind-mounted)
     honcho/                    # profile [honcho]; built from pinned _source/ (gitignored)
+    agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
   machines/
     hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
   docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
@@ -43,6 +44,15 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
 - **honcho** — services `honcho-api` + `honcho-deriver`, built from a
   **pinned** `plastic-labs/honcho` commit. Profile `[honcho]`;
   `depends_on` pg/redis/litellm so `COMPOSE_PROFILES=honcho` auto-pulls them.
+- **agentmemory** — service `agentmemory`, persistent agent memory. Profile
+  `[agentmemory]`; standalone (file-based state on its own volume — no
+  pg/redis). No published image: built from a Dockerfile that npm-installs
+  the **pinned, maintainer-tested** `@agentmemory/agentmemory` release
+  (`AGENTMEMORY_VERSION`, bump for newer "stable" code) + the pinned iii
+  engine binary. LLM + embeddings routed through LiteLLM. Config split:
+  committed non-secret `services/agentmemory/.env` (deviations from upstream
+  defaults documented inline) + secrets via Compose `environment:` from
+  `.stack/.env`. Not yet wired into Hermes (next step).
 - **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,
@@ -170,6 +180,13 @@ recreating from scratch is the supported model — `just stop` then remove the
     substitute with `COMPOSE_PROJECT_NAME` (e.g. `litellm.aitools.orb.local`).
     Within a stack, containers reach each other by plain service name on
     `<project>_default`.
+11. **agentmemory ≥0.9.18 runs an interactive first-run wizard** whenever
+    `~/.agentmemory/preferences.json` is missing — on a non-TTY it
+    `process.exit(0)`s, so the container crash-loops. The entrypoint
+    pre-seeds `preferences.json` ("onboarding complete") to skip it; provider
+    config still comes from env. (Verified empirically: the generic
+    `iiidev/iii` image alone 404s every `/agentmemory/*` route — agentmemory
+    must be npm-installed into the image, hence the build.)
 
 ## Secrets model
 
@@ -178,7 +195,7 @@ is ever tracked in git.
 
 | File | Contents | Owner |
 |------|----------|-------|
-| `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `LITELLM_VIRTKEY_*_MODELS` declarations | you (`just setup`) |
+| `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, `AGENTMEMORY_SECRET`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `LITELLM_VIRTKEY_*_MODELS` declarations | you (`just setup`) |
 | `.stack/db.generated.env` | `POSTGRES_SUPERPASS`, `HONCHO_DB_PASSWORD`, `LITELLM_DB_PASSWORD` | `services/postgres/build.sh` |
 | `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values | `services/litellm/start.sh` |
 | `services/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |
@@ -188,3 +205,9 @@ truncated/rewritten). Service config ships as committed `*.template`; the
 rendered `*.runtime.*` is gitignored and bind-mounted. `git check-ignore`
 covers `.stack/`, `**/*.generated.env`, `**/_source/`, `**/*.runtime.*`, and
 `services/litellm/chatgpt/auth.json`.
+
+`services/agentmemory/.env` is the one **committed** `.env` — it is
+**non-secret by design** (base URLs, model names, feature flags only;
+deviations from upstream defaults documented inline). agentmemory's secrets
+(`OPENAI_API_KEY` = a LiteLLM virtual key, `AGENTMEMORY_SECRET`) are NOT in
+it — they're injected via the Compose `environment:` block from `.stack/.env`.

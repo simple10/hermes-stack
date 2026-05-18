@@ -14,4 +14,12 @@ else
   env_upsert "$DBENV" HONCHO_DB_PASSWORD  "$(openssl rand -hex 16)"
   env_upsert "$DBENV" LITELLM_DB_PASSWORD "$(openssl rand -hex 16)"
 fi
+# Per-service passwords added after initial generation must also appear when
+# REUSING an older db.generated.env. env_upsert is idempotent; only generate
+# when absent so existing honcho/litellm pw keep matching the pg volume.
+# NOTE: the matching pg role/db is only seeded when 00-init.sql runs (fresh
+# <project>_pg-data volume) — adding a service to a LIVE stack requires
+# recreating that volume.
+[ -n "$(env_get "$DBENV" HINDSIGHT_DB_PASSWORD)" ] || \
+  env_upsert "$DBENV" HINDSIGHT_DB_PASSWORD "$(openssl rand -hex 16)"
 # No shared external network — Compose creates a per-project default network.

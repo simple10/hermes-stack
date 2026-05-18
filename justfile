@@ -45,7 +45,8 @@ start:
      echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}  COMPOSE_ENV_FILES=$COMPOSE_ENV_FILES"; \
      dc up -d pg redis; \
      if echo "${COMPOSE_PROFILES:-}" | grep -qw litellm || \
-        echo "${COMPOSE_PROFILES:-}" | grep -qw honcho; then \
+        echo "${COMPOSE_PROFILES:-}" | grep -qw honcho || \
+        echo "${COMPOSE_PROFILES:-}" | grep -qw hindsight; then \
        dc up -d litellm; \
        bash "{{root}}/services/litellm/start.sh"; \
        export COMPOSE_ENV_FILES="$(compose_env_files)"; \

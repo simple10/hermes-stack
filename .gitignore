@@ -17,3 +17,4 @@ services/litellm/chatgpt/auth.json
 .bak/
 
 .claude/*.lock
+.claude/worktrees

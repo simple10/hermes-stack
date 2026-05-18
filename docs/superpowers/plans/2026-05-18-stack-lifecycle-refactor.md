@@ -41,6 +41,10 @@ lcr_harness() {
   for s in litellm honcho cliproxyapi; do for e in yaml toml; do
     f="$MAIN/services/$s/config.runtime.$e"; [ -f "$f" ] && cp "$f" "/tmp/$name/services/$s/"
   done; done
+  # gitignored runtime artifact (gotcha #9) — without it litellm blocks on the
+  # ChatGPT device-code prompt and never goes healthy in an isolated project.
+  [ -d "$MAIN/services/litellm/chatgpt" ] && \
+    cp -R "$MAIN/services/litellm/chatgpt" "/tmp/$name/services/litellm/chatgpt"
   mkdir -p "/tmp/$name/.stack"
   cp "$MAIN/.stack/.env" "/tmp/$name/.stack/.env"
   sed -i '' "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$name/" "/tmp/$name/.stack/.env"

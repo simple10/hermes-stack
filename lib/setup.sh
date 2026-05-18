@@ -21,6 +21,15 @@ ask() { # ask VAR PROMPT [secret]
 }
 
 log "hermes-stack setup -> $ENVF"
+
+# Per-stack identity. Containers/volumes/network are project-scoped and
+# OrbStack exposes services at <service>.<project>.orb.local. Use a DISTINCT
+# project name (and a distinct STACK_MACHINES name) per stack to run several
+# side by side.
+curproj="$(env_get "$ENVF" COMPOSE_PROJECT_NAME)"
+read -rp "Compose project name [${curproj:-aitools}]: " proj
+env_upsert "$ENVF" COMPOSE_PROJECT_NAME "${proj:-${curproj:-aitools}}"
+
 ask OPENROUTER_API_KEY "OpenRouter API key" secret
 ask VOYAGE_API_KEY     "Voyage API key" secret
 mk="$(env_get "$ENVF" LITELLM_MASTER_KEY)"

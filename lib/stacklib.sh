@@ -28,6 +28,14 @@ env_upsert() {
 # env_get FILE KEY — print value or empty.
 env_get() { grep "^${2}=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 
+# stack_project — Compose project name from .stack/.env (default "aitools").
+# This is THE per-stack identity: containers/volumes/network are project-scoped
+# and OrbStack exposes services at <service>.<project>.orb.local.
+stack_project() { local p; p="$(env_get "$STACK_DIR/.env" COMPOSE_PROJECT_NAME)"; printf '%s' "${p:-aitools}"; }
+
+# dc — `docker compose` bound to this stack's project + root file.
+dc() { docker compose -p "$(stack_project)" -f "$STACK_ROOT/docker-compose.yaml" "$@"; }
+
 # render_template TEMPLATE OUT SERVICE — copy TEMPLATE->OUT only if OUT missing;
 # record template hash; if OUT exists, drift-check (warn only).
 render_template() {

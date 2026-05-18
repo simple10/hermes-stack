@@ -1,5 +1,42 @@
 # Unified Stack Architecture Implementation Plan
 
+> **⚠️ v2 (multi-stack) supersedes the naming/DNS/volume/migration parts of
+> Tasks 1–7 below.** The unify-into-`services/`+`machines/`+`.stack/` design
+> was implemented & verified, then evolved to multi-stack. The **committed
+> code + `README.md` are authoritative**; Task code blocks below are kept for
+> history and are accurate EXCEPT where this v2 note overrides:
+>
+> - **Project name parameterized.** Root `docker-compose.yaml` has **no
+>   `name:`**; the project = `COMPOSE_PROJECT_NAME` in `.stack/.env` (default
+>   `aitools`). `lib/stacklib.sh` adds `stack_project()` + a `dc()` helper
+>   (`docker compose -p <project> -f docker-compose.yaml …`) used everywhere.
+> - **No `aitools-` prefix, no `container_name:`, no shared `aitools-net`.**
+>   Services are `pg`/`redis`/`litellm`/`honcho-api`/`honcho-deriver` on the
+>   Compose **default per-project network** (`<project>_default`); siblings
+>   resolve by service name (`pg:5432`, `redis:6379`, `http://litellm:4000`).
+> - **DNS is project-scoped:** `<service>.<project>.orb.local`. Decision 8 /
+>   gotcha 10's "bare DNS" is REVERSED — the project name is now a deliberate,
+>   stable value, so project-qualified DNS is correct and isolates stacks.
+>   Hermes config templates carry `__STACK_PROJECT__`, substituted with
+>   `COMPOSE_PROJECT_NAME` by `machines/hermes/{build,start}.sh`.
+> - **Recreate-from-scratch, NOT migrate.** Volumes are project-scoped
+>   (`<project>_pg-data`, …) with no explicit `name:`/reattach. The volume-
+>   reattach machinery, the C3 db-password-lockout guard, and Task 7's
+>   migration steps no longer apply (no data of value). `honcho-postup.sh`
+>   keeps only the fresh-DB 1024 path.
+> - **From-scratch ordering fixed.** `machines/hermes/build.sh` no longer
+>   hard-requires `HERMES_VIRTUAL_KEY` (it's minted during `start`, after
+>   build); `machines/hermes/start.sh` applies it post-mint.
+>   `services/litellm/start.sh` self-heals: on `/key/update` failure (key not
+>   in this DB) it re-mints.
+> - **Scripts are project-scoped:** `litellm/start.sh` and `honcho-postup.sh`
+>   talk to services via `dc exec`/`dc` (no fixed container names / shared
+>   network); the litellm admin key is read from the container's own env.
+>
+> Verified e2e under project `aitools`: `<svc>.aitools.orb.local` resolves
+> from the Hermes VM, fresh-DB → `vector(1024)`, Hermes brain (chatgpt/gpt-5.5
+> streaming) + Honcho chain green, `hermes-agent` untouched.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Collapse the two-compose-project layout (`aitools-backends` + `aitools-services`) plus standalone build scripts into one composable stack: a single root `docker-compose.yaml` (`include:` per service), Docker services under `services/`, Orb VMs under `machines/`, and ALL runtime secrets in one `.stack/` dir — driven by `just setup|build|start`.

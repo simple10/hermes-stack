@@ -1,8 +1,10 @@
-# hermes-stack — unified compose. Run via `just` (it sets COMPOSE_ENV_FILES;
-# .stack/.env is intentionally NOT auto-loaded — see plan decision 5).
-# Each services/<svc>/compose.yaml is self-contained (own network/volume decls)
-# so it also runs standalone: `cd services/<svc> && docker compose up`.
-name: hermes-stack
+# Unified compose. Run via `just` (sets COMPOSE_ENV_FILES + project name).
+# NO top-level `name:` — the project name comes from COMPOSE_PROJECT_NAME in
+# .stack/.env (default `aitools`), so multiple independent stacks can run
+# side by side. Each stack's services/volumes/network are project-scoped;
+# OrbStack exposes services at <service>.<project>.orb.local
+# (e.g. litellm.aitools.orb.local). Containers use Compose's default
+# per-project network — no shared external network.
 
 include:
   - services/postgres/compose.yaml

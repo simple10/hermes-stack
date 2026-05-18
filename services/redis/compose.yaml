@@ -1,25 +1,18 @@
-# redis. No profile => always-on shared backend. No `name:` (see postgres
-# note); reattachment is the explicit volumes.aitools-redis-data.name: below.
+# redis. No profile => always-on shared backend. Project-scoped (no
+# container_name / no shared network). Siblings reach it at host `redis`.
 
 services:
-  aitools-redis:
+  redis:
     image: redis:8.6.3
-    container_name: aitools-redis
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1"]
     volumes:
-      - aitools-redis-data:/data
+      - redis-data:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
-    networks: [aitools-net]
 
 volumes:
-  aitools-redis-data:
-    name: aitools-backends_aitools-redis-data   # <- literal from Task2/Step1
-
-networks:
-  aitools-net:
-    external: true
+  redis-data:

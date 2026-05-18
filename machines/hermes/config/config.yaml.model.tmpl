@@ -4,11 +4,11 @@
 # the real value; the scripts substitute ${HERMES_VIRTUAL_KEY} from
 # .stack/litellm.generated.env. Hermes streams, so the LiteLLM chatgpt/*
 # non-streaming bug does not bite (see README gotcha #5).
-# base_url uses the BARE OrbStack container DNS (project-independent) — NOT a
-# <container>.<project>.orb.local form, which breaks when the Compose project
-# name changes (it is now `hermes-stack`, not `aitools-services`).
+# base_url uses the project-scoped OrbStack DNS <service>.<project>.orb.local;
+# the scripts substitute __STACK_PROJECT__ with COMPOSE_PROJECT_NAME from
+# .stack/.env (default `aitools` -> litellm.aitools.orb.local).
 model:
   default: chatgpt/gpt-5.5
   provider: custom
-  base_url: http://aitools-litellm.orb.local:4000/v1
+  base_url: http://litellm.__STACK_PROJECT__.orb.local:4000/v1
   api_key: ${HERMES_VIRTUAL_KEY}

@@ -1,14 +1,13 @@
 # postgres (pgvector). No profile => always-on shared backend.
-# Volume pinned by explicit name to REATTACH existing data (no rebuild).
-# NOTE: no `name:` here — under root `include:` a per-file name: is ignored
-# (top-level project name `hermes-stack` wins). Reattachment is guaranteed
-# SOLELY by the explicit `volumes.aitools-pg-data.name:` below — DO NOT remove
-# or change that literal or existing Honcho/LiteLLM data is lost.
+# No container_name / no shared network: services are project-scoped, so
+# multiple stacks coexist. Sibling services reach this at host `pg` on the
+# Compose default network; Hermes reaches it at pg.<project>.orb.local.
+# Volume is project-scoped (default <project>_pg-data) — recreate-from-scratch
+# is fine (no data of value yet).
 
 services:
-  aitools-pg:
+  pg:
     image: pgvector/pgvector:pg18
-    container_name: aitools-pg
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -25,19 +24,13 @@ services:
           /seed/00-init.sql > /docker-entrypoint-initdb.d/00-init.sql && \
         exec docker-entrypoint.sh postgres -c max_connections=200
     volumes:
-      - aitools-pg-data:/var/lib/postgresql/data/
+      - pg-data:/var/lib/postgresql/data/
       - ./pg-init/00-init.sql:/seed/00-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 10
-    networks: [aitools-net]
 
 volumes:
-  aitools-pg-data:
-    name: aitools-backends_aitools-pg-data   # <- literal from Task2/Step1; reattach
-
-networks:
-  aitools-net:
-    external: true
+  pg-data:

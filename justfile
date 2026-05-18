@@ -1,6 +1,8 @@
 # hermes-stack — composable Docker services + Orb machines.
-# Secrets live ONLY in .stack/ (gitignored). .stack/.env is intentionally not
-# auto-loaded — recipes set COMPOSE_ENV_FILES explicitly (plan decision 5).
+# Secrets live ONLY in .stack/ (gitignored). The Compose PROJECT name comes
+# from COMPOSE_PROJECT_NAME in .stack/.env (default `aitools`) so multiple
+# independent stacks coexist; `dc` (from lib/stacklib.sh) binds every compose
+# call to that project. Services are reachable at <service>.<project>.orb.local.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
@@ -20,7 +22,7 @@ build:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      bash "{{root}}/services/postgres/build.sh"; \
-     source "{{root}}/.stack/.env"; \
+     set -a; source "{{root}}/.stack/.env"; set +a; \
      for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
        [ -x "{{root}}/services/$p/build.sh" ] && bash "{{root}}/services/$p/build.sh" || true; \
      done; \
@@ -32,27 +34,26 @@ build:
 
 # Staged bring-up. ORDER IS LOAD-BEARING:
 #   pg+redis -> litellm -> mint virtual keys -> honcho-postup (brings honcho up
-#   correctly for fresh OR reattached DB) -> settle up -d -> machines.
+#   correctly for fresh DB) -> settle up -d -> machines.
 # Do NOT add a blanket `up -d` before honcho-postup: on a fresh DB honcho-api
 # crash-loops on the 1536/1024 validator until postup applies the dim fix.
 start:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
+     set -a; source "{{root}}/.stack/.env"; set +a; \
      export COMPOSE_ENV_FILES="$(compose_env_files)"; \
-     source "{{root}}/.stack/.env"; \
-     echo "COMPOSE_ENV_FILES=$COMPOSE_ENV_FILES  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}"; \
-     DC="docker compose -f {{root}}/docker-compose.yaml"; \
-     $DC up -d aitools-pg aitools-redis; \
+     echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}  COMPOSE_ENV_FILES=$COMPOSE_ENV_FILES"; \
+     dc up -d pg redis; \
      if echo "${COMPOSE_PROFILES:-}" | grep -qw litellm || \
         echo "${COMPOSE_PROFILES:-}" | grep -qw honcho; then \
-       $DC up -d aitools-litellm; \
+       dc up -d litellm; \
        bash "{{root}}/services/litellm/start.sh"; \
        export COMPOSE_ENV_FILES="$(compose_env_files)"; \
      fi; \
      if echo "${COMPOSE_PROFILES:-}" | grep -qw honcho; then \
        bash "{{root}}/lib/honcho-postup.sh"; \
      fi; \
-     $DC up -d; \
+     dc up -d; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
        [ -n "$mch" ] && [ -x "{{root}}/machines/$mch/start.sh" ] && \
          bash "{{root}}/machines/$mch/start.sh" "$mch"; \
@@ -60,19 +61,20 @@ start:
      echo "start complete"
 
 # Stop containers (keep volumes). Machines left running.
-# Source the user's profiles so profiled services (litellm/honcho) are also
-# removed (`--profile "*"` is not valid for `down`).
 stop:
     @set -a; source "{{lib}}"; set +a; \
      export COMPOSE_ENV_FILES="$(compose_env_files)"; \
-     source "{{root}}/.stack/.env" 2>/dev/null || true; \
+     set -a; source "{{root}}/.stack/.env" 2>/dev/null || true; set +a; \
      export COMPOSE_PROFILES="${COMPOSE_PROFILES:-litellm,honcho}"; \
-     docker compose -f "{{root}}/docker-compose.yaml" down --remove-orphans
+     dc down --remove-orphans
 
-# Container health + machine list.
+# This stack's container health + machine list.
 status:
-    @docker ps --filter "name=aitools-" --format "table {{{{.Names}}}}\t{{{{.Status}}}}"; \
-     echo "---"; orb list 2>/dev/null || true
+    @set -a; source "{{lib}}"; set +a; \
+     p="$(stack_project)"; \
+     docker ps --filter "label=com.docker.compose.project=$p" \
+       --format "table {{{{.Names}}}}\t{{{{.Status}}}}"; \
+     echo "--- (project=$p) ---"; orb list 2>/dev/null || true
 
 # Tail an Orb machine console (OrbStack Logs tab = console).
 logs machine="hermes":

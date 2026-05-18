@@ -14,8 +14,13 @@ require_stack_env
 ENVF="$STACK_DIR/.env"
 GEN="$STACK_DIR/litellm.generated.env"
 source "$ENVF"
+# Key may not exist yet on a from-scratch run (it's minted by litellm during
+# `just start`, AFTER build). build.sh just provisions + writes config with
+# whatever is available; machines/hermes/start.sh (post-mint) applies the
+# real key and restarts the gateway. So: do NOT hard-require it here.
 HERMES_VIRTUAL_KEY="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
-[ -n "$HERMES_VIRTUAL_KEY" ] || die "HERMES_VIRTUAL_KEY missing — run \`just start\` (litellm mint) first."
+[ -n "$HERMES_VIRTUAL_KEY" ] || warn "HERMES_VIRTUAL_KEY not minted yet — start.sh will apply it post-mint"
+PROJ="$(stack_project)"   # wire this VM to <svc>.$PROJ.orb.local
 D="$(dirname "${BASH_SOURCE[0]}")"; REMOTE_USER="joe"
 m() { orb -m "$MACHINE" bash -lc "$1"; }
 
@@ -38,11 +43,12 @@ EOF
 printf '%s' "$ENV_PAYLOAD" | orb -m "$MACHINE" bash -lc \
   'mkdir -p ~/.hermes && umask 077 && cat > ~/.hermes/.env && chmod 600 ~/.hermes/.env && echo "~/.hermes/.env seeded"'
 
-log "4. write ~/.hermes/honcho.json"
-orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json' < "$D/config/honcho.json.tmpl"
+log "4. write ~/.hermes/honcho.json (honcho-api.$PROJ.orb.local)"
+sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/honcho.json.tmpl" \
+  | orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json'
 
-log "5. patch ~/.hermes/config.yaml model: block (key via stdin, never argv)"
-MODEL_BLOCK="$(sed "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
+log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
+MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
 printf '%s\n' "$MODEL_BLOCK" | orb -m "$MACHINE" bash -lc '
   set -e; umask 077; cfg=~/.hermes/config.yaml
   [ -f "$cfg" ] || hermes config init >/dev/null 2>&1 || touch "$cfg"

@@ -1,0 +1,45 @@
+# honcho-ui (offendingcommit/openconcho) — OPTIONAL web UI for Honcho.
+# profile [honcho-ui]. Project-scoped (no container_name / no shared net).
+# Built from PINNED source (services/honcho-ui/build.sh -> _source/, gotcha
+# #6) via the local multi-stage Dockerfile; no published image upstream.
+#
+# Stateless static SPA: NO database, NO secrets, NO model/env levers. All
+# connection config (Honcho base URL + optional token) is entered in-app and
+# kept in the browser's localStorage — this is OpenConcho's designed flow.
+#
+# depends_on honcho-api so COMPOSE_PROFILES=honcho-ui auto-pulls Honcho's API
+# (the Honcho pattern). Plain list = service_started only: the static server
+# must not block on (or crash-loop with) honcho-api health — the browser
+# connects to Honcho later, on demand. For the deriver/dream features also
+# enable the `honcho` profile.
+#
+# nginx listens on :80, so from the host it's a clean URL with NO port:
+#   http://honcho-ui.<project>.orb.local
+# In the app's first-run dialog enter the in-cluster Honcho URL:
+#   http://honcho-api.<project>.orb.local:8000
+# (Honcho runs USE_AUTH=false in this stack, so leave the token blank.)
+
+services:
+  honcho-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: [honcho-ui]
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - honcho-api
+    healthcheck:
+      # 127.0.0.1 (not localhost): BusyBox wget resolves localhost to ::1
+      # first and nginx only listens on IPv4 :80 -> false "unhealthy".
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 6s
+      start_period: 10s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

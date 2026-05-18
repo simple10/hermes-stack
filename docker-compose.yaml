@@ -11,6 +11,7 @@ include:
   - services/redis/compose.yaml
   - services/litellm/compose.yaml
   - services/honcho/compose.yaml
+  - services/honcho-ui/compose.yaml
   - services/agentmemory/compose.yaml
   - services/hindsight/compose.yaml
   - services/cliproxyapi/compose.yaml

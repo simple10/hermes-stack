@@ -22,6 +22,7 @@ hermes-stack/
     postgres/  redis/          # always-on backends (no profile); project-scoped volumes
     litellm/                   # profile [litellm]; *.template -> *.runtime.* (bind-mounted)
     honcho/                    # profile [honcho]; built from pinned _source/ (gitignored)
+    honcho-ui/                 # profile [honcho-ui]; OpenConcho SPA, pinned _source/ -> nginx
     agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
     hindsight/                 # profile [hindsight] (opt-in); pinned image; pg-backed; LiteLLM-wired
   machines/
@@ -49,6 +50,20 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   `HONCHO_*_MODEL`/`STACK_LLM_MODEL_FAST`, dialectic → `HONCHO_DIALECTIC_MODEL`/
   `STACK_LLM_MODEL`); embeddings Voyage. Models are `.stack/.env` levers
   injected into the rendered `config.runtime.toml` by `honcho/build.sh`.
+- **honcho-ui** — service `honcho-ui` (optional), the
+  [OpenConcho](https://github.com/offendingcommit/openconcho) web UI for
+  Honcho. No published image: a multi-stage Dockerfile pnpm-builds the static
+  SPA from a **pinned** `offendingcommit/openconcho` commit (gitignored
+  `_source/`, fetched by `honcho-ui/build.sh`) and serves it via nginx.
+  Profile `[honcho-ui]`; `depends_on honcho-api` so
+  `COMPOSE_PROFILES=honcho-ui` auto-pulls Honcho's API (enable the `honcho`
+  profile too for the deriver/dream features). Stateless — no DB, no secrets,
+  no model/env levers: it's a pure client whose connection config (Honcho base
+  URL + optional token) is entered in-app and kept in browser localStorage.
+  nginx listens on `:80`, so it's a clean **no-port** URL from the host:
+  `http://honcho-ui.<project>.orb.local`. On first run enter
+  `http://honcho-api.<project>.orb.local:8000` (Honcho runs `USE_AUTH=false`
+  here → leave the token blank).
 - **agentmemory** — service `agentmemory`, persistent agent memory. Profile
   `[agentmemory]`; standalone (file-based state on its own volume — no
   pg/redis). No published image: built from a Dockerfile that npm-installs

@@ -13,13 +13,13 @@ services:
       CACHE_URL: redis://redis:6379/0?suppress=true
       CACHE_ENABLED: "true"
       HONCHO_VIRTUAL_KEY: ${HONCHO_VIRTUAL_KEY}
-      # Authoritative over the TOML [embedding] VECTOR_DIMENSIONS (honcho's
-      # settings precedence is env > TOML). Makes a FRESH DB create
-      # documents/message_embeddings at Vector(1024) directly (models.py:
-      # Vector(_VECTOR_DIM=settings.EMBEDDING.VECTOR_DIMENSIONS), default
-      # 1536) → no 1536/1024 crash-loop → poststart dim-fix is a no-op.
-      # In-place dim changes on an existing table are out of scope (need a
-      # custom re-embed migration), not an automated step.
+      # The startup embedding-validator refuses to serve unless the physical
+      # pgvector column dim == EMBEDDING_VECTOR_DIMENSIONS. alembic hardcodes
+      # vector(1536); the honcho-schema one-shot (below) runs
+      # configure_embeddings.py --yes which ALTERs the EMPTY columns to 1024
+      # — this value must match so the validator passes. In-place resize of a
+      # POPULATED column is intentionally out of scope (configure_embeddings
+      # refuses it; needs an out-of-band re-embed migration).
       EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
       - ./config.runtime.toml:/app/config.toml:ro
@@ -28,6 +28,7 @@ services:
       redis: { condition: service_healthy }
       litellm: { condition: service_healthy }
       honcho-provision: { condition: service_completed_successfully }
+      honcho-schema: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)\""]
       interval: 10s
@@ -44,13 +45,13 @@ services:
       CACHE_URL: redis://redis:6379/0?suppress=true
       CACHE_ENABLED: "true"
       HONCHO_VIRTUAL_KEY: ${HONCHO_VIRTUAL_KEY}
-      # Authoritative over the TOML [embedding] VECTOR_DIMENSIONS (honcho's
-      # settings precedence is env > TOML). Makes a FRESH DB create
-      # documents/message_embeddings at Vector(1024) directly (models.py:
-      # Vector(_VECTOR_DIM=settings.EMBEDDING.VECTOR_DIMENSIONS), default
-      # 1536) → no 1536/1024 crash-loop → poststart dim-fix is a no-op.
-      # In-place dim changes on an existing table are out of scope (need a
-      # custom re-embed migration), not an automated step.
+      # The startup embedding-validator refuses to serve unless the physical
+      # pgvector column dim == EMBEDDING_VECTOR_DIMENSIONS. alembic hardcodes
+      # vector(1536); the honcho-schema one-shot (below) runs
+      # configure_embeddings.py --yes which ALTERs the EMPTY columns to 1024
+      # — this value must match so the validator passes. In-place resize of a
+      # POPULATED column is intentionally out of scope (configure_embeddings
+      # refuses it; needs an out-of-band re-embed migration).
       EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
       - ./config.runtime.toml:/app/config.toml:ro
@@ -59,6 +60,7 @@ services:
       redis: { condition: service_healthy }
       honcho-api: { condition: service_healthy }
       honcho-provision: { condition: service_completed_successfully }
+      honcho-schema: { condition: service_completed_successfully }
 
   # One-shot DB provisioner (replaces honcho's 00-init.sql lines + vector ext).
   honcho-provision:
@@ -78,3 +80,30 @@ services:
       - sh
       - -c
       - 'psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$$SVC_DB_PASSWORD" -f /provision.sql'
+
+  # One-shot schema/dim init (honcho image). Ordered AFTER honcho-provision
+  # (role/db) and BEFORE honcho-api/deriver. Runs alembic (provision_db.py,
+  # hardcoded vector(1536)) then configure_embeddings.py --yes which ALTERs
+  # the EMPTY embedding columns to EMBEDDING_VECTOR_DIMENSIONS (1024). Safe:
+  # configure_embeddings REFUSES to touch a POPULATED column and is a no-op
+  # when the schema already matches → idempotent on every start, never
+  # corrupts vectors (replaces the old unsafe post-start honcho-postup).
+  honcho-schema:
+    build: { context: ./_source, dockerfile: Dockerfile }
+    profiles: [honcho]
+    restart: "no"
+    labels:
+      com.stack.role: provisioner
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - '/app/.venv/bin/python scripts/provision_db.py && /app/.venv/bin/python scripts/configure_embeddings.py --yes'
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://honcho:${HONCHO_DB_PASSWORD}@pg:5432/honcho
+      CACHE_ENABLED: "false"
+      HONCHO_VIRTUAL_KEY: ${HONCHO_VIRTUAL_KEY}
+      EMBEDDING_VECTOR_DIMENSIONS: "1024"
+    volumes:
+      - ./config.runtime.toml:/app/config.toml:ro
+    depends_on:
+      pg: { condition: service_healthy }
+      honcho-provision: { condition: service_completed_successfully }

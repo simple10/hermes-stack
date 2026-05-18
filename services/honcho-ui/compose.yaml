@@ -3,9 +3,12 @@
 # Built from PINNED source (services/honcho-ui/build.sh -> _source/, gotcha
 # #6) via the local multi-stage Dockerfile; no published image upstream.
 #
-# Stateless static SPA: NO database, NO secrets, NO model/env levers. All
-# connection config (Honcho base URL + optional token) is entered in-app and
-# kept in the browser's localStorage — this is OpenConcho's designed flow.
+# Stateless static SPA: NO database, NO secrets, NO model/env levers.
+# Connection config lives in the browser's localStorage (OpenConcho's
+# designed flow). The base URL is build-time patched to this stack's
+# honcho-api (HONCHO_BASE_URL arg, project-scoped) so the first-run form
+# opens PRE-FILLED — the user only adds the token (if any) and clicks Save.
+# The token is NEVER injected (it stays a manual in-app field).
 #
 # depends_on honcho-api so COMPOSE_PROFILES=honcho-ui auto-pulls Honcho's API
 # (the Honcho pattern). Plain list = service_started only: the static server
@@ -15,15 +18,19 @@
 #
 # nginx listens on :80, so from the host it's a clean URL with NO port:
 #   http://honcho-ui.<project>.orb.local
-# In the app's first-run dialog enter the in-cluster Honcho URL:
-#   http://honcho-api.<project>.orb.local:8000
-# (Honcho runs USE_AUTH=false in this stack, so leave the token blank.)
+# The first-run form is pre-filled with http://honcho-api.<project>.orb.local
+# :8000 (Honcho runs USE_AUTH=false here, so the token can be left blank) —
+# just click Save.
 
 services:
   honcho-ui:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Project-scoped so multi-stack stays correct; default keeps a plain
+        # `docker compose build` working outside `just`.
+        HONCHO_BASE_URL: http://honcho-api.${COMPOSE_PROJECT_NAME:-aitools}.orb.local:8000
     profiles: [honcho-ui]
     restart: unless-stopped
     expose:

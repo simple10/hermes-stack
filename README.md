@@ -58,12 +58,16 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   Profile `[honcho-ui]`; `depends_on honcho-api` so
   `COMPOSE_PROFILES=honcho-ui` auto-pulls Honcho's API (enable the `honcho`
   profile too for the deriver/dream features). Stateless — no DB, no secrets,
-  no model/env levers: it's a pure client whose connection config (Honcho base
-  URL + optional token) is entered in-app and kept in browser localStorage.
-  nginx listens on `:80`, so it's a clean **no-port** URL from the host:
-  `http://honcho-ui.<project>.orb.local`. On first run enter
-  `http://honcho-api.<project>.orb.local:8000` (Honcho runs `USE_AUTH=false`
-  here → leave the token blank).
+  no model/env levers: connection config lives in browser localStorage
+  (OpenConcho's design). Upstream has no default-endpoint config, so the
+  Dockerfile build-time patches the hardcoded `http://localhost:8000` default
+  to this stack's honcho-api (`HONCHO_BASE_URL` build arg, project-scoped via
+  `COMPOSE_PROJECT_NAME`; `_source/` stays pristine). The **token is never
+  injected** — it remains a manual in-app field. nginx listens on `:80`, so
+  it's a clean **no-port** URL from the host:
+  `http://honcho-ui.<project>.orb.local`. The first-run form opens
+  **pre-filled** with `http://honcho-api.<project>.orb.local:8000` (Honcho
+  runs `USE_AUTH=false` here → token can stay blank) — just click Save.
 - **agentmemory** — service `agentmemory`, persistent agent memory. Profile
   `[agentmemory]`; standalone (file-based state on its own volume — no
   pg/redis). No published image: built from a Dockerfile that npm-installs

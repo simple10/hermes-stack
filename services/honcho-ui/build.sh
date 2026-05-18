@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# honcho-ui/build.sh — fetch pinned OpenConcho source (build context for the
-# multi-stage Dockerfile). Mirrors services/honcho/build.sh. No config to
-# render: OpenConcho is a static SPA whose connection config (Honcho base URL
-# + optional token) is entered in-app and kept in browser localStorage — there
-# are no build-time/runtime env levers and no secrets, so nothing is injected.
+# honcho-ui/build.sh — fetch pinned OpenConcho source, then build the image so
+# the per-project default-endpoint patch (HONCHO_BASE_URL build arg) is baked
+# deterministically by `just build` (multi-stack safe). _source/ stays
+# pristine/pinned; the only injected value is the default Honcho URL — no
+# secrets, and the in-app token field is never touched.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/honcho-ui"
@@ -19,3 +19,11 @@ else
   rm -rf "$D/_source/.git"
 fi
 log "honcho-ui: source ready (pin ${OPENCONCHO_PIN:0:12})"
+
+# Build the image now so COMPOSE_PROJECT_NAME -> HONCHO_BASE_URL is resolved
+# and the source patch is baked (compose only builds lazily on first `up`,
+# which would miss a project rename). Layer-cached: no-op if nothing changed.
+set -a; . "$STACK_DIR/.env"; set +a
+export COMPOSE_ENV_FILES="$(compose_env_files)"
+log "honcho-ui: building image (default endpoint -> http://honcho-api.$(stack_project).orb.local:8000)"
+dc build honcho-ui

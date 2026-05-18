@@ -43,9 +43,68 @@ EOF
 printf '%s' "$ENV_PAYLOAD" | orb -m "$MACHINE" bash -lc \
   'mkdir -p ~/.hermes && umask 077 && cat > ~/.hermes/.env && chmod 600 ~/.hermes/.env && echo "~/.hermes/.env seeded"'
 
-log "4. write ~/.hermes/honcho.json (honcho-api.$PROJ.orb.local)"
-sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/honcho.json.tmpl" \
-  | orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json'
+MEM="${HERMES_MEMORY:-honcho}"
+log "4. configure Hermes memory provider: $MEM"
+# Guardrail: the chosen provider's backing service should be in the stack.
+case "$MEM" in
+  honcho)      echo "${COMPOSE_PROFILES:-}" | grep -qw honcho      || warn "HERMES_MEMORY=honcho but 'honcho' not in COMPOSE_PROFILES";;
+  hindsight)   echo "${COMPOSE_PROFILES:-}" | grep -qw hindsight   || warn "HERMES_MEMORY=hindsight but 'hindsight' not in COMPOSE_PROFILES";;
+  agentmemory) echo "${COMPOSE_PROFILES:-}" | grep -qw agentmemory || warn "HERMES_MEMORY=agentmemory but 'agentmemory' not in COMPOSE_PROFILES";;
+esac
+case "$MEM" in
+  default)
+    log "memory: leaving Hermes' own default untouched (no provider override)"
+    ;;
+  honcho)
+    sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/honcho.json.tmpl" \
+      | orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json'
+    m 'hermes config set memory.provider honcho'
+    log "memory: honcho -> honcho-api.$PROJ.orb.local:8000"
+    ;;
+  hindsight)
+    sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/hindsight.config.json.tmpl" \
+      | orb -m "$MACHINE" bash -lc 'mkdir -p ~/.hermes/hindsight && cat > ~/.hermes/hindsight/config.json'
+    m 'hermes config set memory.provider hindsight'
+    log "memory: hindsight (local_external) -> hindsight.$PROJ.orb.local:8888 (plugin auto-installs hindsight-client on first session)"
+    ;;
+  holographic)
+    m 'hermes config set memory.provider holographic'
+    log "memory: holographic (fully local in the VM; no stack service)"
+    ;;
+  agentmemory)
+    # Third-party (NOT in Hermes' official memory-plugin set): the @agentmemory/mcp
+    # shim + memory.provider. Our agentmemory is containerized, so the shim must
+    # reach it at the orb DNS (NOT localhost:3111) — pass URL + secret via
+    # ~/.hermes/.env (step 3 rewrote that file fresh, so this append is
+    # idempotent across builds). npx/node must be on the VM PATH.
+    printf 'AGENTMEMORY_URL=http://agentmemory.%s.orb.local:3111\nAGENTMEMORY_SECRET=%s\n' \
+      "$PROJ" "${AGENTMEMORY_SECRET:-}" \
+      | orb -m "$MACHINE" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+    m 'hermes config set memory.provider agentmemory'
+    orb -m "$MACHINE" bash -lc '
+      set -e; cfg=~/.hermes/config.yaml
+      py=/home/joe/.hermes/hermes-agent/venv/bin/python; [ -x "$py" ] || py=python3
+      "$py" - "$cfg" <<PY
+import sys,os
+try:
+    import yaml
+except Exception:
+    raise SystemExit("pyyaml unavailable in venv; add mcp_servers.agentmemory to config.yaml manually")
+p=sys.argv[1]
+d=(yaml.safe_load(open(p)) if os.path.exists(p) else {}) or {}
+ms=d.get("mcp_servers") or {}
+ms["agentmemory"]={"command":"npx","args":["-y","@agentmemory/mcp"]}
+d["mcp_servers"]=ms
+mem=d.get("memory") or {}; mem["provider"]="agentmemory"; d["memory"]=mem
+yaml.safe_dump(d,open(p,"w"),sort_keys=False,default_flow_style=False)
+print("config.yaml: mcp_servers.agentmemory + memory.provider merged")
+PY'
+    log "memory: agentmemory (MCP shim -> agentmemory.$PROJ.orb.local:3111). Deeper 6-hook provider is manual: copy integrations/hermes -> ~/.hermes/plugins/agentmemory."
+    ;;
+  *)
+    die "unknown HERMES_MEMORY='$MEM' (use: default|honcho|hindsight|agentmemory|holographic)"
+    ;;
+esac
 
 log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
 HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env

@@ -55,6 +55,9 @@ if echo "$mch" | grep -qw hermes; then
   ask TELEGRAM_BOT_TOKEN     "Telegram bot token (blank ok)"
   ask TELEGRAM_ALLOWED_USERS "Telegram allowed user IDs (csv, blank ok)"
   ask TELEGRAM_HOME_CHANNEL  "Telegram home channel (blank ok)"
+  curmem="$(env_get "$ENVF" HERMES_MEMORY)"
+  read -rp "Hermes memory [default|honcho|hindsight|agentmemory|holographic] [${curmem:-honcho}]: " hmem
+  env_upsert "$ENVF" HERMES_MEMORY "${hmem:-${curmem:-honcho}}"
 fi
 
 # Seed model levers + virtual-key list from the example if absent. ORDER
@@ -68,7 +71,7 @@ for k in \
   HINDSIGHT_MODEL HINDSIGHT_EMBEDDING_MODEL \
   HONCHO_DERIVER_MODEL HONCHO_SUMMARY_MODEL HONCHO_DREAM_MODEL \
   HONCHO_DIALECTIC_MODEL HONCHO_EMBEDDING_MODEL \
-  LITELLM_VIRTKEYS; do
+  HERMES_MEMORY LITELLM_VIRTKEYS; do
   [ -n "$(env_get "$ENVF" "$k")" ] || env_upsert "$ENVF" "$k" "$(env_get "$EX" "$k")"
 done
 chmod 600 "$ENVF"

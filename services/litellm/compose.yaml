@@ -54,4 +54,4 @@ services:
     command:
       - sh
       - -c
-      - 'psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$SVC_DB_PASSWORD" -f /provision.sql'
+      - 'psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$$SVC_DB_PASSWORD" -f /provision.sql'

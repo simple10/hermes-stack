@@ -15,3 +15,5 @@ services/litellm/chatgpt/auth.json
 *.bak
 *.bak.*
 .bak/
+
+.claude/*.lock

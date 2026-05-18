@@ -23,6 +23,16 @@ services:
     restart: unless-stopped
     expose:
       - "8317"
+    # CLIProxyAPI hardcodes its OAuth callback to http://127.0.0.1:<port>
+    # (no config/env override exists). Bind the container's 8317 to the Mac's
+    # LOOPBACK so the callback resolves with zero per-login UI overrides — do
+    # the OAuth login + panel at http://127.0.0.1:${CLIPROXY_HOST_PORT}/
+    # management.html. Loopback-only (127.0.0.1, never 0.0.0.0/LAN); still
+    # api-key + management-key gated. orb DNS (cliproxyapi.<project>.orb.local
+    # :8317) keeps working for in-OrbStack clients. Change CLIPROXY_HOST_PORT
+    # in .stack/.env if 8317 is taken on the host.
+    ports:
+      - "127.0.0.1:${CLIPROXY_HOST_PORT:-8317}:8317"
     volumes:
       - ./config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
       - cliproxyapi-auth:/root/.cli-proxy-api

@@ -8,7 +8,54 @@
 
 **Tech Stack:** bash, just, Docker Compose v2 (5.1.2), Postgres 18 (`pgvector/pgvector:pg18`), `psql`, `yq`. Platform darwin.
 
-**Execution note:** Run inside the `feat/stack-lifecycle-refactor` worktree (created via `superpowers:using-git-worktrees` at execution start). Each task is independently verifiable and non-destructive on the live `aitools` stack; commit after each task.
+**Execution note:** Run inside the `feat/stack-lifecycle-refactor` worktree (created via `superpowers:using-git-worktrees` at execution start). Commit after each task.
+
+---
+
+## Incident & deviation (2026-05-18) — READ BEFORE EXECUTING
+
+**What happened:** The original plan verified Tasks 2–9 by running `dc` / `just start` from the worktree while `.stack/` was symlinked to the live `aitools` secrets. A fresh git worktree does **not** contain the gitignored rendered `config.runtime.*` (nor `_source/`). So `litellm/preflight.sh`'s `dc up -d litellm` targeted the **live shared stack** and recreated `aitools-litellm-1` with a bind-mount to a *missing* `config.runtime.yaml` (Docker created an empty dir) → live litellm went unhealthy twice. It was fully restored from the **main checkout** (stable paths); all `aitools` data/volumes intact, zero loss.
+
+**Deviation (user-approved):** the code edits (Tasks 1–7) are unchanged and sound. **ALL verification moves off the live `aitools` stack into isolated compose projects.** Never run `dc` / `just start` against project `aitools` from this worktree.
+
+## Verification venue (REVISED — applies to every task below)
+
+Wherever a task says "verify … on the live stack / `just start`", it means **in an isolated harness**, never `aitools`. Two harness builders (defined once, reused):
+
+- `H_FRESH` — fresh isolated project, empty volumes (from-scratch path).
+- `H_CLONE` — isolated project whose `pg-data` is a **clone of the live `aitools_pg-data`**, with the live `.stack/*.generated.env` copied in (so existing roles/dbs/passwords are present) — proves idempotent provisioner **no-op against real existing data** (spec S1 gate) with zero risk to the shared stack.
+
+```bash
+# lcr_harness <name> <clone|fresh>  -> sets up /tmp/<name> as an isolated tree
+lcr_harness() {
+  name="$1"; mode="$2"
+  WT="/Users/joe/Development/ai-tools/openclaw/hermes-stack/.claude/worktrees/feat+stack-lifecycle-refactor"
+  MAIN="/Users/joe/Development/ai-tools/openclaw/hermes-stack"
+  rm -rf "/tmp/$name"; mkdir -p "/tmp/$name"
+  # code = the worktree tree minus .git/.stack/_source-symlink artifacts
+  rsync -a --exclude .git --exclude .stack --exclude '.claude' "$WT/." "/tmp/$name/"
+  # _source + rendered configs from MAIN (avoid network re-clone; faithful)
+  for s in honcho honcho-ui cliproxyapi; do
+    [ -d "$MAIN/services/$s/_source" ] && cp -R "$MAIN/services/$s/_source" "/tmp/$name/services/$s/_source"
+  done
+  for s in litellm honcho cliproxyapi; do for e in yaml toml; do
+    f="$MAIN/services/$s/config.runtime.$e"; [ -f "$f" ] && cp "$f" "/tmp/$name/services/$s/"
+  done; done
+  mkdir -p "/tmp/$name/.stack"
+  cp "$MAIN/.stack/.env" "/tmp/$name/.stack/.env"
+  sed -i '' "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$name/" "/tmp/$name/.stack/.env"
+  sed -i '' "s/^STACK_MACHINES=.*/STACK_MACHINES=-/" "/tmp/$name/.stack/.env"   # no VMs in tests
+  if [ "$mode" = clone ]; then
+    cp "$MAIN"/.stack/*.generated.env "/tmp/$name/.stack/" 2>/dev/null || true
+    docker volume create "${name}_pg-data" >/dev/null
+    docker run --rm -v aitools_pg-data:/from:ro -v "${name}_pg-data":/to alpine \
+      sh -c 'cp -a /from/. /to/'   # hot copy; pg recovers WAL on start — fine for idempotency test
+  fi
+  echo "/tmp/$name ready ($mode)"
+}
+```
+
+Teardown after each use: `docker compose -p <name> down -v --remove-orphans; rm -rf /tmp/<name>`. Acceptance gates that the original plan ran "on the live stack" are now run inside `H_CLONE` (existing data) and/or `H_FRESH`; their pass/fail criteria are unchanged.
 
 ---
 
@@ -280,7 +327,15 @@ env_upsert "$STACK_DIR/db.generated.env" LITELLM_DB_PASSWORD "$pw"
 log "litellm: LITELLM_DB_PASSWORD owned in litellm.generated.env (mirrored)"
 ```
 
-- [ ] **Step 4: ACCEPTANCE GATE — prove the provisioner is a no-op on the live volume**
+- [ ] **Step 4: ACCEPTANCE GATE — prove the provisioner is a no-op on existing data**
+
+> **VENUE (REVISED):** this gate requires *existing* data and MUST NOT run
+> against `aitools`. It is executed in the consolidated **`H_CLONE`** harness
+> at **Task 9 Step 2** (clone of `aitools_pg-data`). At this point in
+> execution: apply the code edits + commit (Steps 1–3, 5 below), and treat
+> Step 4's pass/fail criteria as satisfied by Task 9 Step 2. The `aitools-`
+> commands in the snippet below are the *reference assertions*; Task 9 runs
+> them with the `lcrclone-` prefix. Do not execute the live snippet here.
 
 ```bash
 just build
@@ -448,7 +503,12 @@ log "hindsight: HINDSIGHT_DB_PASSWORD owned in hindsight.generated.env (mirrored
 
 Run: `chmod +x services/hindsight/build.sh`
 
-- [ ] **Step 7: Acceptance gate — no-op on live volume for both**
+- [ ] **Step 7: Acceptance gate — no-op on existing data for both**
+
+> **VENUE (REVISED):** same as Task 3 Step 4 — executed in **`H_CLONE`** at
+> **Task 9 Step 2**, not against `aitools`. Apply code edits + commit
+> (Steps 1–6); the snippet below is the reference assertion that Task 9
+> runs with the `lcrclone-` prefix.
 
 ```bash
 just build
@@ -646,92 +706,105 @@ git commit -m "docs: stack lifecycle taxonomy + provisioner/preflight gotchas"
 
 ---
 
-## Task 8: From-scratch validation (separate compose project)
+## Task 8: From-scratch validation — isolated `H_FRESH` project
 
-**Files:** none (validation only)
+**Files:** none (validation only). Never touches `aitools`.
 
-- [ ] **Step 1: Spin up a clean isolated project**
+- [ ] **Step 1: Build the fresh isolated harness + bring it up**
 
 ```bash
-cp .stack/.env /tmp/scratch.env
-sed -i '' 's/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=lcscratch/' /tmp/scratch.env
-rm -rf /tmp/lcscratch && cp -R . /tmp/lcscratch
-rm -rf /tmp/lcscratch/.stack /tmp/lcscratch/.git
-mkdir -p /tmp/lcscratch/.stack && cp /tmp/scratch.env /tmp/lcscratch/.stack/.env
-cd /tmp/lcscratch && just build && just start
+source <(sed -n '/^lcr_harness()/,/^}/p' docs/superpowers/plans/2026-05-18-stack-lifecycle-refactor.md)
+lcr_harness lcrfresh fresh
+rm -f /tmp/lcrfresh/.stack/*.generated.env   # truly fresh: no prior passwords
+cd /tmp/lcrfresh && just build && just start
 ```
-Note: `cp -R .` also copies `services/*/_source` (gitignored, ~19M honcho) — this is intended: `honcho/build.sh` **reuses** an existing `_source` (no network re-clone, faster). `.git` is removed so the scratch tree isn't a confusing second worktree. Fresh `COMPOSE_PROJECT_NAME=lcscratch` ⇒ fresh volumes ⇒ a true from-scratch DB.
-Expected: `just build` generates `.stack/{litellm,honcho,hindsight}.generated.env` (+ `db.generated.env` superpass) with **fresh random** DB passwords (no prior values in the scratch `.stack`); `just start` → backends → `== preflight: litellm ==` mints → `== prestart: litellm ==` passes → `dc up -d` (each `*-provision` runs, exits 0; services start) → `== poststart: honcho ==` (fresh DB → applies the dim fix) → all services `healthy`. No `00-init.sql`.
+Expected: `just build` generates fresh-random `.stack/{litellm,honcho,hindsight}.generated.env` + `db.generated.env` superpass; `just start` → `dc up -d pg redis` → `== preflight: litellm ==` (mints) → `== prestart: litellm ==` (passes) → `dc up -d` (each `*-provision` exits 0; services start with fresh role/db) → `== poststart: honcho ==` (fresh DB → dim fix applied) → all services `healthy`. No `00-init.sql`.
 
-- [ ] **Step 2: Assert provisioning + negative prestart**
+- [ ] **Step 2: Assert provisioning + REAL-AUTH + negative prestart**
 
 ```bash
-docker exec lcscratch-pg-1 psql -U postgres -tAc \
+docker exec lcrfresh-pg-1 psql -U postgres -tAc \
  "select string_agg(datname,',' order by datname) from pg_database \
   where datname in ('honcho','litellm','hindsight');"
-cd /tmp/lcscratch && cp services/litellm/config.runtime.yaml /tmp/lcs.cfg.bak && \
+for s in litellm honcho hindsight; do
+  RPW="$(set -a; . /tmp/lcrfresh/.stack/$s.generated.env; eval echo \$$(echo $s|tr a-z A-Z)_DB_PASSWORD)"
+  docker exec -e PGPASSWORD="$RPW" lcrfresh-pg-1 psql -h 127.0.0.1 -U "$s" -d "$s" -tAc 'select 1' \
+    && echo "$s AUTH ok" || echo "$s AUTH-FAIL"
+done
+cd /tmp/lcrfresh && cp services/litellm/config.runtime.yaml /tmp/lcrf.bak && \
   printf '\n:::bad\n' >> services/litellm/config.runtime.yaml && \
   (just start; echo "exit=$?"); \
-  cp /tmp/lcs.cfg.bak services/litellm/config.runtime.yaml && rm /tmp/lcs.cfg.bak && \
-  (just start >/dev/null 2>&1; echo "restored-exit=$?")
+  cp /tmp/lcrf.bak services/litellm/config.runtime.yaml && rm /tmp/lcrf.bak
 ```
-Expected: db list `hindsight,honcho,litellm`; the malformed run prints `FATAL: litellm: ...not valid YAML` and aborts before `dc up -d` (`exit` non-zero). `config.runtime.yaml` is gitignored, so it is restored via the `cp` backup (NOT `git checkout`); after restore `restored-exit=0` (start proceeds).
+Expected: db list `hindsight,honcho,litellm`; all three `AUTH ok` (proves B1 fix — `:'pw'` got the real value); the malformed run prints `FATAL: litellm: …not valid YAML` and aborts before `dc up -d` (`exit` non-zero).
 
-- [ ] **Step 3: Tear down the scratch project (no trace on aitools)**
+- [ ] **Step 3: Teardown**
 
 ```bash
-cd /tmp/lcscratch && docker compose -p lcscratch down -v --remove-orphans
-cd /Users/joe/Development/ai-tools/openclaw/hermes-stack && rm -rf /tmp/lcscratch /tmp/scratch.env
+docker compose -p lcrfresh down -v --remove-orphans; rm -rf /tmp/lcrfresh /tmp/lcrf.bak
 docker ps --filter label=com.docker.compose.project=aitools --format '{{.Names}} {{.Status}}'
 ```
-Expected: `lcscratch` project + volumes gone; the `aitools` stack untouched (same containers/uptimes as before Task 8).
+Expected: `lcrfresh` gone; **`aitools` stack untouched** (same containers/uptimes).
 
 ---
 
-## Task 9: Non-destructive live-stack validation
+## Task 9: Existing-data validation — isolated `H_CLONE` of `aitools_pg-data`
 
-**Files:** none (validation only)
+**Files:** none (validation only). Clones the live volume into an isolated project; **never mutates `aitools`**.
 
-- [ ] **Step 1: Snapshot, run, compare**
+- [ ] **Step 1: Build the clone harness + bring it up against real existing data**
 
 ```bash
-docker exec aitools-pg-1 pg_dumpall -U postgres --schema-only --globals-only \
-  | grep -c 'CREATE ROLE' > /tmp/roles.before
-docker volume ls --format '{{.Name}}' | grep aitools_pg-data
-just stop && just start
-docker exec aitools-pg-1 psql -U postgres -tAc \
+source <(sed -n '/^lcr_harness()/,/^}/p' docs/superpowers/plans/2026-05-18-stack-lifecycle-refactor.md)
+lcr_harness lcrclone clone
+cd /tmp/lcrclone && just build && just start
+```
+Note: `lcr_harness … clone` copied the live `.stack/*.generated.env` in, so each `build.sh`'s mandatory-migration-read finds the **existing** passwords (no fresh regen). The cloned volume already has the honcho/litellm/hindsight roles+dbs from real use.
+Expected: `just build` → each `*_DB_PASSWORD` resolved from the copied live `db.generated.env` (NOT regenerated); `just start` → provisioners run against the cloned data: roles/dbs **already exist** → `\gexec` no-ops, `ALTER ROLE … :'pw'` re-syncs the *same* value; `== poststart: honcho ==` sees `vector(1024)` already → "no dim fix"; all services `healthy` on the pre-existing data.
+
+- [ ] **Step 2: Acceptance gate (spec S1/S2/B1) — idempotent no-op + REAL-AUTH on existing data**
+
+```bash
+for s in litellm honcho hindsight; do
+  L="$(set -a; . /tmp/lcrclone/.stack/db.generated.env; eval echo \$$(echo $s|tr a-z A-Z)_DB_PASSWORD)"
+  G="$(set -a; . /tmp/lcrclone/.stack/$s.generated.env; eval echo \$$(echo $s|tr a-z A-Z)_DB_PASSWORD)"
+  [ "$L" = "$G" ] && echo "$s PW-MATCH ok" || echo "$s PW-MISMATCH (FAIL)"
+  docker logs "$(docker ps -aq --filter label=com.docker.compose.project=lcrclone \
+    --filter name=$s-provision)" 2>&1 | tail -2
+  RPW="$G"; docker exec -e PGPASSWORD="$RPW" lcrclone-pg-1 \
+    psql -h 127.0.0.1 -U "$s" -d "$s" -tAc 'select 1' \
+    && echo "$s AUTH ok" || echo "$s AUTH-FAIL (FAIL)"
+done
+docker exec lcrclone-pg-1 psql -U postgres -tAc \
  "select string_agg(datname,',' order by datname) from pg_database \
   where datname in ('honcho','litellm','hindsight');"
-docker exec aitools-pg-1 pg_dumpall -U postgres --schema-only --globals-only \
-  | grep -c 'CREATE ROLE' > /tmp/roles.after
-diff /tmp/roles.before /tmp/roles.after && echo "ROLES UNCHANGED"
-docker volume ls --format '{{.Name}}' | grep -c aitools_pg-data
 ```
-Expected: db list `hindsight,honcho,litellm`; `ROLES UNCHANGED`; the `aitools_pg-data` volume name unchanged and count `1` (NOT recreated).
+Expected: all three `PW-MATCH ok` (mandatory-read used existing pw, no shadow), provision containers exit 0 with no errors, all three `AUTH ok` (role pw == per-service env pw against the **pre-existing cloned cluster** — proves non-destructive on real data), db list `hindsight,honcho,litellm`. **Any `PW-MISMATCH` / `AUTH-FAIL` ⇒ STOP.**
 
-- [ ] **Step 2: e2e round-trips through the proxy**
+- [ ] **Step 3: e2e + auto-remove flag**
 
 ```bash
-curl -fsS "http://litellm.aitools.orb.local:4000/health/liveliness" && echo " litellm-ok"
-curl -fsS "http://honcho-api.aitools.orb.local:8000/health" && echo " honcho-ok"
-curl -fsS "http://hindsight.aitools.orb.local:8888/health" && echo " hindsight-ok"
-```
-Expected: each prints its OK marker (services serving against the preserved data).
-
-- [ ] **Step 3: Auto-remove flag behavior**
-
-```bash
+docker exec lcrclone-litellm-1 python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:4000/health/liveliness',timeout=4).status==200 else 1)" && echo "litellm e2e ok"
 docker ps -a --filter label=com.stack.role=provisioner \
-  --filter label=com.docker.compose.project=aitools --format '{{.Names}} {{.Status}}'
+  --filter label=com.docker.compose.project=lcrclone --format '{{.Names}} {{.Status}}'
+cd /tmp/lcrclone && sed -i '' 's/^STACK_AUTO_REMOVE_PROVISIONERS=.*/STACK_AUTO_REMOVE_PROVISIONERS=true/' .stack/.env
 just start-cleanup
 docker ps -a --filter label=com.stack.role=provisioner \
-  --filter label=com.docker.compose.project=aitools --format '{{.Names}} {{.Status}}'
+  --filter label=com.docker.compose.project=lcrclone --format '{{.Names}} {{.Status}}' | wc -l
 ```
-Expected: before cleanup, `*-provision` containers show `Exited (0)`; after `just start-cleanup`, none remain; other services untouched.
+Expected: `litellm e2e ok`; before cleanup `*-provision` show `Exited (0)`; after `just start-cleanup` the count is `0`.
 
-- [ ] **Step 4: Final commit (validation notes, if any) + report**
+- [ ] **Step 4: Teardown + final report**
 
-If any divergence from expected output was found and fixed, commit the fix referencing the task. Then report to the user: implementation complete, both from-scratch (Task 8) and non-destructive live (Task 9) validations passed, ready for merge review of `feat/stack-lifecycle-refactor`.
+```bash
+docker compose -p lcrclone down -v --remove-orphans
+docker volume rm lcrclone_pg-data 2>/dev/null || true
+rm -rf /tmp/lcrclone
+docker ps --filter label=com.docker.compose.project=aitools --format '{{.Names}} {{.Status}}'
+```
+Expected: `lcrclone` + its cloned volume gone; **`aitools` untouched throughout**.
+
+Then report to the user: implementation complete; from-scratch (`H_FRESH`) and existing-data-against-a-clone (`H_CLONE`) validations passed; the live `aitools` stack was never mutated (only briefly disrupted during the incident, since fully restored). Ready for merge review of the feat branch.
 
 ---
 

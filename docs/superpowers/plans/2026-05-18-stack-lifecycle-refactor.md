@@ -43,8 +43,10 @@ lcr_harness() {
   done; done
   # gitignored runtime artifact (gotcha #9) — without it litellm blocks on the
   # ChatGPT device-code prompt and never goes healthy in an isolated project.
+  # copy CONTENTS (trailing /.) — dst already exists from rsync (tracked
+  # README.md), so `cp -R src dst` would nest it as chatgpt/chatgpt/.
   [ -d "$MAIN/services/litellm/chatgpt" ] && \
-    cp -R "$MAIN/services/litellm/chatgpt" "/tmp/$name/services/litellm/chatgpt"
+    cp -R "$MAIN/services/litellm/chatgpt/." "/tmp/$name/services/litellm/chatgpt/"
   mkdir -p "/tmp/$name/.stack"
   cp "$MAIN/.stack/.env" "/tmp/$name/.stack/.env"
   sed -i '' "s/^COMPOSE_PROJECT_NAME=.*/COMPOSE_PROJECT_NAME=$name/" "/tmp/$name/.stack/.env"

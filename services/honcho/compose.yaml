@@ -13,6 +13,14 @@ services:
       CACHE_URL: redis://redis:6379/0?suppress=true
       CACHE_ENABLED: "true"
       HONCHO_VIRTUAL_KEY: ${HONCHO_VIRTUAL_KEY}
+      # Authoritative over the TOML [embedding] VECTOR_DIMENSIONS (honcho's
+      # settings precedence is env > TOML). Makes a FRESH DB create
+      # documents/message_embeddings at Vector(1024) directly (models.py:
+      # Vector(_VECTOR_DIM=settings.EMBEDDING.VECTOR_DIMENSIONS), default
+      # 1536) → no 1536/1024 crash-loop → poststart dim-fix is a no-op.
+      # In-place dim changes on an existing table are out of scope (need a
+      # custom re-embed migration), not an automated step.
+      EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
       - ./config.runtime.toml:/app/config.toml:ro
     depends_on:
@@ -36,6 +44,14 @@ services:
       CACHE_URL: redis://redis:6379/0?suppress=true
       CACHE_ENABLED: "true"
       HONCHO_VIRTUAL_KEY: ${HONCHO_VIRTUAL_KEY}
+      # Authoritative over the TOML [embedding] VECTOR_DIMENSIONS (honcho's
+      # settings precedence is env > TOML). Makes a FRESH DB create
+      # documents/message_embeddings at Vector(1024) directly (models.py:
+      # Vector(_VECTOR_DIM=settings.EMBEDDING.VECTOR_DIMENSIONS), default
+      # 1536) → no 1536/1024 crash-loop → poststart dim-fix is a no-op.
+      # In-place dim changes on an existing table are out of scope (need a
+      # custom re-embed migration), not an automated step.
+      EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
       - ./config.runtime.toml:/app/config.toml:ro
     depends_on:

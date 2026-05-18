@@ -16,11 +16,13 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
       HONCHO_PW: ${HONCHO_DB_PASSWORD}
       LITELLM_PW: ${LITELLM_DB_PASSWORD}
+      HINDSIGHT_PW: ${HINDSIGHT_DB_PASSWORD}
     entrypoint:
       - bash
       - -c
       - |
         sed -e "s/:HONCHO_PW/$${HONCHO_PW}/" -e "s/:LITELLM_PW/$${LITELLM_PW}/" \
+          -e "s/:HINDSIGHT_PW/$${HINDSIGHT_PW}/" \
           /seed/00-init.sql > /docker-entrypoint-initdb.d/00-init.sql && \
         exec docker-entrypoint.sh postgres -c max_connections=200
     volumes:

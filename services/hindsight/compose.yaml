@@ -1,0 +1,48 @@
+# hindsight (vectorize-io/hindsight) — OPTIONAL agent memory. profile
+# [hindsight]. Project-scoped (no container_name / no shared net). Prebuilt
+# all-in-one image PINNED by digest (gotcha #6) — mirrored in
+# services/hindsight/.image-digest; bump deliberately via commit (update both).
+#
+# Reaches pg + litellm by sibling service name on the Compose default
+# network. depends_on pg+litellm so COMPOSE_PROFILES=hindsight auto-pulls
+# them (Honcho pattern). LLM + embeddings route through LiteLLM on the
+# minted HINDSIGHT_VIRTUAL_KEY (glm/grok + voyage; NEVER chatgpt/* —
+# gotcha #5, non-streaming). The hindsight DB role/db is seeded by
+# services/postgres/pg-init/00-init.sql (FRESH pg volume only — adding this
+# to a live stack needs the <project>_pg-data volume recreated).
+#
+# All-in-one image runs the API (:8888, health GET /health) + the
+# Control-Plane Web UI (:9999). Not published to the host; reachable on the
+# project net as hindsight:8888 and from the Hermes VM at
+# hindsight.<project>.orb.local:8888 / :9999.
+
+services:
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight@sha256:f0f9e9a73d6aedde9eaf4010ab604c3e015494e494318b26f1011144856b8112
+    profiles: [hindsight]
+    restart: unless-stopped
+    expose:
+      - "8888"
+      - "9999"
+    environment:
+      HINDSIGHT_API_DATABASE_URL: postgresql://hindsight:${HINDSIGHT_DB_PASSWORD}@pg:5432/hindsight
+      HINDSIGHT_API_LLM_PROVIDER: litellm
+      HINDSIGHT_API_LITELLM_API_BASE: http://litellm:4000
+      HINDSIGHT_API_LLM_API_KEY: ${HINDSIGHT_VIRTUAL_KEY}
+      HINDSIGHT_API_LLM_MODEL: glm-4.7-flash
+      HINDSIGHT_API_EMBEDDINGS_PROVIDER: litellm
+      HINDSIGHT_API_EMBEDDINGS_LITELLM_MODEL: voyage-4-lite
+    depends_on:
+      pg: { condition: service_healthy }
+      litellm: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8888/health || exit 1"]
+      interval: 10s
+      timeout: 6s
+      start_period: 60s
+      retries: 30
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

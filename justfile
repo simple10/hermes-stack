@@ -73,9 +73,23 @@ stop:
 status:
     @set -a; source "{{lib}}"; set +a; \
      p="$(stack_project)"; \
+     echo "========== PROJECT: $p =========="; \
+     echo ""; \
+     echo "----- DOCKER ----"; \
      docker ps --filter "label=com.docker.compose.project=$p" \
-       --format "table {{{{.Names}}}}\t{{{{.Status}}}}"; \
-     echo "--- (project=$p) ---"; orb list 2>/dev/null || true
+       --format "table {{{{.Label \"com.docker.compose.service\"}}\t{{{{.Status}}\t{{{{.Ports}}"; \
+     echo ""; \
+     echo "------- VMs -------"; \
+     mch="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ',' ' ')"; \
+     if [ -z "$(echo "$mch" | tr -d '[:space:]')" ]; then \
+       echo "(no STACK_MACHINES configured for this stack)"; \
+     else \
+       ol="$(orb list 2>/dev/null || true)"; \
+       for m in $mch; do \
+         row="$(echo "$ol" | awk -v m="$m" '$1==m')"; \
+         [ -n "$row" ] && echo "$row" || echo "$m  (not created)"; \
+       done; \
+     fi
 
 # Tail an Orb machine console (OrbStack Logs tab = console).
 logs machine="hermes":

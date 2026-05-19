@@ -97,6 +97,88 @@ stack_backends() {
   printf '%s' "$out" | sed 's/^ //'
 }
 
+# _svc_uc NAME — uppercase with hyphens->underscores. Internal to stack_source.
+_svc_uc() { printf '%s' "$1" | tr 'a-z-' 'A-Z_'; }
+
+# ensure_dockerignore SRC_DIR — make SRC_DIR/.dockerignore exist with `.git/`
+# as one of its lines. Preserves any pre-existing content (idempotent).
+ensure_dockerignore() {
+  local src="$1" f="$1/.dockerignore"
+  [ -d "$src" ] || die "ensure_dockerignore: $src is not a directory"
+  if [ ! -f "$f" ]; then
+    printf '.git/\n' > "$f"
+    return 0
+  fi
+  if ! grep -qFx '.git/' "$f"; then
+    printf '.git/\n' >> "$f"
+  fi
+}
+
+# stack_source SVC REPO DEFAULT_PIN — clone-and-pin services/SVC/_source/ to
+# ${<SVC_UC>_VERSION:-DEFAULT_PIN}. Reuse fast-path on lock+HEAD match. Always
+# leaves _source at the resolved SHA, keeps .git, ensures _source/.dockerignore.
+stack_source() {
+  local svc="$1" repo="$2" default_pin="$3"
+  local svc_uc; svc_uc="$(_svc_uc "$svc")"
+  local requested; eval "requested=\${${svc_uc}_VERSION:-\$default_pin}"
+  local src="$STACK_ROOT/services/$svc/_source"
+  local lockdir="$STACK_DIR/$svc"
+  local lock="$lockdir/.source.lock"
+
+  # Identity check on existing _source (refuse if origin doesn't match).
+  if [ -d "$src/.git" ]; then
+    local origin_url; origin_url="$(git -C "$src" remote get-url origin 2>/dev/null || true)"
+    if [ -n "$origin_url" ] && [ "$origin_url" != "$repo" ]; then
+      die "stack_source($svc): $src origin '$origin_url' != expected '$repo' (re-clone manually if intended)"
+    fi
+  fi
+
+  # Reuse fast-path: lock matches + HEAD matches -> no network, no marker.
+  if [ -d "$src/.git" ] && [ -f "$lock" ]; then
+    local lock_req lock_sha head
+    lock_req="$(env_get "$lock" requested)"
+    lock_sha="$(env_get "$lock" resolved_sha)"
+    head="$(git -C "$src" rev-parse HEAD 2>/dev/null || true)"
+    if [ "$lock_req" = "$requested" ] && [ "$head" = "$lock_sha" ]; then
+      ensure_dockerignore "$src"
+      log "stack_source($svc): reuse — $requested @ ${head:0:12}"
+      return 0
+    fi
+  fi
+
+  # Fresh clone if missing
+  if [ ! -d "$src/.git" ]; then
+    rm -rf "$src"
+    log "stack_source($svc): cloning $repo (keeping .git)"
+    git clone "$repo" "$src"
+  fi
+
+  # Resolve requested (tag, SHA, or branch).
+  # `--verify` is required: without it, `git rev-parse 'bogus^{commit}'`
+  # prints the literal string to stdout AND exits 128, defeating our
+  # empty-string failure detection. With --verify, failure prints nothing
+  # to stdout (errors go to stderr, suppressed).
+  git -C "$src" fetch --tags origin
+  local sha
+  sha="$(git -C "$src" rev-parse --verify "${requested}^{commit}" 2>/dev/null || true)"
+  if [ -z "$sha" ]; then
+    git -C "$src" fetch origin "$requested" 2>/dev/null || true
+    sha="$(git -C "$src" rev-parse --verify "${requested}^{commit}" 2>/dev/null \
+        || git -C "$src" rev-parse --verify "origin/${requested}^{commit}" 2>/dev/null \
+        || git -C "$src" rev-parse --verify "FETCH_HEAD^{commit}" 2>/dev/null \
+        || true)"
+  fi
+  [ -n "$sha" ] || die "stack_source($svc): cannot resolve '$requested' in $repo"
+
+  git -C "$src" checkout --detach "$sha"
+  ensure_dockerignore "$src"
+
+  mkdir -p "$lockdir"
+  printf 'requested=%s\nresolved_sha=%s\n' "$requested" "$sha" > "$lock"
+  touch "$lockdir/.source.rebuild"
+  log "stack_source($svc): pinned $requested -> ${sha:0:12} (rebuild marker set)"
+}
+
 # dc — `docker compose` for THIS stack, run HERMETICALLY. Compose sees ONLY
 # .stack/.env (+ .stack/*.generated.env), passed as ABSOLUTE --env-file args,
 # with the host environment STRIPPED (env -i + a tight docker-operational

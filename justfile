@@ -35,14 +35,14 @@ build:
 # Staged bring-up. ORDER: backends -> per-profile preflight.sh (+ env
 # recompute) -> per-profile prestart.sh -> dc up -d (provisioners ordered by
 # depends_on) -> per-profile poststart.sh -> machines -> optional cleanup.
-# Generic: no service names except the pg/redis backend substrate.
+# Generic: no service names except the pg/redis/rabbitmq backend substrate.
 start:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
      export COMPOSE_ENV_FILES="$(compose_env_files)"; \
      echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}"; \
-     dc up -d pg redis; \
+     dc up -d pg redis rabbitmq; \
      for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
        [ -n "$p" ] && [ -x "{{root}}/services/$p/preflight.sh" ] && \
          { echo "== preflight: $p =="; bash "{{root}}/services/$p/preflight.sh"; }; \

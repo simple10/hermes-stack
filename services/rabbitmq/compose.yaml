@@ -1,0 +1,26 @@
+# rabbitmq. No profile => always-on shared backend (nuq transport for
+# firecrawl; reusable by future services). Project-scoped (no container_name
+# / no shared network). Siblings reach it at host `rabbitmq:5672`; mgmt UI
+# at rabbitmq.<project>.orb.local:15672 (default guest/guest — localhost-only
+# by RabbitMQ default, so orb-DNS is effectively read-blocked; the AMQP path
+# on the project net is unauthenticated, same as upstream firecrawl). Tag-
+# pinned like redis:8.6.3 (backends use tag pins, not digests).
+services:
+  rabbitmq:
+    image: rabbitmq:4.3.0-management
+    restart: unless-stopped
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      # timings intentionally more generous than the redis/pg backend
+      # precedent (5s/5s/10, no start_period) — RabbitMQ's epmd/beam boot is
+      # genuinely slower (~10-20s). Do NOT "normalize" back to 5s/3 retries
+      # (causes flaky firecrawl-api `depends_on: rabbitmq service_healthy`).
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  rabbitmq-data:

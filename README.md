@@ -54,20 +54,23 @@ fixpoint: `stack_profiles` (= `COMPOSE_PROFILES` ∪ required, injected by
 `just start` brings up first). Adding a new consumer = one line in *its*
 `service.env`; the dependency's compose is never touched.
 
-**Version pinning.** One model for every externally-sourced thing: a
-`<NAME>_VERSION` lever in `.stack/.env` (optional, per-stack), an annotated
-immutable default tracked in code (`services/<svc>/images.env` for
-digest-class images; the `stack_source` call's third arg in `build.sh` for
-`_source` services), and an auto-detected lock at
-`.stack/<svc>/.image.<NAME>.lock` or `.stack/<svc>/.source.lock`. `just
-build` runs in two explicit phases: Phase 1 (`stack_resolve_images`)
-unconditionally resolves every digest-class image (compose `include:`
-parses the whole tree on every `dc` call, so partial resolution is fatal);
-Phase 2 iterates `stack_profiles | tr ',' ' '` (transitive) for per-service
-`build.sh` runs. Tag-class images (Docker Hub-style — `pg`/`redis`/
-`rabbitmq`/`cliproxyapi`) interpolate `image: repo:${VAR:-default}`
-directly. Bump: edit `.stack/.env`, `just build`, `just up` — auto-detected,
-rebuilt if needed, no code edits.
+**Version pinning.** Two files per service: tracked
+`services/<svc>/service.env` (declares deps + image/source defaults) and
+gitignored `.stack/<svc>/.generated.env` (every build artifact — secrets,
+resolved digests, source SHAs, rebuild flag, all under uniquely-prefixed
+keys). Override any default via `<NAME>_VERSION` in `.stack/.env`
+(optional, per-stack). `just build` runs in two phases: Phase 1
+(`stack_resolve_images`) walks every `services/*/service.env` for
+`<NAME>_IMAGE_REPO`/`_IMAGE_DEFAULT` pairs and writes the resolved
+`<NAME>_IMAGE` (tag→digest via `docker buildx imagetools inspect`, or
+digest pass-through) into the per-service `.generated.env` — runs
+unconditionally because compose `include:` parses the whole tree on every
+`dc` call. Phase 2 iterates `stack_profiles | tr ',' ' '` (transitive) for
+per-service `build.sh` runs (source clone + checkout + rebuild-if-changed,
+via `stack_source`). Tag-class images (Docker Hub-style: `pg`/`redis`/
+`rabbitmq`/`cliproxyapi`) interpolate `image: repo:${VAR:-default}` in
+compose directly — no resolver. Bump: edit `.stack/.env`, `just build`,
+`just up` — auto-detected, rebuilt if needed, no code edits.
 
 - **pg / redis** — `pgvector/pgvector:pg18` (service `pg`, dir `services/pg/`;
   DBs `honcho` + `litellm`, each a least-priv role) and `redis:8.6.3` (service

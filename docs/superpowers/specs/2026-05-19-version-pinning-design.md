@@ -1,15 +1,76 @@
 # Version Pinning & Build Strategy — design
 
 Date: 2026-05-19
-Status: approved; dual self + two sub-agent rounds 2026-05-19. Round 1
-fixes: B1 (central image resolver), B2 (multi-image signature),
-B3 (`.dockerignore` append-if-absent + tracked honcho-ui), B4 (`stack_profiles`
-expansion in `just build`), M1–M7. Round 2 verification fixes: NAME case
-canonicalized to uppercase across `images.env` / locks / env vars;
-`stack_resolve_images` parser rewritten with `read -r`-based trim (one-
-char whitespace strip bug); mandatory double-quoting of compose digest-
-class `image:` scalars; migration step 4 line-count corrected; pg/build.sh
-ordering rationale; `tr ',' ' '` note for `stack_profiles` consumption.
+Status: implemented + post-implementation refactor. **Two-file model**: one
+tracked `services/<svc>/service.env` (declares the service: deps, image
+defaults, source defaults), one gitignored `.stack/<svc>/.generated.env`
+(all build artifacts: secrets + resolved digests + source SHAs + rebuild
+flag, all in one file via prefixed keys). The earlier `images.env` files
+and per-service `.source.lock` / `.image.<NAME>.lock` / `.source.rebuild`
+sidecars are gone — same information, fewer files. Inline `# tag …`
+comments in service.env declarations MUST be stripped by readers (helper
+`_env_value` in stacklib).
+
+## Implemented model (authoritative — supersedes section details below)
+
+The shipped design uses **two files per service**:
+
+```
+services/<svc>/service.env         # tracked — declares the service
+.stack/<svc>/.generated.env        # gitignored — all build artifacts
+```
+
+**`services/<svc>/service.env`** holds the service's declarative contract:
+- `SERVICE_REQUIRES=<comma profiles>` (cross-service deps; see deps-cleanup spec).
+- `SERVICE_KIND=backend` for single-service substrate (pg/redis/rabbitmq).
+- `<NAME>_IMAGE_REPO=…` + `<NAME>_IMAGE_DEFAULT=sha256:… # tag …`
+  per digest-class image owned by this service. Multiple `<NAME>_*` pairs
+  per service.env are supported (firecrawl has three).
+- `<SVC_UC>_SOURCE_REPO=…` + `<SVC_UC>_SOURCE_DEFAULT=<sha> # tag …`
+  for `_source`-class services.
+
+Inline `# …` annotations on the value side are stripped by readers
+(stacklib helper `_env_value`). Without stripping, the annotation would
+leak into `git rev-parse` / `docker compose interpolation`, silently
+producing the wrong commit / an invalid image ref. Regression-tested.
+
+**`.stack/<svc>/.generated.env`** holds every build artifact in one file,
+keys uniquely prefixed:
+- secrets (existing): `<SVC_UC>_DB_PASSWORD`, `*_VIRTUAL_KEY`, etc.
+- digest-class lock: `<NAME>_IMAGE_REQUESTED`,
+  `<NAME>_IMAGE_RESOLVED_DIGEST`, `<NAME>_IMAGE` (the value compose reads).
+- source-class lock: `<SVC_UC>_SOURCE_REQUESTED`,
+  `<SVC_UC>_SOURCE_RESOLVED_SHA`, `<SVC_UC>_SOURCE_REBUILD` (set to `1` on
+  change, cleared to empty by build.sh after a successful `dc build`).
+
+`dc()`'s existing `--env-file .stack/*/.generated.env` glob picks the file
+up for compose interpolation. Extra prefixed keys are inert (compose only
+resolves `${VAR}` references that appear in compose files).
+
+**Helpers** (`lib/stacklib.sh`):
+- `stack_source SVC [REPO DEFAULT_PIN]` — REPO/DEFAULT_PIN default to
+  `<SVC_UC>_SOURCE_REPO`/`_SOURCE_DEFAULT` in service.env.
+- `stack_image NAME REPO DEFAULT_PIN [SVC]` — same shape as before.
+- `stack_resolve_images` — scans `services/*/service.env` for
+  `<NAME>_IMAGE_REPO` keys (was: `services/*/images.env`).
+- `_env_value FILE KEY` — `env_get` + strip inline `# …` comment + trim
+  whitespace. Used for all declarative reads from service.env.
+- `ensure_dockerignore SRC_DIR` — append-if-absent `.git/` line.
+
+Build.sh callers collapse to one-liners (no inline pin args):
+```bash
+stack_source honcho
+GEN="$STACK_DIR/honcho/.generated.env"
+if [ -n "$(env_get "$GEN" HONCHO_SOURCE_REBUILD)" ]; then
+  dc build honcho-api honcho-deriver
+  env_upsert "$GEN" HONCHO_SOURCE_REBUILD ""
+fi
+```
+
+The legacy sections below (file layout under `_source`/`.image-digest`,
+`stack_image NAME REPO ...` lock-file paragraph, "declarative `images.env`"
+section, etc.) describe the pre-refactor design and remain for historical
+context — defer to this section on any conflict.
 
 ## Problem
 

@@ -1,6 +1,0 @@
-# Resolved 2026-05-18 from :latest (gotcha #6 — upstream ships no semver;
-# digest is the only stable pin). Bump deliberately: re-resolve + update
-# BOTH this file and services/firecrawl/compose.yaml in one commit.
-ghcr.io/firecrawl/firecrawl@sha256:fb156ea529d2c40acf805872251d921ba15bf17b22b2d5a72bd0aaac30076280
-ghcr.io/firecrawl/playwright-service@sha256:9e0737bc09df28275aab29726b1c0824a7725113945434e843385d487b7f7ec6
-ghcr.io/firecrawl/nuq-postgres@sha256:f9388bd25ae2e1f1d034518236f993ce236173c1d8800ce24092ea6643a95a33

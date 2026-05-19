@@ -106,6 +106,21 @@ PY'
     ;;
 esac
 
+# Firecrawl (profile [firecrawl]): the self-hosted firecrawl-api ignores
+# client auth (USE_DB_AUTHENTICATION=false), but the firecrawl SDK requires a
+# non-empty FIRECRAWL_API_KEY — so a fixed, clearly-labelled no-auth
+# placeholder (NOT a secret). Append URL+placeholder to ~/.hermes/.env (step 3
+# rewrites that file fresh, so this is idempotent across builds). Only wired
+# when the firecrawl profile is active — don't point Hermes at a dead endpoint.
+if echo "${COMPOSE_PROFILES:-}" | grep -qw firecrawl; then
+  printf 'FIRECRAWL_API_URL=http://firecrawl-api.%s.orb.local:3002\nFIRECRAWL_API_KEY=%s\n' \
+    "$PROJ" "fc-selfhost-noauth" \
+    | orb -m "$MACHINE" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+  log "firecrawl: FIRECRAWL_API_URL=http://firecrawl-api.$PROJ.orb.local:3002 + placeholder key -> ~/.hermes/.env"
+else
+  warn "firecrawl not in COMPOSE_PROFILES — skipping Hermes firecrawl env (add 'firecrawl' to COMPOSE_PROFILES to e2e-test it)"
+fi
+
 log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
 HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env
 MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" -e "s|__HERMES_MODEL__|$HM|g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"

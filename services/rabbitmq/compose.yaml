@@ -12,7 +12,7 @@
 # pinned like redis:8.6.3 (backends use tag pins, not digests).
 services:
   rabbitmq:
-    image: rabbitmq:4.3.0-management
+    image: "rabbitmq:${RABBITMQ_VERSION:-4.3.0-management}"
     profiles: [rabbitmq]
     restart: unless-stopped
     volumes:

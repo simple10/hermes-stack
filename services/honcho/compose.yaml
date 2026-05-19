@@ -64,7 +64,7 @@ services:
 
   # One-shot DB provisioner (replaces honcho's 00-init.sql lines + vector ext).
   honcho-provision:
-    image: pgvector/pgvector:pg18
+    image: "pgvector/pgvector:${PG_VERSION:-pg18}"
     profiles: [honcho]
     restart: "no"
     labels:

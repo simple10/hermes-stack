@@ -7,7 +7,7 @@
 
 services:
   pg:
-    image: pgvector/pgvector:pg18
+    image: "pgvector/pgvector:${PG_VERSION:-pg18}"
     profiles: [pg]
     restart: unless-stopped
     environment:

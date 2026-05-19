@@ -3,7 +3,7 @@
 
 services:
   redis:
-    image: redis:8.6.3
+    image: "redis:${REDIS_VERSION:-8.6.3}"
     profiles: [redis]
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1"]

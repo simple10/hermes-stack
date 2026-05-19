@@ -73,7 +73,7 @@ services:
 
   # One-shot DB provisioner (replaces hindsight's 00-init.sql lines + vector).
   hindsight-provision:
-    image: pgvector/pgvector:pg18
+    image: "pgvector/pgvector:${PG_VERSION:-pg18}"
     profiles: [hindsight]
     restart: "no"
     labels:

@@ -1,7 +1,8 @@
 # Stack config & cross-service dependency cleanup — design
 
 Date: 2026-05-19
-Status: approved (pending spec review)
+Status: approved; self-re-reviewed 2026-05-19 (fixed: postgres→pg rename
+invariant, POSTGRES_SUPERPASS preservation, chatgpt tracked-README split)
 
 ## Problem
 
@@ -53,13 +54,24 @@ Two coupled pain points in how a stack's identity is expressed:
 
 | Service compose | Before | After |
 |---|---|---|
-| `services/postgres/compose.yaml` (`pg`) | no `profiles:` (always-on) | `profiles: [pg]` |
+| `services/pg/compose.yaml` (`pg`) | no `profiles:` (always-on) | `profiles: [pg]` |
 | `services/redis/compose.yaml` (`redis`) | no `profiles:` (always-on) | `profiles: [redis]` |
 | `services/rabbitmq/compose.yaml` (`rabbitmq`) | `profiles: ["firecrawl"]` | `profiles: [rabbitmq]` |
 
-**Rule:** every single-service substrate profile's name **equals its service
-name** (`pg`, `redis`, `rabbitmq`). This makes a required name usable both as a
-`COMPOSE_PROFILES` entry *and* as a `dc up -d <name>` target with no lookup.
+**Invariant:** for substrate, **directory == compose service == profile**
+(`pg`, `redis`, `rabbitmq`). This makes a required name usable as a
+`COMPOSE_PROFILES` entry, a `dc up -d <name>` target, *and* a
+`services/<name>/service.env` path — all with zero lookup tables.
+
+**Required rename:** the directory is currently `services/postgres/` but the
+compose service is `pg` (every `depends_on: pg`, `@pg:5432`,
+`PGPASSWORD`/`POSTGRES_PASSWORD` uses `pg`). `git mv services/postgres
+services/pg` to satisfy the invariant. The compose **service name stays `pg`**
+— this is a structural/path rename only, **no runtime change**. Update the two
+references: `docker-compose.yaml` include (`services/postgres/compose.yaml` →
+`services/pg/compose.yaml`) and `justfile` build
+(`{{root}}/services/postgres/build.sh` → `{{root}}/services/pg/build.sh`).
+`redis` and `rabbitmq` dirs already satisfy the invariant (no rename).
 
 ### Per-service manifest
 
@@ -99,7 +111,7 @@ compose; mark "—" for none, omit the file when empty):
 
 | Service dir | `service.env` | Reason |
 |---|---|---|
-| `postgres` | `SERVICE_KIND=backend` | substrate (service `pg`, profile `pg`) |
+| `pg` (renamed from `postgres`) | `SERVICE_KIND=backend` | substrate (dir==service==profile==`pg`) |
 | `redis` | `SERVICE_KIND=backend` | substrate |
 | `rabbitmq` | `SERVICE_KIND=backend` | substrate |
 | `litellm` | `SERVICE_REQUIRES=pg,redis` | provision→pg; `REDIS_URL` redis (no compose depends_on) |
@@ -178,13 +190,24 @@ acceptance test below.
 ```
 .stack/
   .env                              # unchanged — the lever surface
+  pg/
+    .generated.env                  # POSTGRES_SUPERPASS — was .stack/db.generated.env
   <svc>/
     .generated.env                  # was .stack/<svc>.generated.env
     config.runtime.{yaml,toml}      # was services/<svc>/config.runtime.*
     .config-hashes/<file>.sha256    # was .stack/.config-hashes/<svc>.<file>.sha256
   litellm/
-    chatgpt/                        # was services/litellm/chatgpt/  (live auth tokens)
+    chatgpt/
+      auth.json                     # was services/litellm/chatgpt/auth.json (token)
 ```
+
+`POSTGRES_SUPERPASS` is **actively used** (pg container password +
+every provisioner's `PGPASSWORD`); `db.generated.env` is **not** vestigial.
+It is *renamed/moved* to `.stack/pg/.generated.env`, never deleted —
+`dc()`'s new glob still passes it to Compose. The litellm `chatgpt/`
+dir mixes a **tracked** `README.md` (docs) with an ignored `auth.json`
+(state): only `auth.json` is stack state and moves; the README stays a
+tracked doc (relocated to `services/litellm/README-chatgpt.md`).
 
 ### Code changes (no fallback — new paths only)
 
@@ -199,87 +222,131 @@ acceptance test below.
   `.config-hashes` dirs; `.generated.env` is matched by explicit name).
 - **`render_template`**: writes `OUT` and its hash under
   `.stack/<svc>/` and `.stack/<svc>/.config-hashes/<basename>.sha256`.
-- **`services/litellm/build.sh`, `services/honcho/build.sh`**: render into
-  `.stack/<svc>/config.runtime.*`; read/write the DB password only from
-  `.stack/<svc>/.generated.env`. The legacy `db.generated.env` fallback line
-  is **removed** (values are preserved by the one-time manual migration).
+- **`services/pg/build.sh`** (renamed dir): `DBENV="$STACK_DIR/db.generated.env"`
+  → `DBENV="$STACK_DIR/pg/.generated.env"` (still reuse-if-present so it keeps
+  matching the pg volume). `mkdir -p` the parent.
+- **`services/litellm/build.sh`, `services/honcho/build.sh`,
+  `services/hindsight/build.sh`**: render into `.stack/<svc>/config.runtime.*`;
+  read/write `<SVC>_DB_PASSWORD` only from `.stack/<svc>/.generated.env`. The
+  legacy `db.generated.env` fallback line is **removed** — confirmed a dead
+  no-op for the live stack (the per-service passwords live in the per-service
+  files, never in `db.generated.env`, which holds only `POSTGRES_SUPERPASS`).
 - **`just reconfigure svc`**: back up + re-render under `.stack/<svc>/`.
-- **`.gitignore`**: remove now-dead `services/*/config.runtime.*` and
-  `services/*/chatgpt/` entries — `.stack/` is already gitignored wholesale,
-  so no stack-state remains tracked-but-ignored in the git tree.
+- **`.gitignore`**: actual current entries are `**/*.runtime.{toml,yaml,json}`
+  and `services/litellm/chatgpt/auth.json` (not `services/*/config.runtime.*`
+  or `services/*/chatgpt/`). After the move these become dead (everything lives
+  under the already-ignored `.stack/`). Removing them is **optional cleanup**,
+  not correctness-relevant; do it for tidiness. Keep `.stack/` and
+  `**/*.generated.env`.
 
 ---
 
 ## Migration runbook (one-time, `main`, performed by hand)
 
 The live `main` `.stack/` is migrated once during implementation. No fallback
-code ships. Moving bound files does **not** kill running containers (they keep
-the old inode until recreated), so this is non-destructive to the shared live
-stack until a coordinated recreate.
+code ships.
 
-1. Verify per-service generated envs already hold the DB passwords
-   (`LITELLM_DB_PASSWORD` in `.stack/litellm.generated.env`,
-   `HONCHO_DB_PASSWORD` in `.stack/honcho.generated.env`). They do, from prior
-   builds; abort if not.
-2. `mkdir -p .stack/<svc>` and `mv .stack/<svc>.generated.env
-   .stack/<svc>/.generated.env` for `litellm honcho hindsight firecrawl`
+**Bind-mounted artifacts are `cp`'d, not `mv`'d**, until a verified recreate.
+Relying on a running container tolerating its bind source being moved is
+unsafe across file-sharing backends (OrbStack virtiofs); copying leaves the
+old path intact as a rollback and the container untouched until it is
+recreated onto the new bind. `.generated.env` / hash files are *not*
+bind-mounted (they are `--env-file` / build inputs), so those are plain `mv`.
+
+1. **Password preservation gate (abort on failure).** Confirm
+   `POSTGRES_SUPERPASS` is present in `.stack/db.generated.env`;
+   `LITELLM_DB_PASSWORD` in `.stack/litellm.generated.env`;
+   `HONCHO_DB_PASSWORD` in `.stack/honcho.generated.env`;
+   `HINDSIGHT_DB_PASSWORD` in `.stack/hindsight.generated.env`;
+   `FIRECRAWL_DB_PASSWORD` in `.stack/firecrawl.generated.env`. Abort the
+   whole migration if any is missing.
+2. `mv .stack/db.generated.env .stack/pg/.generated.env`
+   (`mkdir -p .stack/pg` first). **Never delete it** — it carries
+   `POSTGRES_SUPERPASS`, which must keep matching the existing pg volume.
+3. For `litellm honcho hindsight firecrawl`: `mkdir -p .stack/<svc>` and
+   `mv .stack/<svc>.generated.env .stack/<svc>/.generated.env`
    (guard each with `[ -f ]`).
-3. `mv services/litellm/config.runtime.yaml .stack/litellm/config.runtime.yaml`;
-   `mv services/litellm/chatgpt .stack/litellm/chatgpt`;
-   `mv services/honcho/config.runtime.toml .stack/honcho/config.runtime.toml`;
-   `mv services/cliproxyapi/config.runtime.yaml
-   .stack/cliproxyapi/config.runtime.yaml` (each guarded with `[ -e ]`).
-4. `mkdir -p .stack/<svc>/.config-hashes`; move
+4. `cp` rendered configs / token to the new paths (originals stay until
+   step 8): `services/litellm/config.runtime.yaml` →
+   `.stack/litellm/config.runtime.yaml`; `services/honcho/config.runtime.toml`
+   → `.stack/honcho/config.runtime.toml`;
+   `services/cliproxyapi/config.runtime.yaml` →
+   `.stack/cliproxyapi/config.runtime.yaml` (each guarded with `[ -e ]`);
+   `services/litellm/chatgpt/auth.json` →
+   `.stack/litellm/chatgpt/auth.json`.
+5. Relocate the tracked doc: `git mv services/litellm/chatgpt/README.md
+   services/litellm/README-chatgpt.md`; then the now-empty
+   `services/litellm/chatgpt/` is removed by the rename/cleanup.
+6. `mkdir -p .stack/<svc>/.config-hashes`; move
    `.stack/.config-hashes/<svc>.<file>.sha256`
    → `.stack/<svc>/.config-hashes/<file>.sha256`; `rmdir .stack/.config-hashes`.
-5. Delete the now-vestigial `.stack/db.generated.env` (only after step 1
-   verification passes).
-6. Land the code changes, then a **coordinated** `just build` (re-render is a
-   no-op: files already moved) + recreate to rebind containers to the new
-   paths.
+7. Land all code changes (incl. `git mv services/postgres services/pg` and the
+   two path-reference updates). `just build` is then a no-op re-render
+   (files already in place; passwords reused, not regenerated).
+8. **Coordinated recreate** (non-destructive — volumes preserved): bring the
+   stack down (containers only) and back up so containers rebind to the new
+   paths. Verify health, then delete the old `services/*/config.runtime.*`
+   originals left from step 4.
 
 **Concurrent-agent coordination.** `main` is sometimes worked by multiple
-agents against one live shared stack (`aitools`). The compose bind-path change
-takes effect only when containers are recreated; until then running containers
-keep working on the old inode. The recreate must therefore be coordinated with
-any other agent on this checkout (do not unilaterally `just down`/destroy
-shared pg data — non-destructive recreate only).
+agents against one live shared stack (`aitools`). Migration steps 1–6 do not
+disturb running containers (no bind source is moved; only copies + non-bound
+`mv`s). The recreate (step 8) keeps volumes (`just down` removes containers,
+not volumes; never `docker volume rm`) so pg data and passwords are intact.
+Coordinate the recreate with any other agent on this checkout.
 
 ---
 
 ## Acceptance criteria
 
-1. `services/rabbitmq/compose.yaml` has `profiles: [rabbitmq]`; `pg`/`redis`
+1. `git mv services/postgres services/pg` done; `docker-compose.yaml` include
+   and `justfile` build reference updated; `services/pg/compose.yaml` service
+   is still named `pg`.
+2. `services/rabbitmq/compose.yaml` has `profiles: [rabbitmq]`; `pg`/`redis`
    have `profiles: [pg]`/`[redis]`.
-2. `lib/stacklib.sh` provides `stack_required`, `stack_profiles`,
+3. `lib/stacklib.sh` provides `stack_required`, `stack_profiles`,
    `stack_backends`; `dc()` uses `stack_profiles` for the injected
-   `COMPOSE_PROFILES`. `postgres`/`redis`/`rabbitmq` have
-   `service.env` with `SERVICE_KIND=backend`.
-3. `just start` derives the backends-first bring-up from `stack_backends`
+   `COMPOSE_PROFILES`. `pg`/`redis`/`rabbitmq` have `service.env` with
+   `SERVICE_KIND=backend`.
+4. `just start` derives the backends-first bring-up from `stack_backends`
    (no hardcoded `pg redis`); with the default profiles it resolves to
    exactly the substrate the active stack needs.
-4. **Non-destructive profile-resolution test passes** for: the default
-   `COMPOSE_PROFILES`, and each profile individually — using
-   `dc … up -d --dry-run` (or `dc config`) which must succeed with **no
-   `undefined service`** error. (Run against the live stack — `--dry-run`
-   creates nothing.)
-5. All `config.runtime.*`, `<svc>/.generated.env`, per-svc `.config-hashes`,
-   and `litellm/chatgpt/` resolve under `.stack/<svc>/`; no
-   `services/*/config.runtime.*` or `services/*/chatgpt/` remains; the
-   corresponding `.gitignore` lines are removed.
-6. The live `main` stack, after migration + coordinated recreate, comes up
-   healthy (`just status`) with unchanged DB passwords (pg auth intact) and
-   unchanged litellm ChatGPT auth (tokens preserved).
-7. Adding a hypothetical new AMQP consumer requires editing only that
+5. **Non-destructive profile-resolution test passes.** For the default
+   `COMPOSE_PROFILES` *and* each user profile individually: compute the
+   expanded set via `stack_profiles` (with `COMPOSE_PROFILES` overridden to
+   the profile under test) and run `docker compose --profile <expanded…> …
+   up --dry-run` — must succeed with **no `undefined service`** error.
+   `--dry-run` creates nothing; safe on the live stack. (The test must
+   exercise the *expanded* set — that is what proves the manifests are
+   complete.)
+6. `.stack/pg/.generated.env` holds `POSTGRES_SUPERPASS`; no
+   `.stack/db.generated.env` remains and no superpass was regenerated. All
+   `config.runtime.*`, every `<svc>/.generated.env`, per-svc
+   `.config-hashes`, and `litellm/chatgpt/auth.json` resolve under
+   `.stack/<svc>/`. No `services/*/config.runtime.*` and no
+   `services/litellm/chatgpt/` remain; `services/litellm/README-chatgpt.md`
+   is tracked.
+7. The live `main` stack, after migration + coordinated recreate, comes up
+   healthy (`just status`) with: pg superuser auth intact (a provisioner
+   re-run / `psql` as superuser succeeds against the existing volume), each
+   service authenticates to its DB (no `*_DB_PASSWORD` regenerated — values
+   byte-identical to pre-migration), litellm ChatGPT auth preserved
+   (`auth.json` unchanged).
+8. Adding a hypothetical new AMQP consumer requires editing only that
    service's `service.env` — `rabbitmq/compose.yaml` is untouched.
 
 ## Risks
 
+- **Deleting/regenerating `POSTGRES_SUPERPASS`** → pg superuser + all
+  provisioners break against the existing volume. Mitigated: explicit
+  `mv db.generated.env → pg/.generated.env` (never delete), step-1 gate,
+  acceptance #6/#7. `pg/build.sh` reuses-if-present.
 - **Incomplete manifest audit** → `undefined service` at `dc up`. Mitigated by
-  acceptance test #4 (covers default + every single profile).
-- **Recreate timing on shared stack** → mitigated by the coordination note;
-  migration `mv`s are non-destructive to running containers.
+  acceptance #5 (default + every single profile, on the expanded set).
+- **Bind source moved under a running container** → avoided: bind-mounted
+  artifacts are `cp`'d (not `mv`'d) until a verified recreate; rollback = the
+  untouched originals.
 - **A service connects to substrate with neither compose `depends_on` nor an
-  obvious env URL** → caught by acceptance test #4 only if that profile is
-  exercised; implementation audit must read each compose's `environment:` for
-  `pg`/`redis`/`rabbitmq` hostnames, not just `depends_on:`.
+  obvious env URL** → implementation audit must read each compose's
+  `environment:` for `pg`/`redis`/`rabbitmq` hostnames, not just
+  `depends_on:`; acceptance #5 catches it only for exercised profiles.

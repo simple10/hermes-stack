@@ -64,6 +64,10 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
+      # N2: timings intentionally more generous than the redis/pg backend
+      # precedent (5s/5s/10, no start_period) — RabbitMQ's epmd/beam boot is
+      # genuinely slower (~10-20s). Do NOT "normalize" back to 5s/3 retries
+      # (causes flaky firecrawl-api `depends_on: rabbitmq service_healthy`).
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
       timeout: 6s
@@ -157,31 +161,32 @@ log "firecrawl: FIRECRAWL_DB_PASSWORD + FIRECRAWL_BULL_AUTH_KEY owned in firecra
 
 Run: `chmod +x services/firecrawl/build.sh`
 
-- [ ] **Step 2: Verify build.sh is idempotent (isolated `.stack`)**
+- [ ] **Step 2: Verify build.sh is idempotent (isolated copy — must NOT touch the real `.stack/`)**
+
+> **Why this exact form (B1):** `lib/stacklib.sh` line 7 is an
+> *unconditional* `STACK_DIR="$STACK_ROOT/.stack"` — a pre-exported
+> `STACK_DIR` is **overwritten** when build.sh sources stacklib, so an
+> env-override would write into the **real live `.stack/`**
+> (shared-checkout hazard) and false-pass. Line 6 *does* honor a
+> pre-exported `STACK_ROOT` (`STACK_ROOT="${STACK_ROOT:-…}"`), so override
+> `STACK_ROOT` against an rsync'd copy and grep that copy's `.stack/`.
 
 Run:
 ```bash
-T=/tmp/fcr-b && rm -rf $T && mkdir -p $T
-STACK_ROOT="$T" bash -c '
-  mkdir -p "$1/.stack"; cd "$(dirname "$2")/../.." 
-  STACK_DIR="$1/.stack" . lib/stacklib.sh 2>/dev/null
-' _ "$T" services/firecrawl/build.sh 2>/dev/null || true
-# Direct, simpler check: run twice against a temp STACK_DIR via env override
-cat > /tmp/fcr-b.sh <<'SH'
-set -euo pipefail
-. lib/stacklib.sh
-SH
-( cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
-  STACK_DIR=/tmp/fcrstk; rm -rf $STACK_DIR; mkdir -p $STACK_DIR
-  export STACK_DIR
-  bash services/firecrawl/build.sh
-  a="$(grep FIRECRAWL_DB_PASSWORD /tmp/fcrstk/firecrawl.generated.env)"
-  bash services/firecrawl/build.sh
-  b="$(grep FIRECRAWL_DB_PASSWORD /tmp/fcrstk/firecrawl.generated.env)"
-  [ "$a" = "$b" ] && echo "IDEMPOTENT ok ($(wc -l < /tmp/fcrstk/firecrawl.generated.env) keys)" || echo "NOT IDEMPOTENT (FAIL)"
-  rm -rf /tmp/fcrstk )
+B=/tmp/fcr-b && rm -rf $B && mkdir -p $B
+rsync -a --exclude .git --exclude .stack --exclude '.claude' \
+  /Users/joe/Development/ai-tools/openclaw/hermes-stack/. "$B/"
+mkdir -p "$B/.stack"
+STACK_ROOT="$B" bash "$B/services/firecrawl/build.sh"
+a="$(grep '^FIRECRAWL_DB_PASSWORD=' "$B/.stack/firecrawl.generated.env")"
+STACK_ROOT="$B" bash "$B/services/firecrawl/build.sh"
+b="$(grep '^FIRECRAWL_DB_PASSWORD=' "$B/.stack/firecrawl.generated.env")"
+keys="$(grep -c '=' "$B/.stack/firecrawl.generated.env")"
+{ [ "$a" = "$b" ] && [ "$keys" -eq 2 ]; } \
+  && echo "IDEMPOTENT ok ($keys keys)" || echo "NOT IDEMPOTENT (FAIL)"
+rm -rf "$B"
 ```
-Expected: `IDEMPOTENT ok (2 keys)` — second run reuses the same password (read-existing-first), file has both `FIRECRAWL_DB_PASSWORD` and `FIRECRAWL_BULL_AUTH_KEY`. (Note: `stacklib.sh` honors a pre-exported `STACK_DIR`.)
+Expected: `IDEMPOTENT ok (2 keys)` — 2nd run reuses the same password (read-existing-first); both `FIRECRAWL_DB_PASSWORD` + `FIRECRAWL_BULL_AUTH_KEY` present. The real repo `.stack/` is never written (we run the rsync'd copy with `STACK_ROOT` overridden — the only honored override).
 
 - [ ] **Step 3: `.stack.env.example` — profile doc + model lever + resource levers + virtkey**
 
@@ -238,20 +243,27 @@ git -c user.name="Joe Johnston" -c user.email="<redacted>" \
 
 - [ ] **Step 1: Resolve the three manifest digests**
 
-Run:
+Run (primary = manifest-list digest via imagetools; real fallback =
+`RepoDigests` after a pull — S2: the old `python3 -c '…print()'` fallback
+was bogus, it emitted an empty digest):
 ```bash
 for i in firecrawl playwright-service nuq-postgres; do
-  d=$(docker buildx imagetools inspect ghcr.io/firecrawl/$i:latest --format '{{.Manifest.Digest}}' 2>/dev/null) \
-   || d=$(docker manifest inspect ghcr.io/firecrawl/$i:latest -v 2>/dev/null | python3 -c 'import sys,json,hashlib;print()' 2>/dev/null)
-  echo "ghcr.io/firecrawl/$i@$d"
+  d=$(docker buildx imagetools inspect ghcr.io/firecrawl/$i:latest \
+        --format '{{.Manifest.Digest}}' 2>/dev/null)
+  if [ -z "$d" ]; then
+    docker pull -q ghcr.io/firecrawl/$i:latest >/dev/null
+    ref=$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/firecrawl/$i:latest)
+    d=${ref#*@}
+  fi
+  case "$d" in sha256:*) echo "ghcr.io/firecrawl/$i@$d";;
+    *) echo "RESOLVE-FAILED for $i (got: '$d') — STOP"; esac
 done
 ```
-Expected: three lines, each `ghcr.io/firecrawl/<img>@sha256:<64hex>`. If `imagetools` is unavailable, use:
-`docker pull -q ghcr.io/firecrawl/$i:latest && docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/firecrawl/$i:latest` (gives `ghcr.io/firecrawl/<img>@sha256:…`).
+Expected: exactly three `ghcr.io/firecrawl/<img>@sha256:<64hex>` lines, no `RESOLVE-FAILED`. The manifest-list digest pulls correctly on darwin/arm64 (Docker resolves the per-arch image from the list digest — same mechanism as the existing pinned `litellm`/`hindsight` digests).
 
 - [ ] **Step 2: Write `services/firecrawl/.image-digest`**
 
-Create the file with exactly the three resolved lines from Step 1 (mirrors `services/litellm/.image-digest` format — pinned ref per line, plus a date comment):
+Create the file with the three resolved lines from Step 1. **S6:** this is a *documented variant* of the `services/litellm/.image-digest` convention (litellm's is a single bare line, no comment) — three pinned refs + a leading `#` provenance/bump-instruction header. Nothing parses `.image-digest` mechanically (purely documentary across litellm/hindsight/here), so the comment is safe:
 
 ```
 # Resolved <YYYY-MM-DD> from :latest (gotcha #6 — upstream ships no semver;
@@ -319,7 +331,11 @@ services:
       - "3000"
     environment:
       PORT: "3000"
+      # S3: deliberate stack default — upstream leaves BLOCK_MEDIA UNSET
+      # (media NOT blocked). We block media (lighter/faster scrapes; no
+      # binary fetches). Flip to "false" if a use case needs media.
       BLOCK_MEDIA: "true"
+      # static value (upstream derives this from CRAWL_CONCURRENT_REQUESTS).
       MAX_CONCURRENT_PAGES: "10"
     cpus: ${FIRECRAWL_PLAYWRIGHT_CPU:-2}
     mem_limit: ${FIRECRAWL_PLAYWRIGHT_MEM:-2g}
@@ -361,12 +377,34 @@ services:
       OPENAI_API_KEY: ${FIRECRAWL_VIRTUAL_KEY}
       OPENAI_BASE_URL: http://litellm:4000/v1
       MODEL_NAME: ${FIRECRAWL_MODEL}
+      # B2: upstream supplies these via `<<: *common-env` with
+      # `${VAR:-<default>}` — that default substitution happens in the
+      # UPSTREAM compose, NOT here, so an omitted key is simply UNSET in our
+      # container (no default). NUM_WORKERS_PER_QUEUE drives harness worker
+      # spawning — unset ⇒ risk of a zero-worker API (jobs enqueue, never
+      # process; Task 6 scrape hangs). Set explicitly to upstream's defaults.
+      # (Implementer: skim `services/firecrawl/_source/apps/api/src/config.ts`
+      # for any other common-env key that is required-with-no-in-app-default
+      # and add it here too.)
+      NUM_WORKERS_PER_QUEUE: "8"
+      CRAWL_CONCURRENT_REQUESTS: "10"
+      MAX_CONCURRENT_JOBS: "5"
+      BROWSER_POOL_SIZE: "5"
     depends_on:
       firecrawl-postgres: { condition: service_healthy }
       firecrawl-playwright: { condition: service_started }
       rabbitmq: { condition: service_healthy }
       redis: { condition: service_healthy }
       litellm: { condition: service_healthy }
+    healthcheck:
+      # S1: spec acceptance requires firecrawl-api "healthy". No HTTP health
+      # path is guaranteed across firecrawl builds, so use a TCP probe on the
+      # API port; harness boot can take a while (HARNESS_STARTUP_TIMEOUT_MS).
+      test: ["CMD-SHELL", "node -e 'require(\"net\").connect(3002,\"127.0.0.1\").on(\"connect\",()=>process.exit(0)).on(\"error\",()=>process.exit(1))'"]
+      interval: 10s
+      timeout: 6s
+      retries: 30
+      start_period: 90s
     cpus: ${FIRECRAWL_API_CPU:-2}
     mem_limit: ${FIRECRAWL_API_MEM:-4g}
     logging:
@@ -418,7 +456,7 @@ git -c user.name="Joe Johnston" -c user.email="<redacted>" \
 
 In `README.md`: (a) add `firecrawl` to the services directory-tree comment and the profiles description ("OPTIONAL web-scraper (nuq); opt-in; needs the always-on `rabbitmq` backend; extract via LiteLLM"); (b) add a gotcha entry:
 ```
-N. **Firecrawl uses a DEDICATED `firecrawl-postgres`, never the shared `pg`.**
+14. **Firecrawl uses a DEDICATED `firecrawl-postgres`, never the shared `pg`.**
    `nuq-postgres` is a purpose-built appliance: `pg_cron`
    `shared_preload_libraries` + cluster-wide `ALTER SYSTEM` + ~40 cron jobs
    that ARE the queue engine (reapers/GC/REINDEX). It self-initializes its
@@ -426,7 +464,7 @@ N. **Firecrawl uses a DEDICATED `firecrawl-postgres`, never the shared `pg`.**
    is a stateless nuq notify/prefetch transport → shared always-on backend.
    Losing `firecrawl-pg-data` loses only in-flight jobs (ephemeral queue).
 ```
-(use the next free gotcha number)
+(N1: there are **13** existing gotchas in README.md — this is **#14**. Verify with `grep -nE '^[0-9]+\. ' README.md | tail -1` before writing.)
 
 - [ ] **Step 2: Verify + commit**
 

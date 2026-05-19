@@ -1,0 +1,38 @@
+# camofox-browser — stealth headless-browser automation API (Camoufox/Firefox)
+# for AI agents. profile [camofox-browser] (opt-in). STANDALONE: no pg/redis/
+# rabbitmq/litellm, no provisioner/preflight/prestart/poststart. No upstream
+# image — built from pinned services/camofox-browser/_source via Dockerfile.ci
+# (honcho/honcho-ui precedent). Project-scoped (no container_name / no shared
+# network); siblings reach it as camofox-browser:9377, external via
+# camofox-browser.<project>.orb.local:9377. CAMOFOX_ACCESS_KEY is generated
+# (services/camofox-browser/build.sh) into .stack/camofox-browser.generated.env
+# and reaches the container ONLY via dc's hermetic --env-file (gotcha #16).
+services:
+  camofox-browser:
+    build: { context: ./_source, dockerfile: Dockerfile.ci }
+    profiles: [camofox-browser]
+    restart: unless-stopped
+    expose:
+      - "9377"
+    environment:
+      CAMOFOX_PORT: "9377"
+      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY}
+      MAX_OLD_SPACE_SIZE: ${CAMOFOX_HEAP_MB:-128}
+    volumes:
+      - camofox-data:/root/.camofox
+    healthcheck:
+      # /health is unauthenticated (no bearer needed). curl is installed by
+      # Dockerfile.ci. start_period covers Camoufox/Xvfb first boot.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9377/health || exit 1"]
+      interval: 10s
+      timeout: 6s
+      retries: 20
+      start_period: 30s
+    cpus: ${CAMOFOX_CPU:-2}
+    mem_limit: ${CAMOFOX_MEM:-2g}
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  camofox-data:

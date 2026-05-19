@@ -100,6 +100,15 @@ stack_backends() {
 # _svc_uc NAME — uppercase with hyphens->underscores. Internal to stack_source.
 _svc_uc() { printf '%s' "$1" | tr 'a-z-' 'A-Z_'; }
 
+# _env_value FILE KEY — env_get + strip inline "# comment" + trim whitespace.
+# Use for service.env declaration keys that legitimately carry annotations
+# (REPO, DEFAULT, PIN). env_get itself stays raw (passwords can contain '#').
+_env_value() {
+  local v; v="$(env_get "$1" "$2")"
+  v="${v%%#*}"
+  printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
 # ensure_dockerignore SRC_DIR — make SRC_DIR/.dockerignore exist with `.git/`
 # as one of its lines. Preserves any pre-existing content (idempotent).
 ensure_dockerignore() {
@@ -125,11 +134,11 @@ stack_source() {
   local svc_uc; svc_uc="$(_svc_uc "$svc")"
   local svcenv="$STACK_ROOT/services/$svc/service.env"
   if [ -z "$repo" ]; then
-    repo="$(env_get "$svcenv" "${svc_uc}_SOURCE_REPO")"
+    repo="$(_env_value "$svcenv" "${svc_uc}_SOURCE_REPO")"
     [ -n "$repo" ] || die "stack_source($svc): no REPO arg and no ${svc_uc}_SOURCE_REPO in $svcenv"
   fi
   if [ -z "$default_pin" ]; then
-    default_pin="$(env_get "$svcenv" "${svc_uc}_SOURCE_DEFAULT")"
+    default_pin="$(_env_value "$svcenv" "${svc_uc}_SOURCE_DEFAULT")"
     [ -n "$default_pin" ] || die "stack_source($svc): no DEFAULT_PIN arg and no ${svc_uc}_SOURCE_DEFAULT in $svcenv"
   fi
   local requested; eval "requested=\${${svc_uc}_VERSION:-\$default_pin}"
@@ -233,8 +242,8 @@ stack_resolve_images() {
     [ -z "$names" ] && continue
     while IFS= read -r name; do
       [ -z "$name" ] && continue
-      repo="$(env_get "$f" "${name}_IMAGE_REPO")"
-      default="$(env_get "$f" "${name}_IMAGE_DEFAULT")"
+      repo="$(_env_value "$f" "${name}_IMAGE_REPO")"
+      default="$(_env_value "$f" "${name}_IMAGE_DEFAULT")"
       [ -n "$repo" ] && [ -n "$default" ] \
         || die "stack_resolve_images: $f missing ${name}_IMAGE_REPO or ${name}_IMAGE_DEFAULT"
       stack_image "$name" "$repo" "$default" "$svc"

@@ -86,6 +86,26 @@ test_stack_source_tag_resolve_and_dockerignore() {
   echo "ok: stack_source tag-resolve + .dockerignore + .generated.env"
 }
 
+test_stack_source_service_env_strips_inline_comments() {
+  # Regression: env_get returns raw line-tail INCLUDING "# annotation".
+  # Helpers MUST strip inline comments from REPO/DEFAULT, or git rev-parse
+  # silently falls through to FETCH_HEAD and checks out latest main instead
+  # of the pinned SHA. Live-stack supply-chain bug.
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _stack_source_make_upstream "$d"
+  mkdir -p "$d/services/testsvc"
+  local v1_sha; v1_sha="$(git -C "$d/upstream" rev-list -n1 v1)"
+  cat > "$d/services/testsvc/service.env" <<EOF
+TESTSVC_SOURCE_REPO=$d/upstream.git
+TESTSVC_SOURCE_DEFAULT=$v1_sha   # tag v1 (with inline annotation that MUST be stripped)
+EOF
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc
+  local got; got="$(git -C "$d/services/testsvc/_source" rev-parse HEAD)"
+  [ "$got" = "$v1_sha" ] \
+    || { echo "FAIL: comment leaked into pin — got $got, want $v1_sha (annotation drift)"; return 1; }
+  echo "ok: stack_source strips inline comments from service.env values"
+}
+
 test_stack_source_reads_service_env_when_args_missing() {
   local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
   _stack_source_make_upstream "$d"
@@ -297,6 +317,7 @@ run_helpers_tests() {
   test_stack_image_fail_loud_on_bad_ref || return 1
   test_stack_resolve_images_reads_service_env || return 1
   test_stack_source_reads_service_env_when_args_missing || return 1
+  test_stack_source_service_env_strips_inline_comments || return 1
 }
 
 run_helpers_tests || fail=1

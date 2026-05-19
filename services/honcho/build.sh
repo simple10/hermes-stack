@@ -3,17 +3,10 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/honcho"
-HONCHO_PIN="8fcbb54a49292341dba79d606ee332c50778429b"  # plastic-labs/honcho pinned
-
-if [ -d "$D/_source" ] && [ -f "$D/_source/Dockerfile" ]; then
-  log "honcho: _source present (pinned build context) — reusing"
-else
-  log "honcho: cloning plastic-labs/honcho @ $HONCHO_PIN"
-  rm -rf "$D/_source"   # recover from a partial/interrupted prior clone
-  git clone https://github.com/plastic-labs/honcho "$D/_source"
-  git -C "$D/_source" checkout "$HONCHO_PIN"
-  rm -rf "$D/_source/.git"
-fi
+# Pinned commit of plastic-labs/honcho. Bumpable via .stack/.env HONCHO_VERSION
+# (tag or commit SHA). Tracked default MUST stay annotated with a tag.
+stack_source honcho https://github.com/plastic-labs/honcho \
+  8fcbb54a49292341dba79d606ee332c50778429b   # tag <annotate after first build>
 # Render config.runtime.toml from the template, injecting the per-module
 # model levers from .stack/.env. Bash-source so the ${STACK_LLM_MODEL*} refs
 # in .stack/.env expand (presets defined above the per-service lines). Secret
@@ -43,5 +36,10 @@ log "honcho: HONCHO_DB_PASSWORD owned in honcho.generated.env"
 # `dc up -d` after backends+preflight are already up. honcho-api and
 # honcho-deriver share one build context (./_source) → a single image.
 # Layer-cached: a no-op when nothing changed.
-log "honcho: building image (honcho-api + honcho-deriver share one context)"
-dc build honcho-api honcho-deriver
+if [ -f "$STACK_DIR/honcho/.source.rebuild" ]; then
+  log "honcho: source changed — building image (honcho-api + honcho-deriver share one context)"
+  dc build honcho-api honcho-deriver
+  rm -f "$STACK_DIR/honcho/.source.rebuild"
+else
+  log "honcho: source unchanged — skipping dc build"
+fi

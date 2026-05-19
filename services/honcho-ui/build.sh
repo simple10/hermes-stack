@@ -7,23 +7,19 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/honcho-ui"
-# offendingcommit/openconcho pinned (v0.8.0). Bump deliberately (gotcha #6).
-OPENCONCHO_PIN="e490d911fcb27ee193558fd9a28856cde2057665"
+# Pinned commit of offendingcommit/openconcho. Bumpable via .stack/.env
+# HONCHO_UI_VERSION (tag or commit SHA).
+stack_source honcho-ui https://github.com/offendingcommit/openconcho \
+  e490d911fcb27ee193558fd9a28856cde2057665   # tag <annotate after first build>
 
-if [ -d "$D/_source" ] && [ -f "$D/_source/package.json" ]; then
-  log "honcho-ui: _source present (pinned build context) — reusing"
-else
-  log "honcho-ui: cloning offendingcommit/openconcho @ $OPENCONCHO_PIN"
-  rm -rf "$D/_source"   # recover from a partial/interrupted prior clone
-  git clone https://github.com/offendingcommit/openconcho "$D/_source"
-  git -C "$D/_source" checkout "$OPENCONCHO_PIN"
-  rm -rf "$D/_source/.git"
-fi
-log "honcho-ui: source ready (pin ${OPENCONCHO_PIN:0:12})"
-
-# Build the image now so COMPOSE_PROJECT_NAME -> HONCHO_BASE_URL is resolved
+# Build the image so COMPOSE_PROJECT_NAME -> HONCHO_BASE_URL is resolved
 # and the source patch is baked (compose only builds lazily on first `up`,
-# which would miss a project rename). Layer-cached: no-op if nothing changed.
+# which would miss a project rename). Skip when source unchanged.
 set -a; . "$STACK_DIR/.env"; set +a
-log "honcho-ui: building image (default endpoint -> http://honcho-api.$(stack_project).orb.local:8000)"
-dc build honcho-ui
+if [ -f "$STACK_DIR/honcho-ui/.source.rebuild" ]; then
+  log "honcho-ui: source changed — building image (default endpoint -> http://honcho-api.$(stack_project).orb.local:8000)"
+  dc build honcho-ui
+  rm -f "$STACK_DIR/honcho-ui/.source.rebuild"
+else
+  log "honcho-ui: source unchanged — skipping dc build"
+fi

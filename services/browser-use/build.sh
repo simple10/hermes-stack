@@ -9,21 +9,18 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/browser-use"
-# browser-use/browser-use pinned (v0.12.7). Bump deliberately (gotcha #6).
-BROWSER_USE_PIN="157779338afdcc03023010ec3c24ad63d820453c"
-
-if [ -d "$D/_source" ] && [ -f "$D/_source/Dockerfile" ]; then
-  log "browser-use: _source present (pinned build context) — reusing"
-else
-  log "browser-use: cloning browser-use/browser-use @ $BROWSER_USE_PIN"
-  git clone https://github.com/browser-use/browser-use "$D/_source"
-  git -C "$D/_source" checkout "$BROWSER_USE_PIN"
-  rm -rf "$D/_source/.git"
-fi
-log "browser-use: source ready (pin ${BROWSER_USE_PIN:0:12})"
+# Pinned commit of browser-use/browser-use. Bumpable via .stack/.env
+# BROWSER_USE_VERSION (tag or commit SHA).
+stack_source browser-use https://github.com/browser-use/browser-use \
+  157779338afdcc03023010ec3c24ad63d820453c   # tag <annotate after first build>
 
 # Build the image now (compose only builds lazily on first `up`). Heavy
 # (Chromium apt + uv sync --all-extras) but layer-cached: no-op if unchanged.
 set -a; . "$STACK_DIR/.env"; set +a
-log "browser-use: building image (upstream Dockerfile; Chromium + uv bundled)"
-dc build browser-use
+if [ -f "$STACK_DIR/browser-use/.source.rebuild" ]; then
+  log "browser-use: source changed — building image (upstream Dockerfile; Chromium + uv bundled)"
+  dc build browser-use
+  rm -f "$STACK_DIR/browser-use/.source.rebuild"
+else
+  log "browser-use: source unchanged — skipping dc build"
+fi

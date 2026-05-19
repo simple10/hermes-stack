@@ -48,7 +48,7 @@ start:
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
      echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}"; \
-     dc up -d pg redis; \
+     b="$(stack_backends)"; [ -n "$b" ] && dc up -d $b; \
      for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
        [ -n "$p" ] && [ -x "{{root}}/services/$p/preflight.sh" ] && \
          { echo "== preflight: $p =="; bash "{{root}}/services/$p/preflight.sh"; }; \

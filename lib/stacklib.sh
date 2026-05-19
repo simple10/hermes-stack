@@ -109,7 +109,7 @@ stack_backends() {
 dc() {
   local proj prof v val g
   proj="$(stack_project)"
-  prof="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)"
+  prof="$(stack_profiles)"
   local args=(-p "$proj" -f "$STACK_ROOT/docker-compose.yaml" --env-file "$STACK_DIR/.env")
   # generated overlays — via `ls` (no bare glob: zsh aborts on no-match).
   while IFS= read -r g; do

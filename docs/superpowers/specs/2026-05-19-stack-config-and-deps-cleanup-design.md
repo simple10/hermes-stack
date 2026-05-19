@@ -104,7 +104,10 @@ It is a plain file (not a compose label) precisely because
 - every **cross-profile `depends_on` target** (a `depends_on` on a service in a
   different profile), and
 - every **substrate** (`pg`/`redis`/`rabbitmq`) the service connects to at
-  runtime via env URL even when there is no explicit compose `depends_on`.
+  runtime via env URL even when there is no explicit compose `depends_on`,
+- and any cross-service host (`litellm`, `honcho-api`, …) referenced from an
+  **`env_file`** (e.g. `agentmemory`'s `./.env`), not just from `compose.yaml`
+  — the audit must read `env_file` targets too.
 
 Starting table from the current audit (implementation must re-verify every
 compose; mark "—" for none, omit the file when empty):
@@ -115,11 +118,11 @@ compose; mark "—" for none, omit the file when empty):
 | `redis` | `SERVICE_KIND=backend` | substrate |
 | `rabbitmq` | `SERVICE_KIND=backend` | substrate |
 | `litellm` | `SERVICE_REQUIRES=pg,redis` | provision→pg; `REDIS_URL` redis (no compose depends_on) |
-| `honcho` | `SERVICE_REQUIRES=pg,redis` | `CONNECTION_URI` pg; `redis://redis` |
-| `hindsight` | `SERVICE_REQUIRES=pg` | provision.sql / `@pg:` |
+| `honcho` | `SERVICE_REQUIRES=pg,redis,litellm` | honcho-api depends_on pg, redis, **litellm (cross-profile)** |
+| `hindsight` | `SERVICE_REQUIRES=pg,litellm` | depends_on pg, **litellm (cross-profile)**; litellm pulls redis |
 | `firecrawl` | `SERVICE_REQUIRES=redis,rabbitmq,litellm` | depends_on redis, rabbitmq, **litellm (cross-profile)**; uses own `firecrawl-postgres`, **not** shared `pg` |
-| `honcho-ui` | `SERVICE_REQUIRES=honcho` | depends_on `honcho-api` (cross-profile) |
-| `agentmemory` | — (verify) | LiteLLM consumer via env; verify in implementation |
+| `honcho-ui` | `SERVICE_REQUIRES=honcho` | depends_on `honcho-api` (cross-profile); fixpoint pulls honcho's deps |
+| `agentmemory` | `SERVICE_REQUIRES=litellm` | `OPENAI_BASE_URL=http://litellm:4000` in `env_file ./.env` + `AGENTMEMORY_VIRTUAL_KEY`; **no compose `depends_on`** |
 | `cliproxyapi` | — | no pg/redis/litellm deps (per its compose header) |
 | `camofox-browser` | — | standalone |
 

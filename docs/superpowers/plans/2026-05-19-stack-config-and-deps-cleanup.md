@@ -131,18 +131,24 @@ git commit -m "refactor(pg): rename services/postgres -> services/pg (dir==servi
 
 - [ ] **Step 1: Audit each compose for cross-profile deps + substrate use**
 
-Run:
+Run (scan compose **and** any `env_file` — agentmemory's litellm dep lives in
+`services/agentmemory/.env`, invisible to a compose-only grep):
 ```bash
 for s in agentmemory cliproxyapi honcho-ui camofox-browser litellm honcho hindsight firecrawl; do
   echo "== $s =="
   grep -nE 'depends_on|@pg:|//pg:|POSTGRES_HOST|redis://redis|REDIS[A-Z_]*: *redis|amqp://rabbitmq|rabbitmq:|http://litellm|//honcho-api|honcho-api' "services/$s/compose.yaml" 2>/dev/null
+  for ef in $(grep -A3 'env_file:' "services/$s/compose.yaml" 2>/dev/null | grep -oE '\./[^ ]+' ); do
+    grep -nE 'litellm|//pg:|@pg:|redis://redis|amqp://rabbitmq' "services/$s/$ef" 2>/dev/null | sed "s|^|  (env_file $ef) |"
+  done
 done
 ```
 Expected (decision rule): a `service.env` with `SERVICE_REQUIRES=<profiles>`
-for every profile whose service is a **cross-profile `depends_on` target** or
+for every profile whose service is a **cross-profile `depends_on` target** OR
 whose hostname (`pg`/`redis`/`rabbitmq`/`litellm`/`honcho-api`) appears in
-`environment:`. `agentmemory`/`cliproxyapi`/`camofox-browser`: if the audit
-shows none, create **no** file for them.
+`environment:` **or in an `env_file`**. Known results to expect:
+`honcho` depends_on `litellm`; `hindsight` depends_on `litellm`; `agentmemory`
+has `OPENAI_BASE_URL=http://litellm:4000` in `./.env` (→ needs `litellm`).
+`cliproxyapi`/`camofox-browser`: none → create no file.
 
 - [ ] **Step 2: Create the substrate manifests**
 
@@ -171,13 +177,20 @@ SERVICE_REQUIRES=pg,redis
 ```
 `services/honcho/service.env`:
 ```sh
-# honcho: CONNECTION_URI -> pg ; redis://redis.
-SERVICE_REQUIRES=pg,redis
+# honcho-api: depends_on pg, redis, AND litellm (cross-profile).
+SERVICE_REQUIRES=pg,redis,litellm
 ```
 `services/hindsight/service.env`:
 ```sh
-# hindsight: provision.sql / @pg.
-SERVICE_REQUIRES=pg
+# hindsight: depends_on pg AND litellm (cross-profile; litellm pulls redis).
+SERVICE_REQUIRES=pg,litellm
+```
+`services/agentmemory/service.env`:
+```sh
+# agentmemory: OPENAI_BASE_URL=http://litellm:4000 (in ./.env) + uses
+# AGENTMEMORY_VIRTUAL_KEY (minted by litellm/preflight). No compose
+# depends_on, so the resolution test cannot catch a miss — declare it.
+SERVICE_REQUIRES=litellm
 ```
 `services/firecrawl/service.env`:
 ```sh
@@ -198,9 +211,11 @@ Run:
 bash -c '. lib/stacklib.sh; for s in pg redis rabbitmq litellm honcho hindsight firecrawl honcho-ui; do
   printf "%s: KIND=%s REQ=%s\n" "$s" "$(env_get services/$s/service.env SERVICE_KIND)" "$(env_get services/$s/service.env SERVICE_REQUIRES)"; done'
 ```
-Expected: pg/redis/rabbitmq show `KIND=backend REQ=`; litellm/honcho show
-`KIND= REQ=pg,redis`; hindsight `REQ=pg`; firecrawl `REQ=redis,rabbitmq,litellm`;
-honcho-ui `REQ=honcho`.
+Expected: pg/redis/rabbitmq show `KIND=backend REQ=`; litellm `REQ=pg,redis`;
+honcho `REQ=pg,redis,litellm`; hindsight `REQ=pg,litellm`; firecrawl
+`REQ=redis,rabbitmq,litellm`; honcho-ui `REQ=honcho`; agentmemory `REQ=litellm`.
+
+(Run the same line for `agentmemory` too.)
 
 - [ ] **Step 5: Commit**
 
@@ -238,9 +253,13 @@ seteq() {
     echo "FAIL: got [$a] want [$b]"; fail=1; fi
 }
 
-# stack_profiles is comma-joined -> normalize to spaces for set compare
+# stack_profiles is comma-joined -> normalize to spaces for set compare.
+# honcho requires litellm; hindsight requires litellm; agentmemory requires
+# litellm; litellm requires pg,redis (transitive fixpoint).
 seteq "$(stack_profiles 'litellm,honcho' | tr ',' ' ')"  'litellm honcho pg redis'
-seteq "$(stack_profiles 'honcho-ui' | tr ',' ' ')"       'honcho-ui honcho pg redis'
+seteq "$(stack_profiles 'honcho-ui' | tr ',' ' ')"       'honcho-ui honcho pg redis litellm'
+seteq "$(stack_profiles 'hindsight' | tr ',' ' ')"       'hindsight pg litellm redis'
+seteq "$(stack_profiles 'agentmemory' | tr ',' ' ')"     'agentmemory litellm pg redis'
 seteq "$(stack_profiles 'firecrawl' | tr ',' ' ')"       'firecrawl redis rabbitmq litellm pg'
 # stack_backends is already space-separated
 seteq "$(stack_backends 'litellm,honcho,cliproxyapi,honcho-ui')" 'pg redis'
@@ -430,14 +449,18 @@ a bare `dc up -d` (no args) would start the **whole** stack prematurely —
 only run it when there is at least one backend. With the default profiles
 `$b` = `pg redis`.
 
-- [ ] **Step 4: Verify just parses and the line expands**
+- [ ] **Step 4: Verify just parses; verify the backend set resolves**
 
 Run:
 ```bash
 just --list >/dev/null && echo PARSE_OK
-just -n start 2>&1 | grep -m1 'up -d'
+bash -c '. lib/stacklib.sh; echo "backends=[$(stack_backends)]"'
+just -n start 2>&1 | grep -m1 'dc up -d' | sed 's/^/  start-line: /'
 ```
-Expected: `PARSE_OK`; the printed `dc up -d …` line contains `pg redis`.
+Expected: `PARSE_OK`; `backends=[pg redis]`. (`just -n` prints the recipe's
+**literal** shell source — the `start-line` will show
+`b="$(stack_backends)"; [ -n "$b" ] && dc up -d $b`, NOT `pg redis`; that is
+correct, it is not evaluated. The `stack_backends` echo is the real check.)
 
 - [ ] **Step 5: Commit**
 
@@ -458,7 +481,8 @@ No live files move yet — only the code that reads/writes/binds them.
 - Modify (ALL flat `*.generated.env` users): `services/pg/build.sh`,
   `services/litellm/build.sh`, `services/honcho/build.sh`,
   `services/hindsight/build.sh`, `services/firecrawl/build.sh`,
-  `services/camofox-browser/build.sh`, `services/litellm/preflight.sh`,
+  `services/camofox-browser/build.sh`, `services/cliproxyapi/build.sh`,
+  `services/litellm/preflight.sh`,
   `machines/hermes/build.sh`, `machines/hermes/start.sh`
 - Modify: `services/litellm/compose.yaml`, `services/honcho/compose.yaml`,
   `services/cliproxyapi/compose.yaml`
@@ -537,6 +561,11 @@ first use of `GEN`/render, repoint the path, and delete the now-dead
 `services/camofox-browser/build.sh`:
 - `GEN="$STACK_DIR/camofox-browser.generated.env"` → `mkdir -p "$STACK_DIR/camofox-browser"; GEN="$STACK_DIR/camofox-browser/.generated.env"`
 
+`services/cliproxyapi/build.sh` (renders config to the OLD service dir — must
+move; cliproxyapi is in the default profiles so this runs every `just build`):
+- `mv "$tmp" "$D/config.runtime.yaml"` → `mkdir -p "$STACK_DIR/cliproxyapi"; mv "$tmp" "$STACK_DIR/cliproxyapi/config.runtime.yaml"`
+- `chmod 600 "$D/config.runtime.yaml"` → `chmod 600 "$STACK_DIR/cliproxyapi/config.runtime.yaml"`
+
 `services/litellm/preflight.sh` (mints/validates the virtual keys read by
 honcho/hermes/agentmemory/hindsight):
 - `GEN="$STACK_DIR/litellm.generated.env"` → `mkdir -p "$STACK_DIR/litellm"; GEN="$STACK_DIR/litellm/.generated.env"`
@@ -589,7 +618,8 @@ Expected: `NO_STRUCTURE_ERRORS` (missing bind *paths* are not a `config` error).
 git add lib/stacklib.sh justfile \
   services/pg/build.sh services/litellm/build.sh services/honcho/build.sh \
   services/hindsight/build.sh services/firecrawl/build.sh \
-  services/camofox-browser/build.sh services/litellm/preflight.sh \
+  services/camofox-browser/build.sh services/cliproxyapi/build.sh \
+  services/litellm/preflight.sh \
   machines/hermes/build.sh machines/hermes/start.sh \
   services/litellm/compose.yaml services/honcho/compose.yaml services/cliproxyapi/compose.yaml
 git diff --cached --stat
@@ -631,6 +661,14 @@ check() {
 }
 check default "$DEFAULT"
 for p in $USER_PROFILES; do check "$p" "$p"; done
+
+# Positive check: agentmemory's litellm dep is via env_file (no compose
+# depends_on) so the undefined-service test above cannot see it. Assert the
+# resolved profile set includes litellm directly.
+case ",$(stack_profiles agentmemory)," in
+  *,litellm,*) echo "ok   [agentmemory->litellm resolved]";;
+  *) echo "FAIL [agentmemory] stack_profiles missing litellm"; fail=1;;
+esac
 exit $fail
 ```
 
@@ -894,6 +932,22 @@ pending their review before merge.
   (virtual-key minting), machines/hermes build.sh+start.sh → T7 step4 +
   sanity-grep. Virtual keys added to the T9 snapshot / T11 verify so a
   silent re-mint is caught. ✓
+- **Pass-3 fix (independent sub-agent review)**, all verified against real
+  files before applying:
+  - B1: `honcho-api depends_on litellm` (cross-profile) → honcho
+    `SERVICE_REQUIRES=pg,redis,litellm` (T3).
+  - B2: `hindsight depends_on litellm` (cross-profile) → hindsight
+    `SERVICE_REQUIRES=pg,litellm` (T3).
+  - B3: `cliproxyapi/build.sh` renders to the old service dir & runs every
+    `just build` (cliproxyapi is a default profile) → repointed to
+    `.stack/cliproxyapi/` (T7 step4 + files + commit).
+  - M1: `agentmemory` reaches litellm via `env_file ./.env`
+    (`OPENAI_BASE_URL=http://litellm:4000`) — invisible to a compose-only
+    grep → `services/agentmemory/service.env SERVICE_REQUIRES=litellm`;
+    T3 audit grep extended to scan `env_file`; positive assertion added to
+    `profiles.test.sh` (no compose `depends_on` ⇒ undefined-service test
+    can't catch it). T4 test expectations updated for the new fixpoint
+    (honcho-ui/hindsight/agentmemory now pull litellm). ✓
 
 **Placeholder scan:** No TBD/TODO; every code/command step has concrete
 content and expected output. Audit step (T3.1) gives an explicit decision

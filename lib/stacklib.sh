@@ -274,10 +274,12 @@ EOF
   # operational allowlist — ONLY what the docker CLI needs to reach the daemon
   # and build/pull over the network (these are NOT Compose interpolation
   # inputs — no compose file references ${HTTP_PROXY} etc.; they only affect
-  # docker's own networking + its auto-injection of proxy build-args). The
-  # *_PROXY set is REQUIRED on proxied hosts (e.g. OrbStack's
-  # proxy.orb.internal): without it `dc build` for build-from-source services
-  # (honcho/honcho-ui/camofox-browser) has no egress and apt-get fails.
+  # docker's own networking + its auto-injection of proxy build-args).
+  # Users behind a corporate/captive proxy set HTTP_PROXY etc. in their
+  # shell — dc() passes them through. No auto-derive from the daemon: we
+  # tried that once (OrbStack reports its built-in proxy.orb.internal in
+  # `docker info`) and BuildKit would fail with NXDOMAIN when the OrbStack
+  # proxy was disabled/auto/unreachable. Set proxy vars yourself if needed.
   # Everything else is absent by design. `printenv` (not bash-only ${!v}) so
   # this is bash/zsh-portable; exit status distinguishes set-but-empty/unset.
   local pass=()
@@ -289,28 +291,6 @@ EOF
     if val="$(printenv "$v" 2>/dev/null)"; then pass+=("$v=$val"); fi
   done
   [ -n "$prof" ] && pass+=("COMPOSE_PROFILES=$prof")
-  # Proxied-host build egress: if NO *_PROXY came from the host env but the
-  # DAEMON has one configured, forward the daemon's proxy into the hermetic
-  # env. docker auto-injects env *_PROXY into builds (verified: `dc build`
-  # & `up --build`), so build-from-source services
-  # (honcho/honcho-ui/camofox-browser) can fetch packages on a proxied host
-  # (e.g. OrbStack proxy.orb.internal) where BuildKit has no direct egress.
-  # Portable & non-hardcoded: a no-op when the daemon reports no proxy;
-  # host/user-set *_PROXY always wins (probe skipped). Inert for non-build
-  # subcommands. One `docker info` only when needed.
-  case " ${pass[*]} " in
-    *" HTTP_PROXY="*|*" http_proxy="*|*" HTTPS_PROXY="*|*" https_proxy="*) : ;;
-    *)
-      local dp hp sp np rest
-      dp="$(docker info --format '{{.HTTPProxy}}|{{.HTTPSProxy}}|{{.NoProxy}}' 2>/dev/null || true)"
-      hp="${dp%%|*}"; rest="${dp#*|}"; sp="${rest%%|*}"; np="${rest#*|}"
-      if [ -n "$hp" ] || [ -n "$sp" ]; then
-        [ -n "$hp" ] && pass+=("HTTP_PROXY=$hp" "http_proxy=$hp")
-        [ -n "$sp" ] && pass+=("HTTPS_PROXY=$sp" "https_proxy=$sp")
-        [ -n "$np" ] && pass+=("NO_PROXY=$np" "no_proxy=$np")
-      fi
-      ;;
-  esac
   env -i "${pass[@]}" docker compose "${args[@]}" "$@"
 }
 

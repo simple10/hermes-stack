@@ -29,6 +29,7 @@ hermes-stack/
     hindsight/                 # profile [hindsight] (opt-in); pinned image; pg-backed; LiteLLM-wired
     firecrawl/                 # profile [firecrawl] (opt-in); nuq-backed web-scraper API; rabbitmq-wired; LiteLLM-wired
     camofox-browser/           # profile [camofox-browser] (opt-in); standalone Camoufox/Firefox automation API; built from pinned _source
+    browser-use/               # profile [browser-use] (opt-in); LLM-driven browser agent (MCP); pinned _source -> upstream Dockerfile; SERVICE_REQUIRES=litellm
   machines/
     hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
   docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
@@ -138,6 +139,23 @@ fixpoint: `stack_profiles` (= `COMPOSE_PROFILES` ∪ required, injected by
   (honcho/honcho-ui precedent). `CAMOFOX_ACCESS_KEY` is generated into
   `.stack/camofox-browser/.generated.env` (hermetic; gotcha #16) — read it
   there to wire Hermes. API on `:9377`, `/health` unauthenticated.
+- **browser-use** — service `browser-use` (optional), the
+  [browser-use](https://github.com/browser-use/browser-use) LLM-driven
+  browser-automation agent. Profile `[browser-use]`;
+  `SERVICE_REQUIRES=litellm` (`depends_on litellm`; fixpoint pulls pg/redis).
+  No upstream image: built from a **pinned** gitignored `_source/` via the
+  **upstream Dockerfile** (bundles python3.12 + uv + system Chromium +
+  browser-use). **Fully local — no cloud**: the default `browser-use <task>`
+  CLI needs `BROWSER_USE_API_KEY` + a cloud daemon; we never set that key and
+  disable telemetry / cloud-sync / version-check. The no-cloud interface is
+  the **MCP server** (stdio, `python -m browser_use.mcp`); its Agent LLM is
+  built from `OPENAI_*` env → pointed at LiteLLM, so **all inference is
+  cliproxy→LiteLLM** on the minted `BROWSER_USE_VIRTUAL_KEY` (alias
+  `browser_use` in `LITELLM_VIRTKEYS`; per-consumer SpendLogs), model =
+  `BROWSER_USE_MODEL` lever. No source patching; `_source/` stays pinned. The
+  container is a long-lived **ready worker** (`sleep infinity`) — consumers
+  spawn the stdio MCP server on demand:
+  `docker exec -i <project>-browser-use-1 python -m browser_use.mcp`.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
   via the prebuilt `eceasy/cli-proxy-api` image **pinned by tag**
   (`CLIPROXY_VERSION`, bump deliberately). Profile `[cliproxyapi]`;

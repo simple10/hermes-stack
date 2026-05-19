@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 . lib/stacklib.sh
 
-USER_PROFILES="litellm honcho honcho-ui cliproxyapi hindsight agentmemory firecrawl camofox-browser"
+USER_PROFILES="litellm honcho honcho-ui cliproxyapi hindsight agentmemory firecrawl camofox-browser browser-use"
 DEFAULT="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)"
 fail=0
 check() {

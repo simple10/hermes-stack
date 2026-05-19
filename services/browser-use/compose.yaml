@@ -1,0 +1,76 @@
+# browser-use (browser-use/browser-use) — OPTIONAL local browser-automation
+# agent. profile [browser-use]. Project-scoped (no container_name / no shared
+# net). Built from PINNED _source via the UPSTREAM Dockerfile (bundles
+# python3.12 + uv + system Chromium + browser-use; gotcha #6).
+#
+# FULLY LOCAL — NO CLOUD. browser-use's default `browser-use <task>` CLI is
+# cloud-oriented (needs BROWSER_USE_API_KEY + cloud daemon). We never set that
+# key and disable telemetry / cloud-sync / version-check. The local, no-cloud
+# interface is the MCP server (stdio): `python -m browser_use.mcp`. Its Agent
+# LLM is built from OPENAI_* env (browser_use.llm.ChatOpenAI drops None client
+# params, so AsyncOpenAI honors OPENAI_BASE_URL / OPENAI_API_KEY) — pointed
+# here at LiteLLM, so ALL inference goes cliproxy→LiteLLM on the minted
+# BROWSER_USE_VIRTUAL_KEY (per-consumer SpendLogs), model = BROWSER_USE_MODEL
+# lever (default cliproxy/gpt-5.5). No source patching; _source/ stays pinned.
+#
+# The container runs as a long-lived READY WORKER (`sleep infinity`): the
+# Chromium + venv environment is up; consumers spawn the stdio MCP server (or
+# one-shot Agent tasks) on demand, e.g.:
+#   docker exec -i <project>-browser-use-1 python -m browser_use.mcp
+# Siblings reach LiteLLM as litellm:4000; nothing is published to the host.
+#
+# depends_on litellm (service_healthy), cross-profile. Compose does NOT
+# auto-start a profiled depends_on target — services/browser-use/service.env
+# declares SERVICE_REQUIRES=litellm so dc()'s profile expansion pulls litellm
+# (+ pg,redis transitively) whenever browser-use is active.
+
+services:
+  browser-use:
+    build:
+      context: ./_source
+      dockerfile: Dockerfile
+    profiles: [browser-use]
+    restart: unless-stopped
+    # Upstream ENTRYPOINT is the cloud CLI; override to a ready worker.
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      # All inference via LiteLLM (OpenAI-compatible) on the minted virtual
+      # key; model is the .stack/.env lever (-> STACK_LLM_MODEL). NOTE: the
+      # LITELLM_VIRTKEYS alias is `browser_use` (UNDERSCORE) — preflight.sh
+      # derives the env var as <ALIAS-uppercased>_VIRTUAL_KEY, and a hyphen
+      # would yield the invalid `BROWSER-USE_VIRTUAL_KEY`. Service/profile
+      # stay `browser-use`; only the key alias differs.
+      OPENAI_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${BROWSER_USE_VIRTUAL_KEY}
+      BROWSER_USE_LLM_MODEL: ${BROWSER_USE_MODEL}
+      # Headless system Chromium (IN_DOCKER=True is set by the image -> no
+      # sandbox needed; the bundled chromium is auto-detected).
+      BROWSER_USE_HEADLESS: "true"
+      # Fully local: no telemetry, no cloud sync, no version pings, and skip
+      # the provider key-verification round-trip (LiteLLM is the only target).
+      ANONYMIZED_TELEMETRY: "false"
+      BROWSER_USE_CLOUD_SYNC: "false"
+      BROWSER_USE_VERSION_CHECK: "false"
+      SKIP_LLM_API_KEY_VERIFICATION: "true"
+      # config.json + profiles live on the data volume (env above overrides
+      # its llm.api_key / llm.model anyway).
+      BROWSER_USE_CONFIG_DIR: /data
+      BROWSER_USE_LOGGING_LEVEL: info
+    depends_on:
+      litellm: { condition: service_healthy }
+    shm_size: "1gb"
+    volumes:
+      - browser-use-data:/data
+    healthcheck:
+      # Env-readiness: the package imports (venv intact) and Chromium exists.
+      test: ["CMD-SHELL", "python -c 'import browser_use' && command -v chromium >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  browser-use-data:

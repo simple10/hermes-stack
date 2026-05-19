@@ -24,6 +24,5 @@ log "honcho-ui: source ready (pin ${OPENCONCHO_PIN:0:12})"
 # and the source patch is baked (compose only builds lazily on first `up`,
 # which would miss a project rename). Layer-cached: no-op if nothing changed.
 set -a; . "$STACK_DIR/.env"; set +a
-export COMPOSE_ENV_FILES="$(compose_env_files)"
 log "honcho-ui: building image (default endpoint -> http://honcho-api.$(stack_project).orb.local:8000)"
 dc build honcho-ui

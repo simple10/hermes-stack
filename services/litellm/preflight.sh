@@ -12,7 +12,6 @@ set -euo pipefail
 require_stack_env
 ENVF="$STACK_DIR/.env"
 GEN="$STACK_DIR/litellm.generated.env"
-export COMPOSE_ENV_FILES="$(compose_env_files)"
 
 # Bring up litellm ourselves (the justfile no longer does this for us).
 # `pg` is already running from the start pipeline's backends-first step;

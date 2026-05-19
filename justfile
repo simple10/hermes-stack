@@ -43,14 +43,12 @@ start:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
-     export COMPOSE_ENV_FILES="$(compose_env_files)"; \
      echo "project=$(stack_project)  COMPOSE_PROFILES=${COMPOSE_PROFILES:-}"; \
      dc up -d pg redis; \
      for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
        [ -n "$p" ] && [ -x "{{root}}/services/$p/preflight.sh" ] && \
          { echo "== preflight: $p =="; bash "{{root}}/services/$p/preflight.sh"; }; \
      done; \
-     export COMPOSE_ENV_FILES="$(compose_env_files)"; \
      for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
        [ -n "$p" ] && [ -x "{{root}}/services/$p/prestart.sh" ] && \
          { echo "== prestart: $p =="; bash "{{root}}/services/$p/prestart.sh"; }; \
@@ -80,9 +78,6 @@ start-cleanup:
 # Stop containers (keep volumes). Machines left running.
 stop:
     @set -a; source "{{lib}}"; set +a; \
-     export COMPOSE_ENV_FILES="$(compose_env_files)"; \
-     set -a; source "{{root}}/.stack/.env" 2>/dev/null || true; set +a; \
-     export COMPOSE_PROFILES="${COMPOSE_PROFILES:-litellm,honcho}"; \
      dc down --remove-orphans
 
 # This stack's container health + machine list.

@@ -379,6 +379,23 @@ provisions, `poststart` finalizes.
     playwright scrape engine via `PLAYWRIGHT_MICROSERVICE_URL`, which IS
     wired). Hermes consumers must call plain scrape/extract, not a "browser
     session"/agent mode.
+16. **Config is HERMETIC: only `.stack/.env` (+ `.stack/*.generated.env`); the
+    host environment never overrides it.** Docker Compose `${VAR}`
+    interpolation precedence is host-env > `--env-file`, so a stray exported
+    var (`POSTGRES_SUPERPASS`, `*_DB_PASSWORD`, `*_VIRTUAL_KEY`,
+    `COMPOSE_PROFILES`, `STACK_ROOT`, …) would silently outrank the real
+    `.stack` value — generated secrets are the worst case (they live ONLY in
+    `.stack/*.generated.env`, never in the schema). Defense: `dc()` is the
+    sole `docker compose` chokepoint and runs `env -i` with a tight
+    docker-operational allowlist + absolute `--env-file` args (host
+    interpolation vars literally aren't present to win). `STACK_ROOT` is
+    derived from `stacklib.sh`'s own location (bash `BASH_SOURCE` / zsh
+    `${(%):-%x}`), never from env; if it can't pin a dir containing
+    `docker-compose.yaml`+`lib/stacklib.sh` it **dies loudly** (the old silent
+    `zsh dirname ""=. → ./..=PARENT` mis-resolution was the footgun). There is
+    no `COMPOSE_ENV_FILES` export anywhere — env-file wiring lives only in
+    `dc()`. Don't add `${HOST_VAR}` reads to scripts/compose; add the key to
+    `.stack.env.example` + `lib/setup.sh` instead.
 
 ## Secrets model
 

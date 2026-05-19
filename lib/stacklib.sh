@@ -2,8 +2,28 @@
 # stacklib.sh — shared helpers for hermes-stack scripts. Source, don't exec.
 # Callers set `set -euo pipefail`.
 
-stack_root() { cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd; }
-STACK_ROOT="${STACK_ROOT:-$(stack_root)}"
+# STACK_ROOT is ALWAYS derived from THIS file's own location — never from the
+# ambient/host environment (a stray exported STACK_ROOT once redirected the
+# whole stack at the wrong .stack/). Resolution is shell-PORTABLE: bash sets
+# BASH_SOURCE; zsh does not (it uses ${(%):-%x}); plain sh has neither. If the
+# resolved dir doesn't look like the hermes-stack root we DIE LOUDLY rather
+# than silently operate on the wrong directory — that silent mis-resolution
+# (under zsh `dirname ""`=. , so `./..`=PARENT) was the real footgun, hidden
+# until now because `just` runs recipes under bash. To run against an isolated
+# copy, rsync the repo and source THAT copy's lib/stacklib.sh — self-resolving,
+# no override needed. The ONLY config source remains .stack/.env (+
+# .stack/*.generated.env); no script reads a host env var as an override.
+_stack_self() {
+  if [ -n "${BASH_SOURCE:-}" ]; then printf '%s' "${BASH_SOURCE[0]}"
+  elif [ -n "${ZSH_VERSION:-}" ]; then eval 'printf "%s" "${(%):-%x}"'
+  else printf '%s' "$0"; fi
+}
+STACK_ROOT="$(cd "$(dirname "$(_stack_self)")/.." 2>/dev/null && pwd)"
+if [ ! -f "$STACK_ROOT/docker-compose.yaml" ] || [ ! -f "$STACK_ROOT/lib/stacklib.sh" ]; then
+  printf 'FATAL: stacklib.sh could not locate the hermes-stack root (resolved "%s").\n' "$STACK_ROOT" >&2
+  printf '       Source it from inside the repo (bash or zsh) or use `just`. $STACK_ROOT is NOT honored by design.\n' >&2
+  return 1 2>/dev/null || exit 1
+fi
 STACK_DIR="$STACK_ROOT/.stack"
 
 log()  { printf '\n=== %s ===\n' "$*"; }
@@ -33,8 +53,39 @@ env_get() { grep "^${2}=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 # and OrbStack exposes services at <service>.<project>.orb.local.
 stack_project() { local p; p="$(env_get "$STACK_DIR/.env" COMPOSE_PROJECT_NAME)"; printf '%s' "${p:-aitools}"; }
 
-# dc — `docker compose` bound to this stack's project + root file.
-dc() { docker compose -p "$(stack_project)" -f "$STACK_ROOT/docker-compose.yaml" "$@"; }
+# dc — `docker compose` for THIS stack, run HERMETICALLY. Compose sees ONLY
+# .stack/.env (+ .stack/*.generated.env), passed as ABSOLUTE --env-file args,
+# with the host environment STRIPPED (env -i + a tight docker-operational
+# allowlist). Why BOTH: Compose interpolation precedence is host-env >
+# --env-file, so without env -i a stray exported var (POSTGRES_SUPERPASS,
+# *_DB_PASSWORD, *_VIRTUAL_KEY, COMPOSE_PROFILES, …) silently outranks the
+# real .stack value — the STACK_ROOT footgun, generalized to every secret.
+# project + profiles are injected explicitly from .stack/.env so they never
+# depend on Compose's env-file precedence rules or on the caller's CWD.
+dc() {
+  local proj prof v val g
+  proj="$(stack_project)"
+  prof="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)"
+  local args=(-p "$proj" -f "$STACK_ROOT/docker-compose.yaml" --env-file "$STACK_DIR/.env")
+  # generated overlays — via `ls` (no bare glob: zsh aborts on no-match).
+  while IFS= read -r g; do
+    [ -n "$g" ] && args+=(--env-file "$g")
+  done <<EOF
+$(ls "$STACK_DIR"/*.generated.env 2>/dev/null)
+EOF
+  # operational allowlist — ONLY what the docker CLI needs to reach the daemon
+  # (these are NOT Compose interpolation inputs). Everything else is absent by
+  # design. `printenv` (not bash-only ${!v}) so this is bash/zsh-portable;
+  # exit status distinguishes set-but-empty from unset.
+  local pass=()
+  for v in PATH HOME USER LOGNAME TERM TMPDIR TZ LANG LC_ALL \
+           SSH_AUTH_SOCK XDG_CONFIG_HOME XDG_RUNTIME_DIR \
+           DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_CERT_PATH DOCKER_TLS_VERIFY; do
+    if val="$(printenv "$v" 2>/dev/null)"; then pass+=("$v=$val"); fi
+  done
+  [ -n "$prof" ] && pass+=("COMPOSE_PROFILES=$prof")
+  env -i "${pass[@]}" docker compose "${args[@]}" "$@"
+}
 
 # render_template TEMPLATE OUT SERVICE — copy TEMPLATE->OUT only if OUT missing;
 # record template hash; if OUT exists, drift-check (warn only).
@@ -62,12 +113,6 @@ require_stack_env() {
   [ -f "$STACK_DIR/.env" ] || die ".stack/.env missing — run: just setup"
 }
 
-# compose_env_files — print comma list: .stack/.env first, then *.generated.env.
-compose_env_files() {
-  local list=".stack/.env"
-  local g
-  for g in "$STACK_DIR"/*.generated.env; do
-    [ -e "$g" ] && list="$list,.stack/$(basename "$g")"
-  done
-  printf '%s' "$list"
-}
+# (compose env-file wiring lives solely in dc() now — it passes absolute
+# --env-file args under a stripped env. No separate COMPOSE_ENV_FILES export
+# anywhere: that was relative-path + host-precedence prone. Single source.)

@@ -9,6 +9,10 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 root := justfile_directory()
 lib  := root / "lib/stacklib.sh"
 
+# Convenience aliases.
+alias up   := start
+alias down := stop
+
 # Default: list targets.
 default:
     @just --list
@@ -75,9 +79,23 @@ start-cleanup:
      if [ -n "$ids" ]; then docker rm $ids || true; fi; \
      echo "start-cleanup done"
 
-# Stop containers (keep volumes). Machines left running.
+# Stop this stack's machines, then bring containers down (keep volumes).
+# Only machines listed in this stack's .stack/.env STACK_MACHINES are touched.
 stop:
     @set -a; source "{{lib}}"; set +a; \
+     mch="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ', ' ' ')"; \
+     if [ -n "$(echo "$mch" | tr -d '[:space:]')" ]; then \
+       ol="$(orb list 2>/dev/null || true)"; \
+       for m in $mch; do \
+         [ -n "$m" ] || continue; \
+         row="$(echo "$ol" | awk -v m="$m" '$1==m')"; \
+         if [ -n "$row" ]; then \
+           echo "== stopping machine: $m =="; orb stop "$m" || true; \
+         else \
+           echo "(machine $m not created — skipping)"; \
+         fi; \
+       done; \
+     fi; \
      dc down --remove-orphans
 
 # This stack's container health + machine list.

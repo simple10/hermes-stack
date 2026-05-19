@@ -147,3 +147,26 @@ dir name.
 - Healthcheck path is `/health` (open) — confirmed in source review; if a
   build pins a server variant without it, fall back to a TCP probe on 9377
   (decided at validation).
+
+## As-built (validated 2026-05-18, isolated `cfxval` project)
+
+All acceptance criteria met. Built on arm64 from pinned `_source`
+(`c9a90da`) via `Dockerfile.ci`; image builds cleanly. `build.sh` is
+idempotent (re-run reused the same `CAMOFOX_ACCESS_KEY`, did not re-clone);
+key is 64 hex chars, file perms `600`. Profile-gating verified (absent when
+`camofox-browser` not in `COMPOSE_PROFILES`, present when in). Hermetic-config
+holds (an injected host `CAMOFOX_ACCESS_KEY` does not reach Compose).
+Container reached **healthy in ~10s**. Auth contract observed:
+`GET /health` → `200` (no bearer); `GET /tabs` without key → **`401`**;
+`GET /tabs` with `Authorization: Bearer <CAMOFOX_ACCESS_KEY>` → **`200`**
+(access key enforced as designed). Live `aitools` untouched.
+
+**Infra fix surfaced during validation:** on a proxied host (this machine
+routes egress via OrbStack `proxy.orb.internal:8305`) BuildKit RUN steps have
+no direct egress, so `dc build` for *all* build-from-source services
+(honcho/honcho-ui/camofox-browser) failed at `apt-get`. Not a camofox or
+hermetic-`dc()` defect (a plain `docker build` failed identically). Fixed in
+`lib/stacklib.sh`: `dc()` allowlists the standard `*_PROXY` vars and, when the
+host env sets none, auto-derives the daemon's proxy from `docker info` and
+forwards it (portable; no-op when the daemon has no proxy; explicit
+host/user `*_PROXY` wins). README gotcha #16 updated.

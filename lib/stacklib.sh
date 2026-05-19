@@ -53,6 +53,50 @@ env_get() { grep "^${2}=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 # and OrbStack exposes services at <service>.<project>.orb.local.
 stack_project() { local p; p="$(env_get "$STACK_DIR/.env" COMPOSE_PROJECT_NAME)"; printf '%s' "${p:-aitools}"; }
 
+# _svc_requires PROFILE — SERVICE_REQUIRES from services/PROFILE/service.env (csv or empty).
+_svc_requires() { env_get "$STACK_ROOT/services/$1/service.env" SERVICE_REQUIRES; }
+
+# stack_required [SEED_CSV] — space-separated fixpoint expansion of the active
+# profiles' SERVICE_REQUIRES. SEED defaults to COMPOSE_PROFILES in .stack/.env.
+# Cycle-safe (bounded worklist; each profile visited once).
+stack_required() {
+  local seed; seed="${1:-$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)}"
+  local out="" work p r next
+  work="$(printf '%s' "$seed" | tr ',' ' ')"
+  while [ -n "$(printf '%s' "$work" | tr -d '[:space:]')" ]; do
+    next=""
+    for p in $work; do
+      case " $out " in *" $p "*) continue;; esac
+      out="$out $p"
+      for r in $(_svc_requires "$p" | tr ',' ' '); do
+        [ -n "$r" ] && next="$next $r"
+      done
+    done
+    work="$next"
+  done
+  printf '%s' "$out" | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//'
+}
+
+# stack_profiles [SEED_CSV] — COMPOSE_PROFILES ∪ stack_required, COMMA-joined
+# (ready for the COMPOSE_PROFILES env var). Used by dc().
+stack_profiles() {
+  local seed; seed="${1:-$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)}"
+  stack_required "$seed" | tr ' ' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -
+}
+
+# stack_backends [SEED_CSV] — SPACE-separated subset of stack_profiles whose
+# services/<name>/service.env declares SERVICE_KIND=backend. Valid `dc up -d`
+# targets (dir==service==profile for substrate). Used by `just start`.
+stack_backends() {
+  local seed; seed="${1:-$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)}"
+  local n out=""
+  for n in $(stack_required "$seed"); do
+    [ "$(env_get "$STACK_ROOT/services/$n/service.env" SERVICE_KIND)" = "backend" ] \
+      && out="$out $n"
+  done
+  printf '%s' "$out" | sed 's/^ //'
+}
+
 # dc — `docker compose` for THIS stack, run HERMETICALLY. Compose sees ONLY
 # .stack/.env (+ .stack/*.generated.env), passed as ABSOLUTE --env-file args,
 # with the host environment STRIPPED (env -i + a tight docker-operational

@@ -25,9 +25,13 @@ setup:
 build:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
-     bash "{{root}}/services/pg/build.sh"; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
-     for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
+     echo "== Phase 1: resolve digest-class images =="; \
+     stack_resolve_images; \
+     echo "== Phase 1 done — image refs in .stack/<svc>/.generated.env =="; \
+     bash "{{root}}/services/pg/build.sh"; \
+     for p in $(stack_profiles | tr ',' ' '); do \
+       [ "$p" = "pg" ] && continue; \
        [ -x "{{root}}/services/$p/build.sh" ] && bash "{{root}}/services/$p/build.sh" || true; \
      done; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \

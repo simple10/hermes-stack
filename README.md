@@ -25,6 +25,7 @@ hermes-stack/
     honcho-ui/                 # profile [honcho-ui]; OpenConcho SPA, pinned _source/ -> nginx
     agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
     hindsight/                 # profile [hindsight] (opt-in); pinned image; pg-backed; LiteLLM-wired
+    firecrawl/                 # profile [firecrawl] (opt-in); nuq-backed web-scraper API; rabbitmq-wired; LiteLLM-wired
   machines/
     hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
   docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
@@ -107,6 +108,12 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   switches with no git edits. API `:8888`, Control-Plane UI `:9999`. Seeds
   its own pg role/db (fresh `<project>_pg-data` volume only). Not yet wired
   into Hermes.
+- **firecrawl** — service `firecrawl` (optional), web-scraper API backed by the
+  nuq (non-uniform queue) engine. Profile `[firecrawl]`; opt-in via the
+  `firecrawl` profile; needs the always-on `rabbitmq` backend (stateless
+  notify/prefetch transport). Uses a **dedicated `firecrawl-postgres`** appliance
+  — never the shared `pg` — for its pg_cron-driven queue engine. Extract
+  routed via LiteLLM.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
   via the prebuilt `eceasy/cli-proxy-api` image **pinned by tag**
   (`CLIPROXY_VERSION`, bump deliberately). Profile `[cliproxyapi]`;
@@ -349,6 +356,13 @@ provisions, `poststart` finalizes.
     volume — **non-destructive within a PG major** (a major-version bump is
     the only data-destructive change; out of scope). In-database
     role/db/extension stays in the per-service provisioner.
+14. **Firecrawl uses a DEDICATED `firecrawl-postgres`, never the shared `pg`.**
+    `nuq-postgres` is a purpose-built appliance: `pg_cron`
+    `shared_preload_libraries` + cluster-wide `ALTER SYSTEM` + ~40 cron jobs
+    that ARE the queue engine (reapers/GC/REINDEX). It self-initializes its
+    own single-tenant `firecrawl-pg-data` volume (no provisioner). `rabbitmq`
+    is a stateless nuq notify/prefetch transport → shared always-on backend.
+    Losing `firecrawl-pg-data` loses only in-flight jobs (ephemeral queue).
 
 ## Secrets model
 

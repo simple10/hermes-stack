@@ -25,7 +25,7 @@ setup:
 build:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
-     bash "{{root}}/services/postgres/build.sh"; \
+     bash "{{root}}/services/pg/build.sh"; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
      for p in $(echo "${COMPOSE_PROFILES:-}" | tr ',' ' '); do \
        [ -x "{{root}}/services/$p/build.sh" ] && bash "{{root}}/services/$p/build.sh" || true; \

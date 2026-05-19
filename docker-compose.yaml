@@ -7,7 +7,7 @@
 # per-project network — no shared external network.
 
 include:
-  - services/postgres/compose.yaml
+  - services/pg/compose.yaml
   - services/redis/compose.yaml
   - services/rabbitmq/compose.yaml
   - services/litellm/compose.yaml

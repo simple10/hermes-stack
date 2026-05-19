@@ -160,6 +160,42 @@ test_stack_source_reuse_no_network() {
   echo "ok: stack_source reuse path is offline"
 }
 
+test_stack_source_unknown_ref_fails_loud() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "$d"' RETURN
+  _stack_source_make_upstream "$d"
+  mkdir -p "$d/services/testsvc"
+  if ( STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" no-such-ref ) 2>/dev/null; then
+    echo "FAIL: unknown ref did not die"; return 1
+  fi
+  echo "ok: stack_source unknown-ref dies loud"
+}
+
+test_stack_source_sidebranch_sha_fetch_fallback() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "$d"' RETURN
+  _stack_source_make_upstream "$d"
+  mkdir -p "$d/services/testsvc"
+  local side; side="$(cat "$d/sidebranch_sha")"
+  # First fetch the default branch via tag, then ask for the sidebranch SHA
+  # — exercises the `git fetch origin <sha>` fallback path.
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" v1
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" "$side"
+  [ "$(git -C "$d/services/testsvc/_source" rev-parse HEAD)" = "$side" ] \
+    || { echo "FAIL: sidebranch SHA not checked out"; return 1; }
+  echo "ok: stack_source sidebranch-SHA fetch fallback"
+}
+
+test_stack_source_change_detection() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "$d"' RETURN
+  _stack_source_make_upstream "$d"
+  mkdir -p "$d/services/testsvc"
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" v1
+  rm -f "$d/.stack/testsvc/.source.rebuild"   # caller would clear it
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" v2
+  [ -f "$d/.stack/testsvc/.source.rebuild" ] \
+    || { echo "FAIL: rebuild marker missing after version change"; return 1; }
+  echo "ok: stack_source change-detection sets rebuild marker"
+}
+
 test_stack_source_origin_url_mismatch_fails_loud() {
   local d; d="$(mktemp -d)"; trap 'rm -rf "$d"' RETURN
   _stack_source_make_upstream "$d"
@@ -179,10 +215,19 @@ _stack_source_run() {
 }
 
 run_helpers_tests() {
+  # Isolation: clear any user-set version overrides so default-pin path is
+  # actually exercised in tests.
+  unset HONCHO_VERSION HONCHO_UI_VERSION CAMOFOX_BROWSER_VERSION BROWSER_USE_VERSION \
+        LITELLM_VERSION HINDSIGHT_VERSION \
+        FIRECRAWL_API_VERSION FIRECRAWL_PLAYWRIGHT_VERSION FIRECRAWL_POSTGRES_VERSION \
+        TESTSVC_VERSION 2>/dev/null || true
   test_ensure_dockerignore || return 1
   test_stack_source_tag_resolve_and_dockerignore || return 1
   test_stack_source_reuse_no_network || return 1
   test_stack_source_origin_url_mismatch_fails_loud || return 1
+  test_stack_source_unknown_ref_fails_loud || return 1
+  test_stack_source_sidebranch_sha_fetch_fallback || return 1
+  test_stack_source_change_detection || return 1
 }
 # Append "run_helpers_tests || fail=1" before "exit $fail" — see step 5.
 ```
@@ -267,12 +312,16 @@ stack_source() {
   # Resolve requested (tag, SHA, or branch).
   git -C "$src" fetch --tags origin
   local sha
-  sha="$(git -C "$src" rev-parse "${requested}^{commit}" 2>/dev/null || true)"
+  # `--verify` is required: without it, `git rev-parse 'bogus^{commit}'`
+  # prints the literal string to stdout AND exits 128, defeating our
+  # empty-string failure detection. With --verify, failure prints nothing
+  # to stdout (errors go to stderr, suppressed).
+  sha="$(git -C "$src" rev-parse --verify "${requested}^{commit}" 2>/dev/null || true)"
   if [ -z "$sha" ]; then
     git -C "$src" fetch origin "$requested" 2>/dev/null || true
-    sha="$(git -C "$src" rev-parse "${requested}^{commit}" 2>/dev/null \
-        || git -C "$src" rev-parse "origin/${requested}^{commit}" 2>/dev/null \
-        || git -C "$src" rev-parse "FETCH_HEAD^{commit}" 2>/dev/null \
+    sha="$(git -C "$src" rev-parse --verify "${requested}^{commit}" 2>/dev/null \
+        || git -C "$src" rev-parse --verify "origin/${requested}^{commit}" 2>/dev/null \
+        || git -C "$src" rev-parse --verify "FETCH_HEAD^{commit}" 2>/dev/null \
         || true)"
   fi
   [ -n "$sha" ] || die "stack_source($svc): cannot resolve '$requested' in $repo"
@@ -545,7 +594,9 @@ stack_resolve_images() {
     [ -e "$f" ] || continue
     svc="$(basename "$(dirname "$f")")"
     while IFS='=' read -r name rest; do
-      name="${name%$'\r'}"
+      # strip CRLF tail from BOTH name and rest (or the no-inline-comment
+      # path leaves a literal \r in the resolved digest value).
+      name="${name%$'\r'}"; rest="${rest%$'\r'}"
       # trim leading whitespace from name
       name="$(printf '%s' "$name" | sed -e 's/^[[:space:]]*//')"
       [ -z "$name" ] && continue
@@ -605,6 +656,7 @@ build:
      echo "== Phase 1 done — image refs in .stack/<svc>/.generated.env =="; \
      bash "{{root}}/services/pg/build.sh"; \
      for p in $(stack_profiles | tr ',' ' '); do \
+       [ "$p" = "pg" ] && continue; \
        [ -x "{{root}}/services/$p/build.sh" ] && bash "{{root}}/services/$p/build.sh" || true; \
      done; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
@@ -944,10 +996,20 @@ HINDSIGHT=ghcr.io/vectorize-io/hindsight@<DIGEST_FROM_STEP1>  # tag <TAG_FROM_ST
 ```
 # firecrawl — digest-class (ghcr). Bump via FIRECRAWL_API_VERSION /
 # FIRECRAWL_PLAYWRIGHT_VERSION / FIRECRAWL_POSTGRES_VERSION.
+#
+# Provenance (from the deleted services/firecrawl/.image-digest):
+#   Resolved 2026-05-18 from :latest (upstream ships no semver; digest is
+#   the only stable pin). Bump deliberately: re-resolve + update both
+#   here AND in services/firecrawl/compose.yaml in one commit.
 FIRECRAWL_API=ghcr.io/firecrawl/firecrawl@<DIGEST_FROM_STEP1>            # tag <TAG_FROM_STEP2>
 FIRECRAWL_PLAYWRIGHT=ghcr.io/firecrawl/playwright-service@<DIGEST_FROM_STEP1>  # tag <TAG_FROM_STEP2>
 FIRECRAWL_POSTGRES=ghcr.io/firecrawl/nuq-postgres@<DIGEST_FROM_STEP1>    # tag <TAG_FROM_STEP2>
 ```
+
+(Before deleting `services/firecrawl/.image-digest` in Task 10, copy any
+existing provenance header from it into the comment block above; same for
+litellm/hindsight images.env if their `.image-digest` files have non-trivial
+context.)
 
 - [ ] **Step 6: Verify the resolver consumes them correctly**
 
@@ -1150,12 +1212,21 @@ git commit -m "docs(env-example): document the new version-pinning levers"
 
 **Files:** modify `README.md`
 
-- [ ] **Step 1: Locate pinning-related prose**
+- [ ] **Step 1: Locate pinning-related prose to UPDATE**
 
 Run:
 ```bash
-grep -nE 'pinned|PINNED|digest-pinned|image-digest|commit|tag|version|_PIN' README.md | head
+grep -nE 'pinned by digest|digest-pinned|image-digest|PIN=|HONCHO_PIN|_PIN' README.md
 ```
+The lines to UPDATE are those that:
+- assert "**pinned by digest**" or "digest-pinned" (factual claim now mediated
+  by `images.env` + `<NAME>_VERSION`), or
+- mention `.image-digest` sidecars (deleted in Task 10), or
+- name a specific `<SVC>_PIN` constant that no longer exists.
+
+Lines that just say "pinned `_source/`" or "pinned commit" in service
+descriptions are still accurate (the source IS pinned, via `stack_source`)
+— leave them. Do NOT rewrite unaffected prose.
 
 - [ ] **Step 2: Update the Architecture intro's "image pinning" sentence**
 
@@ -1197,7 +1268,12 @@ Run:
 ```bash
 just build 2>&1 | tail -25
 ```
-Expected: ends with `build complete`. Look for log lines like `stack_image(LITELLM): sha256:… -> …` (Phase 1) and `stack_source(...): reuse …` (Phase 2). No `regenerating` lines for passwords.
+Expected: ends with `build complete`. Look for log lines like
+`stack_image(LITELLM): sha256:… -> …` (Phase 1) and either
+`stack_source(...): cloning …` (first run on this stack — existing
+`_source` had no `.git` from the old pattern) **or**
+`stack_source(...): reuse …` (subsequent runs). No `regenerating` lines
+for passwords.
 
 - [ ] **Step 3: Verify all `_source` dirs retain `.git`**
 
@@ -1252,13 +1328,34 @@ Expected: `dc up -d` reports `0 created, 0 recreated`. `NO_DRIFT`. `just status`
 
 **Files:** any docs the previous tasks deferred.
 
-- [ ] **Step 1: Ensure the four `# tag <annotate …>` placeholders in build.sh are filled**
+- [ ] **Step 1: Fill the four `# tag <annotate …>` placeholders in build.sh + commit**
 
-Run:
+By this point Task 13's `just build` has populated every `_source/.git`, so
+`git describe` resolves. Run:
 ```bash
+grep -n 'annotate after first build' services/*/build.sh || echo "no placeholders found"
+```
+For each match:
+```bash
+# inside services/<svc>/_source, with .git present:
+git -C services/<svc>/_source describe --tags --always
+```
+If `describe` returns an exact tag (e.g. `v0.12.7`), replace the placeholder
+text with `# tag v0.12.7`. If it returns a "tag-N-gHASH" form, use the base
+tag + commit info (e.g. `# tag v0.12.7-3-gabcdef`). If `describe` returns
+only a short SHA (no tag in history), use `# main@YYYY-MM-DD` (date of the
+commit: `git -C services/<svc>/_source log -1 --format=%cs HEAD`).
+
+Then make a **new commit at HEAD** (do NOT amend — the commit to update is
+several back, and interactive rebase is unavailable):
+```bash
+git add services/honcho/build.sh services/honcho-ui/build.sh \
+        services/camofox-browser/build.sh services/browser-use/build.sh
+git diff --cached --stat
+git commit -m "docs(build): annotate stack_source default pins with upstream tags"
 grep -n 'annotate after first build' services/*/build.sh && echo "STILL PLACEHOLDER" || echo "annotated"
 ```
-Expected: `annotated`. If `STILL PLACEHOLDER`, resolve via `git describe --tags --always` inside each `_source` dir and amend the prior commit with the real tag.
+Expected: `annotated`.
 
 - [ ] **Step 2: Report**
 

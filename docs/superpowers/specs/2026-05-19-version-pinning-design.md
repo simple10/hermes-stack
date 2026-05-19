@@ -549,16 +549,19 @@ override.
 6. **Non-destructive default round-trip**: on the live stack, after the
    refactor, `just build` followed by `dc up -d` recreates **zero**
    containers (all resolved digests/tags match the pre-refactor state).
-7. **Bump round-trip** (set `LITELLM_VERSION=<the annotated tag from
-   images.env's comment>`): `just build` resolves to the same digest the
-   default produces, lock updated, second `just build` is a no-op (reuse
-   path; no network).
+7. **Bump round-trip.** For images whose default has a matching upstream
+   tag annotation (e.g. `# tag v1.78.6`), setting
+   `LITELLM_VERSION=v1.78.6` re-resolves to the same digest the default
+   produces; lock updated, container not recreated. For images whose
+   annotation is a date/branch (`# main@2026-05-18` — upstream ships no
+   matching tag), the round-trip is exercised by setting
+   `LITELLM_VERSION=<the resolved digest from .stack/litellm/.image.LITELLM.lock>`
+   instead; same outcome.
 8. `services/{litellm,firecrawl,hindsight}/.image-digest` removed AND the
    three in-compose comments referencing them (line 4 of each) updated.
-9. `.stack.env.example` documents every lever; `.env.example` values
-   match `images.env` `# tag` annotations exactly (so `LITELLM_VERSION=…`
-   from the example is a no-op-equivalent bump). README pinning section
-   updated.
+9. `.stack.env.example` documents every lever (one comment line per
+   `<NAME>_VERSION`) with the bump-pattern shown for each class
+   (tag/digest/source). README pinning section updated.
 
 ## Risks
 

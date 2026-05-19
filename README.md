@@ -398,10 +398,14 @@ provisions, `poststart` finalizes.
     sole `docker compose` chokepoint and runs `env -i` with a tight
     docker-operational allowlist + absolute `--env-file` args (host
     interpolation vars literally aren't present to win). The allowlist
-    includes the standard `*_PROXY` vars (operational, not interpolation):
-    on a proxied host (e.g. OrbStack `proxy.orb.internal`) BuildKit has no
-    egress without them, so omitting them breaks `dc build` for
-    build-from-source services. `STACK_ROOT` is
+    includes the standard `*_PROXY` vars (operational, not interpolation),
+    and when the host env sets none `dc()` auto-derives the **daemon's**
+    proxy from `docker info` and forwards it: on a proxied host (e.g.
+    OrbStack `proxy.orb.internal`) BuildKit has no direct egress, so without
+    this `dc build` for build-from-source services
+    (honcho/honcho-ui/camofox-browser) fails at `apt-get`. Portable: a no-op
+    when the daemon has no proxy; an explicit host/user `*_PROXY` always
+    wins. `STACK_ROOT` is
     derived from `stacklib.sh`'s own location (bash `BASH_SOURCE` / zsh
     `${(%):-%x}`), never from env; if it can't pin a dir containing
     `docker-compose.yaml`+`lib/stacklib.sh` it **dies loudly** (the old silent

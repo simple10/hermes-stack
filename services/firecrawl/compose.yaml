@@ -1,13 +1,15 @@
 # firecrawl (nuq architecture). profile [firecrawl]. Project-scoped (no
 # container_name / no shared network — Compose default per-project net;
 # siblings reach each other by service name). Images digest-pinned (gotcha
-# #6) — mirrored in services/firecrawl/.image-digest. firecrawl-postgres is
+# #6) — digests resolved at build time from services/firecrawl/images.env ->
+# FIRECRAWL_{API,PLAYWRIGHT,POSTGRES}_IMAGE; bump via FIRECRAWL_*_VERSION in
+# .stack/.env. firecrawl-postgres is
 # DEDICATED & self-initializing (upstream nuq-postgres image bakes nuq.sql +
 # pg_cron); it is NOT the shared `pg` and needs no provisioner. Extract is
 # routed through LiteLLM on the minted FIRECRAWL_VIRTUAL_KEY.
 services:
   firecrawl-postgres:
-    image: ghcr.io/firecrawl/nuq-postgres@sha256:f9388bd25ae2e1f1d034518236f993ce236173c1d8800ce24092ea6643a95a33
+    image: "${FIRECRAWL_POSTGRES_IMAGE:?run 'just build' to resolve FIRECRAWL_POSTGRES_VERSION}"
     profiles: [firecrawl]
     restart: unless-stopped
     environment:
@@ -26,7 +28,7 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   firecrawl-playwright:
-    image: ghcr.io/firecrawl/playwright-service@sha256:9e0737bc09df28275aab29726b1c0824a7725113945434e843385d487b7f7ec6
+    image: "${FIRECRAWL_PLAYWRIGHT_IMAGE:?run 'just build' to resolve FIRECRAWL_PLAYWRIGHT_VERSION}"
     profiles: [firecrawl]
     restart: unless-stopped
     expose:
@@ -48,7 +50,7 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
   firecrawl-api:
-    image: ghcr.io/firecrawl/firecrawl@sha256:fb156ea529d2c40acf805872251d921ba15bf17b22b2d5a72bd0aaac30076280
+    image: "${FIRECRAWL_API_IMAGE:?run 'just build' to resolve FIRECRAWL_API_VERSION}"
     profiles: [firecrawl]
     restart: unless-stopped
     command: ["node", "dist/src/harness.js", "--start-docker"]

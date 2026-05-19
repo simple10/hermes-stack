@@ -1,11 +1,12 @@
 # litellm. profile [litellm]. Project-scoped (no container_name / no shared
 # network). Reaches pg/redis by sibling service name on the Compose default
 # network. Image PINNED by digest (gotcha #6) — mirrored in
-# services/litellm/.image-digest; bump deliberately via commit (update both).
+# Digest resolved at build time from services/litellm/images.env -> LITELLM_IMAGE;
+# bump via .stack/.env LITELLM_VERSION (tag or sha256 digest).
 
 services:
   litellm:
-    image: ghcr.io/berriai/litellm-database@sha256:7bb80500033392233c79f74d4f99d43512da47626cdc9bf46e53df16803d88cd
+    image: "${LITELLM_IMAGE:?run 'just build' to resolve LITELLM_VERSION}"
     profiles: [litellm]
     restart: unless-stopped
     command: ["--config", "/app/config.yaml", "--port", "4000"]

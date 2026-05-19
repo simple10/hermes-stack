@@ -1,7 +1,8 @@
 # hindsight (vectorize-io/hindsight) — OPTIONAL agent memory. profile
 # [hindsight]. Project-scoped (no container_name / no shared net). Prebuilt
 # all-in-one image PINNED by digest (gotcha #6) — mirrored in
-# services/hindsight/.image-digest; bump deliberately via commit (update both).
+# Digest resolved at build time from services/hindsight/images.env -> HINDSIGHT_IMAGE;
+# bump via .stack/.env HINDSIGHT_VERSION (tag or sha256 digest).
 #
 # Reaches pg + litellm by sibling service name on the Compose default
 # network. depends_on pg+litellm so COMPOSE_PROFILES=hindsight auto-pulls
@@ -19,7 +20,7 @@
 
 services:
   hindsight:
-    image: ghcr.io/vectorize-io/hindsight@sha256:f0f9e9a73d6aedde9eaf4010ab604c3e015494e494318b26f1011144856b8112
+    image: "${HINDSIGHT_IMAGE:?run 'just build' to resolve HINDSIGHT_VERSION}"
     profiles: [hindsight]
     restart: unless-stopped
     expose:

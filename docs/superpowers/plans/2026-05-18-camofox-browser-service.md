@@ -54,6 +54,14 @@ Assert live untouched: `docker ps -a --filter label=com.docker.compose.project=a
 
 No `lib/setup.sh` change (every Compose var is generated or has a `:-default`). No `machines/hermes/` change (Hermes out of scope).
 
+> **Execution-order correction (applied during implementation):** `build.sh`
+> ends with an eager `dc build camofox-browser`, which fails with
+> `no such service` unless `services/camofox-browser/compose.yaml` is already
+> in the root `docker-compose.yaml` `include:`. So **Task 3 Step 1 (the
+> include line) must land before Task 2's build verification**. Effective
+> order: Task 1 (compose) → Task 3 Step 1 (+docs) → Task 2 (build.sh + heavy
+> verify) → Task 3 Step 5 (gating/hermetic, same venue) → Task 4 (e2e).
+
 ---
 
 ## Task 1: Service compose file

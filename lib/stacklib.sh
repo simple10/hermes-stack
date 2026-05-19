@@ -74,13 +74,20 @@ dc() {
 $(ls "$STACK_DIR"/*.generated.env 2>/dev/null)
 EOF
   # operational allowlist — ONLY what the docker CLI needs to reach the daemon
-  # (these are NOT Compose interpolation inputs). Everything else is absent by
-  # design. `printenv` (not bash-only ${!v}) so this is bash/zsh-portable;
-  # exit status distinguishes set-but-empty from unset.
+  # and build/pull over the network (these are NOT Compose interpolation
+  # inputs — no compose file references ${HTTP_PROXY} etc.; they only affect
+  # docker's own networking + its auto-injection of proxy build-args). The
+  # *_PROXY set is REQUIRED on proxied hosts (e.g. OrbStack's
+  # proxy.orb.internal): without it `dc build` for build-from-source services
+  # (honcho/honcho-ui/camofox-browser) has no egress and apt-get fails.
+  # Everything else is absent by design. `printenv` (not bash-only ${!v}) so
+  # this is bash/zsh-portable; exit status distinguishes set-but-empty/unset.
   local pass=()
   for v in PATH HOME USER LOGNAME TERM TMPDIR TZ LANG LC_ALL \
            SSH_AUTH_SOCK XDG_CONFIG_HOME XDG_RUNTIME_DIR \
-           DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_CERT_PATH DOCKER_TLS_VERIFY; do
+           DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_CERT_PATH DOCKER_TLS_VERIFY \
+           HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY \
+           http_proxy https_proxy ftp_proxy all_proxy no_proxy; do
     if val="$(printenv "$v" 2>/dev/null)"; then pass+=("$v=$val"); fi
   done
   [ -n "$prof" ] && pass+=("COMPOSE_PROFILES=$prof")

@@ -397,7 +397,11 @@ provisions, `poststart` finalizes.
     `.stack/*.generated.env`, never in the schema). Defense: `dc()` is the
     sole `docker compose` chokepoint and runs `env -i` with a tight
     docker-operational allowlist + absolute `--env-file` args (host
-    interpolation vars literally aren't present to win). `STACK_ROOT` is
+    interpolation vars literally aren't present to win). The allowlist
+    includes the standard `*_PROXY` vars (operational, not interpolation):
+    on a proxied host (e.g. OrbStack `proxy.orb.internal`) BuildKit has no
+    egress without them, so omitting them breaks `dc build` for
+    build-from-source services. `STACK_ROOT` is
     derived from `stacklib.sh`'s own location (bash `BASH_SOURCE` / zsh
     `${(%):-%x}`), never from env; if it can't pin a dir containing
     `docker-compose.yaml`+`lib/stacklib.sh` it **dies loudly** (the old silent

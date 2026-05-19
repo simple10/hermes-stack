@@ -363,6 +363,18 @@ provisions, `poststart` finalizes.
     own single-tenant `firecrawl-pg-data` volume (no provisioner). `rabbitmq`
     is a stateless nuq notify/prefetch transport → shared always-on backend.
     Losing `firecrawl-pg-data` loses only in-flight jobs (ephemeral queue).
+15. **Self-hosted Firecrawl has NO interactive browser-session feature.**
+    The v2 `/browser*` routes + `scrape-browser` (and `/v2/scrape` with
+    browser `actions`/agent mode) are gated on `BROWSER_SERVICE_URL` →
+    a browser service upstream **does not ship for self-host** (no
+    `ghcr.io/firecrawl/browser-service` image; `playwright-service` only
+    serves `/health`+`/scrape`). Calling them returns `503 "Browser feature
+    is not configured (BROWSER_SERVICE_URL is missing)"`. Same class as the
+    cloud-only fire-engine caveat (SELF_HOST.md). **Use the supported path:
+    `/v1/scrape|crawl|extract` or `/v2/scrape` WITHOUT browser actions** (the
+    playwright scrape engine via `PLAYWRIGHT_MICROSERVICE_URL`, which IS
+    wired). Hermes consumers must call plain scrape/extract, not a "browser
+    session"/agent mode.
 
 ## Secrets model
 

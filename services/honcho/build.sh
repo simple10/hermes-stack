@@ -3,10 +3,9 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/honcho"
-# Pinned commit of plastic-labs/honcho. Bumpable via .stack/.env HONCHO_VERSION
-# (tag or commit SHA). Tracked default MUST stay annotated with a tag.
-stack_source honcho https://github.com/plastic-labs/honcho \
-  8fcbb54a49292341dba79d606ee332c50778429b   # v3.0.6-51-g8fcbb54 (main, 2026-05-14)
+# Pin from services/honcho/service.env (HONCHO_SOURCE_REPO/_DEFAULT).
+# Bumpable via .stack/.env HONCHO_VERSION (tag or commit SHA).
+stack_source honcho
 # Render config.runtime.toml from the template, injecting the per-module
 # model levers from .stack/.env. Bash-source so the ${STACK_LLM_MODEL*} refs
 # in .stack/.env expand (presets defined above the per-service lines). Secret
@@ -36,10 +35,11 @@ log "honcho: HONCHO_DB_PASSWORD owned in honcho.generated.env"
 # `dc up -d` after backends+preflight are already up. honcho-api and
 # honcho-deriver share one build context (./_source) → a single image.
 # Layer-cached: a no-op when nothing changed.
-if [ -f "$STACK_DIR/honcho/.source.rebuild" ]; then
+GEN="$STACK_DIR/honcho/.generated.env"
+if [ -n "$(env_get "$GEN" HONCHO_SOURCE_REBUILD)" ]; then
   log "honcho: source changed — building image (honcho-api + honcho-deriver share one context)"
   dc build honcho-api honcho-deriver
-  rm -f "$STACK_DIR/honcho/.source.rebuild"
+  env_upsert "$GEN" HONCHO_SOURCE_REBUILD ""
 else
   log "honcho: source unchanged — skipping dc build"
 fi

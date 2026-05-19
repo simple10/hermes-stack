@@ -9,18 +9,18 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/browser-use"
-# Pinned commit of browser-use/browser-use. Bumpable via .stack/.env
+# Pin from services/browser-use/service.env. Bumpable via .stack/.env
 # BROWSER_USE_VERSION (tag or commit SHA).
-stack_source browser-use https://github.com/browser-use/browser-use \
-  157779338afdcc03023010ec3c24ad63d820453c   # main@2026-05-19 (resolve via git describe when _source is checked out)
+stack_source browser-use
 
 # Build the image now (compose only builds lazily on first `up`). Heavy
 # (Chromium apt + uv sync --all-extras) but layer-cached: no-op if unchanged.
 set -a; . "$STACK_DIR/.env"; set +a
-if [ -f "$STACK_DIR/browser-use/.source.rebuild" ]; then
+GEN="$STACK_DIR/browser-use/.generated.env"
+if [ -n "$(env_get "$GEN" BROWSER_USE_SOURCE_REBUILD)" ]; then
   log "browser-use: source changed — building image (upstream Dockerfile; Chromium + uv bundled)"
   dc build browser-use
-  rm -f "$STACK_DIR/browser-use/.source.rebuild"
+  env_upsert "$GEN" BROWSER_USE_SOURCE_REBUILD ""
 else
   log "browser-use: source unchanged — skipping dc build"
 fi

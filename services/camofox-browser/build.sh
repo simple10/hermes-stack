@@ -15,18 +15,18 @@ key="$(env_get "$GEN" CAMOFOX_ACCESS_KEY)"
 env_upsert "$GEN" CAMOFOX_ACCESS_KEY "$key"
 log "camofox-browser: CAMOFOX_ACCESS_KEY owned in camofox-browser.generated.env"
 
-# Pinned commit of jo-inc/camofox-browser. Bumpable via .stack/.env
+# Pin from services/camofox-browser/service.env. Bumpable via .stack/.env
 # CAMOFOX_BROWSER_VERSION (tag or commit SHA).
-stack_source camofox-browser https://github.com/jo-inc/camofox-browser \
-  c9a90dafc76d2dfa0eb5d74fa36ef28f3ba98b29   # main@2026-05-18 (resolve via git describe when _source is checked out)
+stack_source camofox-browser
 
 # Eager build (honcho-ui precedent) — surface the heavy Camoufox/Firefox
 # build at `just build`, not mid-`just start`. First build downloads ~300MB
 # Camoufox + apt Firefox/Xvfb deps (needs build-time network).
-if [ -f "$STACK_DIR/camofox-browser/.source.rebuild" ]; then
+CAMOFOX_GEN="$STACK_DIR/camofox-browser/.generated.env"
+if [ -n "$(env_get "$CAMOFOX_GEN" CAMOFOX_BROWSER_SOURCE_REBUILD)" ]; then
   log "camofox-browser: source changed — building image (Dockerfile.ci)"
   dc build camofox-browser
-  rm -f "$STACK_DIR/camofox-browser/.source.rebuild"
+  env_upsert "$CAMOFOX_GEN" CAMOFOX_BROWSER_SOURCE_REBUILD ""
 else
   log "camofox-browser: source unchanged — skipping dc build"
 fi

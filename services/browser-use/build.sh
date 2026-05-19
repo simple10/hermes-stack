@@ -12,7 +12,7 @@ D="$STACK_ROOT/services/browser-use"
 # Pinned commit of browser-use/browser-use. Bumpable via .stack/.env
 # BROWSER_USE_VERSION (tag or commit SHA).
 stack_source browser-use https://github.com/browser-use/browser-use \
-  157779338afdcc03023010ec3c24ad63d820453c   # tag <annotate after first build>
+  157779338afdcc03023010ec3c24ad63d820453c   # main@2026-05-19 (resolve via git describe when _source is checked out)
 
 # Build the image now (compose only builds lazily on first `up`). Heavy
 # (Chromium apt + uv sync --all-extras) but layer-cached: no-op if unchanged.

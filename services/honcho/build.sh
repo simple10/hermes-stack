@@ -6,7 +6,7 @@ D="$STACK_ROOT/services/honcho"
 # Pinned commit of plastic-labs/honcho. Bumpable via .stack/.env HONCHO_VERSION
 # (tag or commit SHA). Tracked default MUST stay annotated with a tag.
 stack_source honcho https://github.com/plastic-labs/honcho \
-  8fcbb54a49292341dba79d606ee332c50778429b   # tag <annotate after first build>
+  8fcbb54a49292341dba79d606ee332c50778429b   # v3.0.6-51-g8fcbb54 (main, 2026-05-14)
 # Render config.runtime.toml from the template, injecting the per-module
 # model levers from .stack/.env. Bash-source so the ${STACK_LLM_MODEL*} refs
 # in .stack/.env expand (presets defined above the per-service lines). Secret

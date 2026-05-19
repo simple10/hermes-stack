@@ -10,7 +10,7 @@ D="$STACK_ROOT/services/honcho-ui"
 # Pinned commit of offendingcommit/openconcho. Bumpable via .stack/.env
 # HONCHO_UI_VERSION (tag or commit SHA).
 stack_source honcho-ui https://github.com/offendingcommit/openconcho \
-  e490d911fcb27ee193558fd9a28856cde2057665   # tag <annotate after first build>
+  e490d911fcb27ee193558fd9a28856cde2057665   # v0.8.0-5-ge490d91 (main, 2026-05-15)
 
 # Build the image so COMPOSE_PROJECT_NAME -> HONCHO_BASE_URL is resolved
 # and the source patch is baked (compose only builds lazily on first `up`,

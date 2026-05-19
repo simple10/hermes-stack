@@ -18,7 +18,7 @@ log "camofox-browser: CAMOFOX_ACCESS_KEY owned in camofox-browser.generated.env"
 # Pinned commit of jo-inc/camofox-browser. Bumpable via .stack/.env
 # CAMOFOX_BROWSER_VERSION (tag or commit SHA).
 stack_source camofox-browser https://github.com/jo-inc/camofox-browser \
-  c9a90dafc76d2dfa0eb5d74fa36ef28f3ba98b29   # tag <annotate after first build>
+  c9a90dafc76d2dfa0eb5d74fa36ef28f3ba98b29   # main@2026-05-18 (resolve via git describe when _source is checked out)
 
 # Eager build (honcho-ui precedent) — surface the heavy Camoufox/Firefox
 # build at `just build`, not mid-`just start`. First build downloads ~300MB

@@ -1,4 +1,4 @@
-# postgres (pgvector). No profile => always-on shared backend.
+# postgres (pgvector). profile [pg] — pulled in via SERVICE_REQUIRES=pg.
 # No container_name / no shared network: services are project-scoped, so
 # multiple stacks coexist. Sibling services reach this at host `pg` on the
 # Compose default network; Hermes reaches it at pg.<project>.orb.local.
@@ -8,6 +8,7 @@
 services:
   pg:
     image: pgvector/pgvector:pg18
+    profiles: [pg]
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres

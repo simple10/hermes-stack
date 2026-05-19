@@ -1,9 +1,10 @@
-# redis. No profile => always-on shared backend. Project-scoped (no
+# redis. profile [redis] — pulled in via SERVICE_REQUIRES=redis. Project-scoped (no
 # container_name / no shared network). Siblings reach it at host `redis`.
 
 services:
   redis:
     image: redis:8.6.3
+    profiles: [redis]
     restart: unless-stopped
     command: ["redis-server", "--save", "60", "1"]
     volumes:

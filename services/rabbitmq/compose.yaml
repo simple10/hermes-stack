@@ -1,4 +1,4 @@
-# rabbitmq. profile [firecrawl] — firecrawl-api is its ONLY consumer (nuq
+# rabbitmq. profile [rabbitmq] — pulled in via SERVICE_REQUIRES=rabbitmq (nuq
 # notify/prefetch transport); it is NOT shared substrate, so it must not run
 # when firecrawl is off. No backends-line entry: it comes up (and is waited
 # on, healthy) via firecrawl-api's `depends_on: rabbitmq` inside `dc up -d`
@@ -13,7 +13,7 @@
 services:
   rabbitmq:
     image: rabbitmq:4.3.0-management
-    profiles: ["firecrawl"]
+    profiles: [rabbitmq]
     restart: unless-stopped
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq

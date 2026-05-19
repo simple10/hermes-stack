@@ -15,12 +15,14 @@ hermes-stack/
   docker-compose.yaml          # NO name: (project = COMPOSE_PROJECT_NAME); include: services/*
   justfile                     # setup | build | start | stop | status | logs | reconfigure
   lib/                         # stacklib.sh (helpers incl. dc/stack_project), setup.sh
-  .stack/                      # ALL runtime secrets — gitignored (created by `just setup`)
-    .env  *.generated.env  .config-hashes/
-  .stack.env.example           # documents .stack/.env (the only hand-edited file)
+  .stack/                      # ALL stack state — gitignored (created by `just setup`)
+    .env                       # the only hand-edited file
+    <svc>/.generated.env       # per-service secrets; <svc>/config.runtime.*; <svc>/.config-hashes/
+  .stack.env.example           # documents .stack/.env
   services/
-    postgres/  redis/          # always-on backends (no profile); project-scoped volumes
-    litellm/                   # profile [litellm]; *.template -> *.runtime.* (bind-mounted)
+    pg/  redis/  rabbitmq/     # substrate; profiles [pg]/[redis]/[rabbitmq], pulled via SERVICE_REQUIRES
+    <svc>/service.env          # SERVICE_REQUIRES=<profiles> / SERVICE_KIND=backend (dependency manifest)
+    litellm/                   # profile [litellm]; *.template -> .stack/litellm/config.runtime.* (bind)
     honcho/                    # profile [honcho]; built from pinned _source/ (gitignored)
     honcho-ui/                 # profile [honcho-ui]; OpenConcho SPA, pinned _source/ -> nginx
     agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
@@ -40,14 +42,26 @@ each other by service name on the Compose default network
 (`<project>_default`). Nothing is published to the host; Hermes (outside the
 project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
 
-- **postgres / redis** — `pgvector/pgvector:pg18` (service `pg`; DBs `honcho`
-  + `litellm`, each a least-priv role) and `redis:8.6.3` (service `redis`).
-  No Compose profile → always-on shared backends.
+**Cross-service dependencies.** Compose does **not** auto-start a
+profile-gated `depends_on` target (it errors `undefined service`). So each
+service declares its cross-service deps in `services/<svc>/service.env`:
+`SERVICE_REQUIRES=<comma profiles>` (cross-profile `depends_on` targets +
+substrate it connects to, incl. via `env_file`) and, for single-service
+substrate, `SERVICE_KIND=backend`. `lib/stacklib.sh` expands these to a
+fixpoint: `stack_profiles` (= `COMPOSE_PROFILES` ∪ required, injected by
+`dc()` so every compose call resolves) and `stack_backends` (the substrate
+`just start` brings up first). Adding a new consumer = one line in *its*
+`service.env`; the dependency's compose is never touched.
+
+- **pg / redis** — `pgvector/pgvector:pg18` (service `pg`, dir `services/pg/`;
+  DBs `honcho` + `litellm`, each a least-priv role) and `redis:8.6.3` (service
+  `redis`). Each owns its profile (`[pg]` / `[redis]`), pulled in by any
+  consumer's `SERVICE_REQUIRES` — only run when something needs them.
 - **litellm** — service `litellm`, official `litellm-database` image **pinned
   by digest**. Profile `[litellm]`.
 - **honcho** — services `honcho-api` + `honcho-deriver`, built from a
   **pinned** `plastic-labs/honcho` commit. Profile `[honcho]`;
-  `depends_on` pg/redis/litellm so `COMPOSE_PROFILES=honcho` auto-pulls them.
+  `SERVICE_REQUIRES=pg,redis,litellm` (honcho-api `depends_on` all three).
   LLM via cliproxy through LiteLLM (deriver/summary/dream →
   `HONCHO_*_MODEL`/`STACK_LLM_MODEL_FAST`, dialectic → `HONCHO_DIALECTIC_MODEL`/
   `STACK_LLM_MODEL`); embeddings Voyage. Models are `.stack/.env` levers
@@ -57,9 +71,8 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   Honcho. No published image: a multi-stage Dockerfile pnpm-builds the static
   SPA from a **pinned** `offendingcommit/openconcho` commit (gitignored
   `_source/`, fetched by `honcho-ui/build.sh`) and serves it via nginx.
-  Profile `[honcho-ui]`; `depends_on honcho-api` so
-  `COMPOSE_PROFILES=honcho-ui` auto-pulls Honcho's API (enable the `honcho`
-  profile too for the deriver/dream features). Stateless — no DB, no secrets,
+  Profile `[honcho-ui]`; `SERVICE_REQUIRES=honcho` (`depends_on honcho-api`) —
+  the fixpoint pulls honcho's own deps (pg/redis/litellm) too. Stateless — no DB, no secrets,
   no model/env levers: connection config lives in browser localStorage
   (OpenConcho's design). nginx also **reverse-proxies Honcho under `/honcho/`
   on the same origin**: Honcho hardcodes its CORS allowlist (no config knob),
@@ -97,8 +110,8 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   loopback-only). Not yet wired into Hermes (next step).
 - **hindsight** — service `hindsight` (optional), prebuilt
   `vectorize-io/hindsight` all-in-one image **pinned by digest**. Profile
-  `[hindsight]`; `depends_on` pg/litellm so `COMPOSE_PROFILES=hindsight`
-  auto-pulls them. LLM via cliproxy through LiteLLM (`HINDSIGHT_MODEL`
+  `[hindsight]`; `SERVICE_REQUIRES=pg,litellm` (`depends_on` both; litellm
+  pulls redis). LLM via cliproxy through LiteLLM (`HINDSIGHT_MODEL`
   lever) + Voyage embeddings (`HINDSIGHT_EMBEDDING_MODEL`). **Reranker** is
   the `HINDSIGHT_RERANKER` lever: `local` (in-process Torch cross-encoder,
   best quality, ~600 MB RAM), `litellm` (rerank via LiteLLM →
@@ -111,9 +124,9 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   into Hermes.
 - **firecrawl** — service `firecrawl` (optional), web-scraper API backed by the
   nuq (non-uniform queue) engine. Profile `[firecrawl]`; opt-in via the
-  `firecrawl` profile, which also brings up a `rabbitmq` backend (stateless
-  notify/prefetch transport; profile-scoped to `[firecrawl]`, its only
-  consumer — not started when firecrawl is off). Uses a **dedicated
+  `firecrawl` profile. `SERVICE_REQUIRES=redis,rabbitmq,litellm` brings up
+  the `rabbitmq` backend (own `[rabbitmq]` profile now — stateless
+  notify/prefetch transport) only when firecrawl is on. Uses a **dedicated
   `firecrawl-postgres`** appliance
   — never the shared `pg` — for its pg_cron-driven queue engine. Extract
   routed via LiteLLM.
@@ -123,7 +136,7 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   no pg/redis/rabbitmq/litellm, no provisioner/preflight. No upstream image:
   built from a pinned gitignored `_source/` via `Dockerfile.ci`
   (honcho/honcho-ui precedent). `CAMOFOX_ACCESS_KEY` is generated into
-  `.stack/camofox-browser.generated.env` (hermetic; gotcha #16) — read it
+  `.stack/camofox-browser/.generated.env` (hermetic; gotcha #16) — read it
   there to wire Hermes. API on `:9377`, `/health` unauthenticated.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
   via the prebuilt `eceasy/cli-proxy-api` image **pinned by tag**
@@ -133,8 +146,8 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   a LiteLLM consumer (no pg/redis/litellm deps, no virtual key). Intended as a
   **streaming-correct ChatGPT/Codex responses proxy** to sidestep LiteLLM's
   non-streaming `chatgpt/*` bug (gotcha #5). Config is file-based: committed
-  `config.yaml.template` → gitignored `config.runtime.yaml` (build.sh injects
-  `CLIPROXY_API_KEY` + `CLIPROXY_MANAGEMENT_KEY` from `.stack/.env`). OpenAI/
+  `config.yaml.template` → `.stack/cliproxyapi/config.runtime.yaml` (build.sh
+  injects `CLIPROXY_API_KEY` + `CLIPROXY_MANAGEMENT_KEY` from `.stack/.env`). OpenAI/
   Codex API at `cliproxyapi.<project>.orb.local:8317` (api-key gated; orb-DNS
   only, no host ports — stack convention). Health at `/healthz`; the **admin
   UI is `/management.html`** (downloaded SPA; enter `CLIPROXY_MANAGEMENT_KEY`
@@ -181,7 +194,9 @@ entries kept for rollback.
 
 macOS + **OrbStack** (Docker engine active, `orb` CLI on PATH), `just`,
 `git`, `openssl`, `python3`. Docker Compose ≥ v2.20.3 (`include:`,
-`COMPOSE_ENV_FILES`, cross-profile `depends_on` auto-pull).
+`--profile`, `--env-file`). Cross-profile `depends_on` is resolved by the
+`SERVICE_REQUIRES` profile-expansion (Compose itself errors on it), not by
+any Compose auto-pull.
 
 ## Quickstart (from scratch)
 
@@ -196,24 +211,27 @@ just start     # staged bring-up + (first run) ChatGPT device-pair, then everyth
   optional LiteLLM master key (blank → generated), Telegram (if `hermes` is
   enabled), the Docker `COMPOSE_PROFILES`, and `STACK_MACHINES`. Everything else (DB
   passwords, minted virtual keys) is machine-generated into
-  `.stack/*.generated.env`. To run only part of the stack, set
-  `COMPOSE_PROFILES` (e.g. `litellm` alone, or `honcho` — which auto-pulls
-  litellm). `.stack/.env` is intentionally **not** auto-loaded by Compose;
-  the `justfile` always passes it via `COMPOSE_ENV_FILES`, so a bare
-  `docker compose up` from the repo root fails fast by design (guards against
-  accidental parent-`.env` walking when running a single `services/<svc>`).
-- **`just build`** runs `services/postgres/build.sh` (generate/reuse only
-  `POSTGRES_SUPERPASS`), each enabled service's `build.sh` (render
-  `*.template` → gitignored `*.runtime.*`; clone+pin `services/honcho/_source`;
-  **own its `<SVC>_DB_PASSWORD`** in `.stack/<svc>.generated.env`), and each
-  `STACK_MACHINES` machine's `build.sh`. A changed committed template only
-  **warns** (`just reconfigure <svc>` to re-render) — no migration system.
-- **`just start`** is a **generic pipeline** (no service names beyond the
-  `pg redis` backend substrate): `dc up -d pg redis` → each enabled
-  profile's `services/<p>/preflight.sh` (e.g. `litellm/preflight.sh` brings
-  up litellm + mints one **unrestricted** virtual key per `LITELLM_VIRTKEYS`
-  alias into `.stack/litellm.generated.env`) → recompute `COMPOSE_ENV_FILES`
-  → each `services/<p>/prestart.sh` (fail-loud config validation) →
+  `.stack/<svc>/.generated.env`. To run only part of the stack, set
+  `COMPOSE_PROFILES` (e.g. `litellm` alone, or `honcho` — whose
+  `SERVICE_REQUIRES` pulls pg/redis/litellm). `.stack/.env` is intentionally
+  **not** auto-loaded by Compose; the sole chokepoint `dc()` passes it (+ the
+  globbed `.stack/*/.generated.env`) as absolute `--env-file` args under
+  `env -i`, so a bare `docker compose up` from the repo root fails fast by
+  design (guards against accidental parent-`.env` walking).
+- **`just build`** runs `services/pg/build.sh` (generate/reuse only
+  `POSTGRES_SUPERPASS` into `.stack/pg/.generated.env`), each enabled
+  service's `build.sh` (render `*.template` → `.stack/<svc>/config.runtime.*`;
+  clone+pin `services/honcho/_source`; **own its `<SVC>_DB_PASSWORD`** in
+  `.stack/<svc>/.generated.env`), and each `STACK_MACHINES` machine's
+  `build.sh`. A changed committed template only **warns**
+  (`just reconfigure <svc>` to re-render) — no migration system.
+- **`just start`** is a **generic pipeline** (no hardcoded service names; the
+  backends-first set is derived from `stack_backends`):
+  `dc up -d $(stack_backends)` (e.g. `pg redis`) → each enabled profile's
+  `services/<p>/preflight.sh` (e.g. `litellm/preflight.sh` brings up litellm
+  + mints one **unrestricted** virtual key per `LITELLM_VIRTKEYS` alias into
+  `.stack/litellm/.generated.env`) → each `services/<p>/prestart.sh`
+  (fail-loud config validation) →
   `dc up -d` (each service's one-shot **provisioner**(s) create its
   role/db/extension/schema, ordered by `depends_on` — e.g. honcho:
   `pg → honcho-provision → honcho-schema → honcho-api`) → each
@@ -227,7 +245,7 @@ just start     # staged bring-up + (first run) ChatGPT device-pair, then everyth
 First-ever start with no ChatGPT token: LiteLLM prints a device-pair code in
 `docker logs $(docker compose -p <project> ps -q litellm)` (visit the URL,
 enter the code once); the token then persists in the bind-mounted
-`services/litellm/chatgpt/` (gotcha #9).
+`.stack/litellm/chatgpt/auth.json` (gotcha #9).
 
 ### Multiple stacks
 
@@ -256,7 +274,8 @@ recreating from scratch is the supported model — `just stop` then remove the
 | `just build` | render configs, fetch pinned sources, gen DB pw, provision machines |
 | `just start` | generic pipeline: backends → `preflight.sh` (mint) → `prestart.sh` (validate) → `up -d` (provisioners) → `poststart.sh` → machines |
 | `just start-cleanup` | remove this project's exited provisioner containers (auto-run by `start` when `STACK_AUTO_REMOVE_PROVISIONERS=true`) |
-| `just stop` | `docker compose down --remove-orphans` (volumes kept; machines left running) |
+| `just stop` (alias `just down`) | stop this stack's `STACK_MACHINES` (`orb stop`) then `docker compose down --remove-orphans` (volumes kept) |
+| `just start` alias | `just up` |
 | `just status` | this project's container health + `orb list` |
 | `just logs [machine]` | `orb logs <machine>` (OrbStack Logs tab = the console) |
 | `just reconfigure <svc>` | back up + re-render a service's runtime config from its template |
@@ -264,8 +283,8 @@ recreating from scratch is the supported model — `just stop` then remove the
 ## Service lifecycle
 
 Each service owns its lifecycle via per-service artifacts, discovered
-generically by `just` (no service names in `lib/`/`justfile` beyond the
-`pg redis` backend substrate):
+generically by `just` (no hardcoded service names in `lib/`/`justfile`; the
+backends-first set is derived from `stack_backends`):
 
 | Artifact | Phase | One job |
 |---|---|---|
@@ -307,7 +326,7 @@ provisions, `poststart` finalizes.
 4. **A PG rebuild / fresh project wipes the LiteLLM DB → stored virtual keys
    become invalid.** `services/litellm/preflight.sh` self-heals: it tries
    `/key/update` and, if the key isn't valid in this DB, re-mints and
-   overwrites `.stack/litellm.generated.env`. So recreating a stack from
+   overwrites `.stack/litellm/.generated.env`. So recreating a stack from
    scratch just works on the next `just start`.
 5. **The LiteLLM `chatgpt/*` responses-bridge is non-streaming-broken (known
    bug)** — those entries are kept ONLY for rollback. Everything now uses
@@ -324,12 +343,13 @@ provisions, `poststart` finalizes.
    `machines/hermes/{build,start}.sh` hard-refuse it. The clone `hermes` is
    the working machine.
 8. **`.stack/.env` is not auto-loaded by design.** Every compose call goes
-   through the `justfile`'s `COMPOSE_ENV_FILES` (`.stack/.env` first, then
-   `.stack/*.generated.env`).
+   through `dc()`, which passes `.stack/.env` + the globbed
+   `.stack/*/.generated.env` as absolute `--env-file` args (no
+   `COMPOSE_ENV_FILES` anywhere — see gotcha 16).
 9. **ChatGPT `auth.json` is a required runtime artifact** (gitignored, in no
    `.env`). Without it LiteLLM blocks on an interactive device-code prompt at
    boot and never goes healthy. On a fresh install complete the device pairing
-   once (it persists in the bind-mounted `services/litellm/chatgpt/`).
+   once (it persists in the bind-mounted `.stack/litellm/chatgpt/auth.json`).
 10. **DNS is project-scoped: `<service>.<project>.orb.local`.** Services have
     no `container_name:` and the project name is a deliberate, configured
     value (`COMPOSE_PROJECT_NAME`), so the project-qualified OrbStack name is
@@ -347,7 +367,7 @@ provisions, `poststart` finalizes.
     must be npm-installed into the image, hence the build.)
 12. **Adding a pg-using service is purely additive — no `00-init.sql`, no
     volume recreate.** Each service owns its `<SVC>_DB_PASSWORD` in
-    `.stack/<svc>.generated.env` (its `build.sh`, read-or-gen — never
+    `.stack/<svc>/.generated.env` (its `build.sh`, read-or-gen — never
     blind-regen, which would shadow a live pw via `*.generated.env`
     last-wins) and ships a `provision.sql` + a one-shot
     **`com.stack.role=provisioner`** Compose service (`depends_on: pg
@@ -362,7 +382,7 @@ provisions, `poststart` finalizes.
 13. **`pg` extension binaries / `shared_preload_libraries` / global
     `ALTER SYSTEM` are the surgical bucket — never a provisioner's job.**
     Postgres data lives in the `<project>_pg-data` volume, independent of
-    image/config: changing the git-tracked `services/postgres/` definition
+    image/config: changing the git-tracked `services/pg/` definition
     and `dc up -d pg` recreates **only** the `pg` container, re-mounting the
     volume — **non-destructive within a PG major** (a major-version bump is
     the only data-destructive change; out of scope). In-database
@@ -372,9 +392,10 @@ provisions, `poststart` finalizes.
     `shared_preload_libraries` + cluster-wide `ALTER SYSTEM` + ~40 cron jobs
     that ARE the queue engine (reapers/GC/REINDEX). It self-initializes its
     own single-tenant `firecrawl-pg-data` volume (no provisioner). `rabbitmq`
-    is a stateless nuq notify/prefetch transport → profile-scoped to
-    `[firecrawl]` (its only consumer), pulled up healthy via
-    `firecrawl-api`'s `depends_on`, NOT a backends-line always-on substrate.
+    is a stateless nuq notify/prefetch transport → its own `[rabbitmq]`
+    profile, pulled in only by `firecrawl`'s
+    `SERVICE_REQUIRES=redis,rabbitmq,litellm` and waited on healthy via
+    `firecrawl-api`'s `depends_on`.
     Losing `firecrawl-pg-data` loses only in-flight jobs (ephemeral queue).
 15. **Self-hosted Firecrawl has NO interactive browser-session feature.**
     The v2 `/browser*` routes + `scrape-browser` (and `/v2/scrape` with
@@ -435,16 +456,18 @@ read theirs via Compose `environment:`; Hermes via `machines/hermes`.
 | File | Contents | Owner |
 |------|----------|-------|
 | `.stack/.env` | `COMPOSE_PROJECT_NAME`, provider keys, master key, `AGENTMEMORY_SECRET`, Telegram, `COMPOSE_PROFILES`, `STACK_MACHINES`, `HERMES_MEMORY`, model levers (`STACK_LLM_MODEL*` + per-service `*_MODEL`), `LITELLM_VIRTKEYS` | you (`just setup`) |
-| `.stack/db.generated.env` | `POSTGRES_SUPERPASS` only (per-service DB passwords are decentralized) | `services/postgres/build.sh` |
-| `.stack/<svc>.generated.env` | that service's `<SVC>_DB_PASSWORD` (e.g. `litellm`, `honcho`, `hindsight`) | `services/<svc>/build.sh` |
-| `.stack/litellm.generated.env` | minted `*_VIRTUAL_KEY` values (+ `LITELLM_DB_PASSWORD`) | `services/litellm/{build,preflight}.sh` |
-| `services/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |
+| `.stack/pg/.generated.env` | `POSTGRES_SUPERPASS` only (per-service DB passwords are decentralized) | `services/pg/build.sh` |
+| `.stack/<svc>/.generated.env` | that service's `<SVC>_DB_PASSWORD` (e.g. `honcho`, `hindsight`, `firecrawl`) | `services/<svc>/build.sh` |
+| `.stack/litellm/.generated.env` | minted `*_VIRTUAL_KEY` values (+ `LITELLM_DB_PASSWORD`) | `services/litellm/{build,preflight}.sh` |
+| `.stack/<svc>/config.runtime.*` | rendered runtime config (from committed `*.template`) | `services/<svc>/build.sh` / `just reconfigure` |
+| `.stack/litellm/chatgpt/auth.json` | ChatGPT oauth token | LiteLLM (device pair) |
 
 `*.generated.env` is machine-owned — never hand-edit (it gets
 truncated/rewritten). Service config ships as committed `*.template`; the
-rendered `*.runtime.*` is gitignored and bind-mounted. `git check-ignore`
-covers `.stack/`, `**/*.generated.env`, `**/_source/`, `**/*.runtime.*`, and
-`services/litellm/chatgpt/auth.json`.
+rendered `*.runtime.*` lives under the gitignored `.stack/<svc>/` and is
+bind-mounted from there. `git check-ignore` covers `.stack/` (all stack
+state — generated envs, runtime configs, hashes, the ChatGPT token),
+`**/*.generated.env`, and `**/_source/`.
 
 `services/agentmemory/.env` is the one **committed** `.env` — it is
 **non-secret by design** (base URLs, model names, feature flags only;

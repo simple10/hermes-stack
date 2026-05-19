@@ -1,15 +1,11 @@
 # --- runtime secrets / generated / build (NEVER committed) ---
-# All runtime secrets live in .stack/ (templates live in service dirs).
+# ALL stack state (generated envs, rendered runtime configs, config hashes,
+# the ChatGPT token) lives under .stack/<svc>/ — gitignored wholesale here.
+# Templates stay tracked in service dirs (*.template).
 .stack/
 **/*.generated.env
 # Build-from-source clones (pinned commit, re-cloned by build scripts).
 **/_source/
-# Rendered runtime configs (templates are committed as *.template).
-**/*.runtime.toml
-**/*.runtime.yaml
-**/*.runtime.json
-# ChatGPT oauth token (LiteLLM codex auth).
-services/litellm/chatgpt/auth.json
 
 # --- editor / bak ---
 *.bak

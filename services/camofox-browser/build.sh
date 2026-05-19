@@ -9,7 +9,8 @@ CAMOFOX_PIN="c9a90dafc76d2dfa0eb5d74fa36ef28f3ba98b29"  # jo-inc/camofox-browser
 
 # Own CAMOFOX_ACCESS_KEY (generated, hermetic). Read existing value first;
 # never blind-regen (rotating would orphan any Hermes config already wired).
-GEN="$STACK_DIR/camofox-browser.generated.env"
+mkdir -p "$STACK_DIR/camofox-browser"
+GEN="$STACK_DIR/camofox-browser/.generated.env"
 key="$(env_get "$GEN" CAMOFOX_ACCESS_KEY)"
 [ -n "$key" ] || key="$(openssl rand -hex 32)"
 env_upsert "$GEN" CAMOFOX_ACCESS_KEY "$key"

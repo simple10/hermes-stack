@@ -22,7 +22,7 @@ services:
       # refuses it; needs an out-of-band re-embed migration).
       EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
-      - ./config.runtime.toml:/app/config.toml:ro
+      - ../../.stack/honcho/config.runtime.toml:/app/config.toml:ro
     depends_on:
       pg: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -54,7 +54,7 @@ services:
       # refuses it; needs an out-of-band re-embed migration).
       EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
-      - ./config.runtime.toml:/app/config.toml:ro
+      - ../../.stack/honcho/config.runtime.toml:/app/config.toml:ro
     depends_on:
       pg: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -103,7 +103,7 @@ services:
       HONCHO_VIRTUAL_KEY: ${HONCHO_VIRTUAL_KEY}
       EMBEDDING_VECTOR_DIMENSIONS: "1024"
     volumes:
-      - ./config.runtime.toml:/app/config.toml:ro
+      - ../../.stack/honcho/config.runtime.toml:/app/config.toml:ro
     depends_on:
       pg: { condition: service_healthy }
       honcho-provision: { condition: service_completed_successfully }

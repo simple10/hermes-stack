@@ -12,7 +12,7 @@ MACHINE="${1:-hermes}"
 
 require_stack_env
 ENVF="$STACK_DIR/.env"
-GEN="$STACK_DIR/litellm.generated.env"
+GEN="$STACK_DIR/litellm/.generated.env"
 source "$ENVF"
 # Key may not exist yet on a from-scratch run (it's minted by litellm during
 # `just start`, AFTER build). build.sh just provisions + writes config with

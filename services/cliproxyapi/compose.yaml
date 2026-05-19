@@ -28,7 +28,7 @@ services:
     expose:
       - "8317"
     volumes:
-      - ./config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
+      - ../../.stack/cliproxyapi/config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
       - cliproxyapi-auth:/root/.cli-proxy-api
     healthcheck:
       # /healthz is the dedicated unauthenticated health route -> 200

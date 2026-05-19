@@ -25,8 +25,8 @@ services:
       CHATGPT_TOKEN_DIR: /root/.codex/chatgpt
       CHATGPT_AUTH_FILE: auth.json
     volumes:
-      - ./config.runtime.yaml:/app/config.yaml:ro
-      - ./chatgpt:/root/.codex/chatgpt
+      - ../../.stack/litellm/config.runtime.yaml:/app/config.yaml:ro
+      - ../../.stack/litellm/chatgpt:/root/.codex/chatgpt
     depends_on:
       litellm-provision: { condition: service_completed_successfully }
     healthcheck:

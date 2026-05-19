@@ -115,7 +115,7 @@ dc() {
   while IFS= read -r g; do
     [ -n "$g" ] && args+=(--env-file "$g")
   done <<EOF
-$(ls "$STACK_DIR"/*.generated.env 2>/dev/null)
+$(ls "$STACK_DIR"/*/.generated.env 2>/dev/null)
 EOF
   # operational allowlist — ONLY what the docker CLI needs to reach the daemon
   # and build/pull over the network (these are NOT Compose interpolation
@@ -164,8 +164,8 @@ EOF
 # record template hash; if OUT exists, drift-check (warn only).
 render_template() {
   local tpl="$1" out="$2" svc="$3"
-  local hdir="$STACK_DIR/.config-hashes"; mkdir -p "$hdir"
-  local hf="$hdir/${svc}.$(basename "$out").sha256"
+  local hdir="$STACK_DIR/$svc/.config-hashes"; mkdir -p "$hdir"
+  local hf="$hdir/$(basename "$out").sha256"
   local cur; cur="$(shasum -a 256 "$tpl" | cut -d' ' -f1)"
   if [ ! -f "$out" ]; then
     cp "$tpl" "$out"; printf '%s\n' "$cur" > "$hf"

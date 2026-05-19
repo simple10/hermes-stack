@@ -11,7 +11,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 require_stack_env
 ENVF="$STACK_DIR/.env"
-GEN="$STACK_DIR/litellm.generated.env"
+mkdir -p "$STACK_DIR/litellm"; GEN="$STACK_DIR/litellm/.generated.env"
 
 # Bring up litellm ourselves (the justfile no longer does this for us).
 # `pg` is already running from the start pipeline's backends-first step;

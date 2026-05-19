@@ -5,7 +5,8 @@
 # Firecrawl is all-env (no config template to render).
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
-GEN="$STACK_DIR/firecrawl.generated.env"
+mkdir -p "$STACK_DIR/firecrawl"
+GEN="$STACK_DIR/firecrawl/.generated.env"
 
 dbpw="$(env_get "$GEN" FIRECRAWL_DB_PASSWORD)"
 [ -n "$dbpw" ] || dbpw="$(openssl rand -hex 16)"

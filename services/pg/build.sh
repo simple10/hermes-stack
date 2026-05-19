@@ -6,7 +6,7 @@
 # provisioner. Reused on re-run so it keeps matching the pg data volume.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
-DBENV="$STACK_DIR/db.generated.env"
+DBENV="$STACK_DIR/pg/.generated.env"; mkdir -p "$(dirname "$DBENV")"
 if [ -f "$DBENV" ] && [ -n "$(env_get "$DBENV" POSTGRES_SUPERPASS)" ]; then
   log "postgres: reusing existing POSTGRES_SUPERPASS (keeps matching pg volume)"
 else

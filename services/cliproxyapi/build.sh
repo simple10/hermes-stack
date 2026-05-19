@@ -18,6 +18,7 @@ tmp="$(mktemp)"
 sed -e "s|__CLIPROXY_API_KEY__|${API_KEY}|g" \
     -e "s|__CLIPROXY_MGMT_KEY__|${MGMT_KEY}|g" \
     "$D/config.yaml.template" > "$tmp"
-mv "$tmp" "$D/config.runtime.yaml"
-chmod 600 "$D/config.runtime.yaml"
+mkdir -p "$STACK_DIR/cliproxyapi"
+mv "$tmp" "$STACK_DIR/cliproxyapi/config.runtime.yaml"
+chmod 600 "$STACK_DIR/cliproxyapi/config.runtime.yaml"
 log "cliproxyapi: rendered config.runtime.yaml (secrets injected from .stack/.env)"

@@ -5,7 +5,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 MACHINE="${1:-hermes}"
 [ "$MACHINE" = "hermes-agent" ] && die "REFUSING: 'hermes-agent' is the frozen original."
-GEN="$STACK_DIR/litellm.generated.env"
+GEN="$STACK_DIR/litellm/.generated.env"
 HK="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
 PROJ="$(stack_project)"
 # bash-source .stack/.env so HERMES_MODEL=${STACK_LLM_MODEL} expands.

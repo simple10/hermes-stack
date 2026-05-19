@@ -129,7 +129,8 @@ reconfigure svc:
     @set -a; source "{{lib}}"; set +a; \
      d="{{root}}/services/{{svc}}"; \
      for ext in toml yaml json; do \
-       t="$d/config.$ext.template"; o="$d/config.runtime.$ext"; \
+       t="$d/config.$ext.template"; o="{{root}}/.stack/{{svc}}/config.runtime.$ext"; \
+       mkdir -p "{{root}}/.stack/{{svc}}"; \
        if [ -f "$t" ]; then \
          [ -f "$o" ] && cp "$o" "$o.bak.$(date +%s)" && echo "backed up $o"; \
          rm -f "$o"; render_template "$t" "$o" "{{svc}}"; \

@@ -4,9 +4,9 @@
 # only build-time concern.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
-GEN="$STACK_DIR/hindsight.generated.env"
+mkdir -p "$STACK_DIR/hindsight"
+GEN="$STACK_DIR/hindsight/.generated.env"
 pw="$(env_get "$GEN" HINDSIGHT_DB_PASSWORD)"
-[ -n "$pw" ] || pw="$(env_get "$STACK_DIR/db.generated.env" HINDSIGHT_DB_PASSWORD)"
 [ -n "$pw" ] || pw="$(openssl rand -hex 16)"
 env_upsert "$GEN" HINDSIGHT_DB_PASSWORD "$pw"
 log "hindsight: HINDSIGHT_DB_PASSWORD owned in hindsight.generated.env"

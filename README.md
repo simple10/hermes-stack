@@ -26,6 +26,7 @@ hermes-stack/
     agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
     hindsight/                 # profile [hindsight] (opt-in); pinned image; pg-backed; LiteLLM-wired
     firecrawl/                 # profile [firecrawl] (opt-in); nuq-backed web-scraper API; rabbitmq-wired; LiteLLM-wired
+    camofox-browser/           # profile [camofox-browser] (opt-in); standalone Camoufox/Firefox automation API; built from pinned _source
   machines/
     hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
   docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
@@ -116,6 +117,14 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   `firecrawl-postgres`** appliance
   — never the shared `pg` — for its pg_cron-driven queue engine. Extract
   routed via LiteLLM.
+- **camofox-browser** — service `camofox-browser` (optional), a stealth
+  headless-browser automation API (Camoufox, a fingerprint-spoofing Firefox
+  fork) for AI agents. Profile `[camofox-browser]`; opt-in. **Standalone** —
+  no pg/redis/rabbitmq/litellm, no provisioner/preflight. No upstream image:
+  built from a pinned gitignored `_source/` via `Dockerfile.ci`
+  (honcho/honcho-ui precedent). `CAMOFOX_ACCESS_KEY` is generated into
+  `.stack/camofox-browser.generated.env` (hermetic; gotcha #16) — read it
+  there to wire Hermes. API on `:9377`, `/health` unauthenticated.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
   via the prebuilt `eceasy/cli-proxy-api` image **pinned by tag**
   (`CLIPROXY_VERSION`, bump deliberately). Profile `[cliproxyapi]`;

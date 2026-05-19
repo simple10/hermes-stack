@@ -17,3 +17,4 @@ include:
   - services/hindsight/compose.yaml
   - services/cliproxyapi/compose.yaml
   - services/firecrawl/compose.yaml
+  - services/camofox-browser/compose.yaml

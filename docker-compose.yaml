@@ -9,9 +9,11 @@
 include:
   - services/postgres/compose.yaml
   - services/redis/compose.yaml
+  - services/rabbitmq/compose.yaml
   - services/litellm/compose.yaml
   - services/honcho/compose.yaml
   - services/honcho-ui/compose.yaml
   - services/agentmemory/compose.yaml
   - services/hindsight/compose.yaml
   - services/cliproxyapi/compose.yaml
+  - services/firecrawl/compose.yaml

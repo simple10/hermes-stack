@@ -1,0 +1,113 @@
+# firecrawl (nuq architecture). profile [firecrawl]. Project-scoped (no
+# container_name / no shared network — Compose default per-project net;
+# siblings reach each other by service name). Images digest-pinned (gotcha
+# #6) — mirrored in services/firecrawl/.image-digest. firecrawl-postgres is
+# DEDICATED & self-initializing (upstream nuq-postgres image bakes nuq.sql +
+# pg_cron); it is NOT the shared `pg` and needs no provisioner. Extract is
+# routed through LiteLLM on the minted FIRECRAWL_VIRTUAL_KEY.
+services:
+  firecrawl-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres@sha256:f9388bd25ae2e1f1d034518236f993ce236173c1d8800ce24092ea6643a95a33
+    profiles: [firecrawl]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FIRECRAWL_DB_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - firecrawl-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  firecrawl-playwright:
+    image: ghcr.io/firecrawl/playwright-service@sha256:9e0737bc09df28275aab29726b1c0824a7725113945434e843385d487b7f7ec6
+    profiles: [firecrawl]
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      PORT: "3000"
+      # deliberate stack default — upstream leaves BLOCK_MEDIA UNSET (media
+      # NOT blocked). We block media (lighter/faster scrapes). Flip to
+      # "false" if a use case needs media.
+      BLOCK_MEDIA: "true"
+      # static value (upstream derives this from CRAWL_CONCURRENT_REQUESTS).
+      MAX_CONCURRENT_PAGES: "10"
+    cpus: ${FIRECRAWL_PLAYWRIGHT_CPU:-2}
+    mem_limit: ${FIRECRAWL_PLAYWRIGHT_MEM:-2g}
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  firecrawl-api:
+    image: ghcr.io/firecrawl/firecrawl@sha256:fb156ea529d2c40acf805872251d921ba15bf17b22b2d5a72bd0aaac30076280
+    profiles: [firecrawl]
+    restart: unless-stopped
+    command: ["node", "dist/src/harness.js", "--start-docker"]
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "3002"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3002"
+      EXTRACT_WORKER_PORT: "3004"
+      WORKER_PORT: "3005"
+      ENV: local
+      HARNESS_STARTUP_TIMEOUT_MS: "60000"
+      REDIS_URL: redis://redis:6379/3
+      REDIS_RATE_LIMIT_URL: redis://redis:6379/3
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${FIRECRAWL_DB_PASSWORD}
+      POSTGRES_DB: postgres
+      USE_DB_AUTHENTICATION: "false"
+      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      BULL_AUTH_KEY: ${FIRECRAWL_BULL_AUTH_KEY}
+      OPENAI_API_KEY: ${FIRECRAWL_VIRTUAL_KEY}
+      OPENAI_BASE_URL: http://litellm:4000/v1
+      MODEL_NAME: ${FIRECRAWL_MODEL}
+      # upstream supplies these via `<<: *common-env` with ${VAR:-<default>};
+      # that default substitution happens in the UPSTREAM compose, NOT here,
+      # so an omitted key is simply UNSET in our container. NUM_WORKERS_PER_QUEUE
+      # drives harness worker spawning — unset risks a zero-worker API. Set
+      # explicitly to upstream's defaults.
+      NUM_WORKERS_PER_QUEUE: "8"
+      CRAWL_CONCURRENT_REQUESTS: "10"
+      MAX_CONCURRENT_JOBS: "5"
+      BROWSER_POOL_SIZE: "5"
+    depends_on:
+      firecrawl-postgres: { condition: service_healthy }
+      firecrawl-playwright: { condition: service_started }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      litellm: { condition: service_healthy }
+    healthcheck:
+      # spec acceptance requires firecrawl-api "healthy". No guaranteed HTTP
+      # health path across firecrawl builds, so TCP-probe the API port; the
+      # harness boot can take a while (HARNESS_STARTUP_TIMEOUT_MS).
+      test: ["CMD-SHELL", "node -e 'require(\"net\").connect(3002,\"127.0.0.1\").on(\"connect\",()=>process.exit(0)).on(\"error\",()=>process.exit(1))'"]
+      interval: 10s
+      timeout: 6s
+      retries: 30
+      start_period: 90s
+    cpus: ${FIRECRAWL_API_CPU:-2}
+    mem_limit: ${FIRECRAWL_API_MEM:-4g}
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  firecrawl-pg-data:

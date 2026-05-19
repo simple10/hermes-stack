@@ -1,14 +1,15 @@
 # Version Pinning & Build Strategy — design
 
 Date: 2026-05-19
-Status: approved; dual self + sub-agent reviewed 2026-05-19. Sub-agent
-findings applied: B1 (central image-resolution phase — compose `include:`
-interpolates globally; profile-gated resolution is architecturally wrong);
-B2 (multi-image `stack_image` signature: `NAME REPO DEFAULT [SVC]`,
-firecrawl's 3 images under one `.stack/firecrawl/`); B3 (`.dockerignore`
-append-if-absent — preserves upstream; tracked `services/honcho-ui/
-.dockerignore` for `context: .` Dockerfile); B4 (`justfile:build` iterates
-`stack_profiles` so transitive build.shs run); M1-M7 + minors.
+Status: approved; dual self + two sub-agent rounds 2026-05-19. Round 1
+fixes: B1 (central image resolver), B2 (multi-image signature),
+B3 (`.dockerignore` append-if-absent + tracked honcho-ui), B4 (`stack_profiles`
+expansion in `just build`), M1–M7. Round 2 verification fixes: NAME case
+canonicalized to uppercase across `images.env` / locks / env vars;
+`stack_resolve_images` parser rewritten with `read -r`-based trim (one-
+char whitespace strip bug); mandatory double-quoting of compose digest-
+class `image:` scalars; migration step 4 line-count corrected; pg/build.sh
+ordering rationale; `tr ',' ' '` note for `stack_profiles` consumption.
 
 ## Problem
 
@@ -154,14 +155,15 @@ for provenance/`git describe`/cheap bumps. Two cases by `build.context`:
 
 ### `stack_image NAME REPO DEFAULT_PIN [SVC]`
 
-For the **digest class** only. Resolves `<NAME_UC>_VERSION` (tag or digest)
-to a concrete digest and writes `<NAME_UC>_IMAGE` into a per-service
+For the **digest class** only. Resolves `<NAME>_VERSION` (tag or digest)
+to a concrete digest and writes `<NAME>_IMAGE` into a per-service
 generated env that `dc()` already globs.
 
-- `NAME` is the **compose service name** (`litellm`, `firecrawl-api`,
-  `firecrawl-playwright`, `firecrawl-postgres`, `hindsight`). Used for the
-  user-facing var name (`<NAME_UC>_VERSION`/`_IMAGE`) and per-image lock
-  filename.
+- `NAME` is the **compose service name, UPPERCASED with hyphens→underscores**
+  (`LITELLM`, `FIRECRAWL_API`, `FIRECRAWL_PLAYWRIGHT`, `FIRECRAWL_POSTGRES`,
+  `HINDSIGHT`). Used as-is in the user-facing var names (`<NAME>_VERSION` /
+  `<NAME>_IMAGE`), in the per-image lock filename (`.image.<NAME>.lock`),
+  and as the key in `images.env`. No additional case transform anywhere.
 - `SVC` defaults to `NAME` (single-image services). For multi-image services
   (firecrawl owns three compose services), `SVC=firecrawl` and `NAME`
   varies — all three locks/env-vars live under `.stack/firecrawl/`,
@@ -170,7 +172,7 @@ generated env that `dc()` already globs.
 
 **Algorithm:**
 ```
-requested = ${<NAME_UC>_VERSION:-<DEFAULT_PIN>}    # "sha256:…" or a tag
+requested = ${<NAME>_VERSION:-<DEFAULT_PIN>}    # "sha256:…" or a tag
 lock      = .stack/<SVC>/.image.<NAME>.lock        # per-image
 genenv    = .stack/<SVC>/.generated.env
 
@@ -191,7 +193,7 @@ else:
 
 # Always (re-)write the env var so dc() interpolation works after fresh
 # checkout. env_upsert is atomic per-key, so multi-image SVCs are safe.
-env_upsert "$genenv" "<NAME_UC>_IMAGE" "${REPO}@${digest}"
+env_upsert "$genenv" "<NAME>_IMAGE" "${REPO}@${digest}"
 ```
 
 **Failure-mode note:** capturing `$(…)` exit code outside a `local` assignment
@@ -199,7 +201,7 @@ is critical — `local digest=$(…)` swallows the rc under `set -e`. Use bare
 assignment + `|| die`. Single-line `set -e`-safe assignment also fine:
 `digest=$(…) || die …`.
 
-Compose reads `image: ${<NAME_UC>_IMAGE:?run 'just build' to resolve <NAME_UC>_VERSION}`.
+Compose reads `image: ${<NAME>_IMAGE:?run 'just build' to resolve <NAME>_VERSION}`.
 The `:?` form fails loudly with that exact message if the env var is unset
 — making the build-first dependency explicit on fresh checkouts.
 
@@ -326,13 +328,16 @@ compose services (`firecrawl-api`, `firecrawl-playwright`,
 
 | Compose service | `image:` (new) |
 |---|---|
-| `litellm` | `${LITELLM_IMAGE:?run 'just build' to resolve LITELLM_VERSION}` |
-| `hindsight` | `${HINDSIGHT_IMAGE:?run 'just build' to resolve HINDSIGHT_VERSION}` |
-| `firecrawl-api` | `${FIRECRAWL_API_IMAGE:?run 'just build' to resolve FIRECRAWL_API_VERSION}` |
-| `firecrawl-playwright` | `${FIRECRAWL_PLAYWRIGHT_IMAGE:?run 'just build' to resolve FIRECRAWL_PLAYWRIGHT_VERSION}` |
-| `firecrawl-postgres` | `${FIRECRAWL_POSTGRES_IMAGE:?run 'just build' to resolve FIRECRAWL_POSTGRES_VERSION}` |
+| `litellm` | `image: "${LITELLM_IMAGE:?run 'just build' to resolve LITELLM_VERSION}"` |
+| `hindsight` | `image: "${HINDSIGHT_IMAGE:?run 'just build' to resolve HINDSIGHT_VERSION}"` |
+| `firecrawl-api` | `image: "${FIRECRAWL_API_IMAGE:?run 'just build' to resolve FIRECRAWL_API_VERSION}"` |
+| `firecrawl-playwright` | `image: "${FIRECRAWL_PLAYWRIGHT_IMAGE:?run 'just build' to resolve FIRECRAWL_PLAYWRIGHT_VERSION}"` |
+| `firecrawl-postgres` | `image: "${FIRECRAWL_POSTGRES_IMAGE:?run 'just build' to resolve FIRECRAWL_POSTGRES_VERSION}"` |
 
-(YAML-safe form — single-quoted error message string.)
+**YAML quoting is mandatory.** The whole scalar MUST be **double-quoted**
+(as shown above) — `${VAR:?…}` containing embedded single-quotes and
+spaces is brittle as an unquoted YAML scalar; Compose's YAML loader expects
+double-quoted form for interpolation values with special characters.
 
 **Resolution is centralized in `just build`** (see Design D); per-service
 `build.sh` files do not call `stack_image`. The resolver parses every
@@ -363,21 +368,28 @@ Implementation sketch in `lib/stacklib.sh`:
 ```bash
 # stack_resolve_images — invoked from `just build` (and defensively from `start`).
 stack_resolve_images() {
+  local f svc name rest repo_pin repo default
   for f in "$STACK_ROOT"/services/*/images.env; do
     [ -e "$f" ] || continue
-    local svc; svc="$(basename "$(dirname "$f")")"
+    svc="$(basename "$(dirname "$f")")"
     while IFS='=' read -r name rest; do
-      name="${name%%[[:space:]]*}"; [ -z "$name" ] && continue
-      case "$name" in '#'*) continue;; esac        # comments
-      local pin_and_comment="${rest##*[[:space:]]}"  # tolerate trailing # tag …
-      local repo_pin="${rest%%#*}"; repo_pin="${repo_pin%[[:space:]]*}"
-      local repo="${repo_pin%@*}" default="${repo_pin#*@}"
+      # strip CR (Windows line endings); skip blank + comment-only lines
+      name="${name%$'\r'}"; name="${name##[[:space:]]}"; [ -z "$name" ] && continue
+      case "$name" in '#'*) continue;; esac
+      # right-trim rest of any trailing whitespace + optional "# tag …" comment,
+      # then split on '@'. `read -r` gives one-shot whitespace tokenization.
+      repo_pin="${rest%%#*}"                                  # drop inline comment
+      read -r repo_pin <<<"$repo_pin"                         # trim leading/trailing WS
+      repo="${repo_pin%@*}"; default="${repo_pin#*@}"
+      [ -n "$repo" ] && [ -n "$default" ] \
+        || die "stack_resolve_images: malformed line in $f: $name=$rest"
       stack_image "$name" "$repo" "$default" "$svc"
     done < "$f"
   done
 }
 ```
-(Exact parser hardened in the plan; spec specifies behavior, not bytes.)
+(Spec specifies behavior + the exact trim/split idiom; plan will add fixture
+tests covering trailing whitespace, CRLF, inline comments, blank lines.)
 
 **Phase 2: per-profile build.sh loop, iterating `stack_profiles`** (not the
 raw `COMPOSE_PROFILES`). Today `justfile:build` loops the raw value — that
@@ -391,14 +403,20 @@ correct.) Phase-2 build.shs do password ownership, source clone+checkout
 resolve images (Phase 1 handles that, unconditionally).
 
 **`just build` order:**
-1. `services/pg/build.sh` (unchanged explicit invocation — superpass owner).
-2. `stack_resolve_images` (Phase 1).
-3. For `p` in `stack_profiles`: `services/$p/build.sh` if executable (Phase 2).
+1. `stack_resolve_images` (Phase 1) — runs FIRST so any subsequent step
+   that invokes `dc` (including pg's build.sh if it grows to) has all
+   `<NAME>_IMAGE` env vars resolved. Cheap on the reuse path; fail-fast
+   on registry/network problems before anything mutates state.
+2. `services/pg/build.sh` (unchanged explicit invocation — superpass owner).
+3. For `p` in `stack_profiles | tr ',' ' '`: `services/$p/build.sh` if
+   executable (Phase 2). `stack_profiles` returns a COMMA-separated string
+   (see lib/stacklib.sh); the justfile uses the same `tr ',' ' '` pattern
+   already in use for `COMPOSE_PROFILES`.
 4. For `m` in `STACK_MACHINES`: `machines/$m/build.sh` (unchanged).
 
-Phase ordering matters: Phase 1 must precede Phase 2 because Phase 2's
-`dc build` invocations parse the full compose tree and require
-`<NAME>_IMAGE` resolved.
+Phase ordering matters: Phase 1 must precede every other step that invokes
+`dc`, because compose `include:` parses the full tree on every invocation
+and `${<NAME>_IMAGE:?…}` blocks if unresolved.
 
 ## Design E — `.stack/.env` conventions + ergonomics
 
@@ -466,15 +484,16 @@ equals the exact pin in use today.
    first `stack_source` against them: `.git` absent → re-clone (preserves
    the pinned content; image layer cache holds since explicit-COPY
    Dockerfiles don't hash on context-level ignored files).
-4. Convert 7 tag-class `image:` lines (`pg` + 3 provisioners' pgvector + 
-   `redis` + `rabbitmq` + (cliproxyapi already done)). Default tag = current
+4. Convert **6** tag-class `image:` lines (`pg` + 3 provisioners' pgvector +
+   `redis` + `rabbitmq`). cliproxyapi (1 line) already uses the pattern;
+   total tag-class footprint after refactor = 7 lines. Default tag = current
    value. `dc up -d` is a no-op (same image).
 5. Create three `services/<svc>/images.env` files (`litellm`, `hindsight`,
    `firecrawl`) with the current digests as `DEFAULT_PIN` and `# tag …`
    annotations researched at implementation time.
-6. Convert 5 digest-class `image:` lines in compose to
-   `${<NAME>_IMAGE:?run 'just build' to resolve <NAME>_VERSION}` (single-
-   quoted, YAML-safe).
+6. Convert 5 digest-class `image:` lines in compose to the **double-
+   quoted** form `image: "${<NAME>_IMAGE:?run 'just build' to resolve
+   <NAME>_VERSION}"` (mandatory YAML quoting — see Design C).
 7. Delete `services/{litellm,firecrawl,hindsight}/.image-digest` sidecars
    AND update the in-compose comments at line 4 of each that reference
    them.
@@ -521,10 +540,12 @@ override.
    `stack_resolve_images`.
 5. **`justfile:build` runs in two explicit phases**: Phase 1
    (`stack_resolve_images`) before Phase 2 (per-profile build.sh loop over
-   `stack_profiles`). With `COMPOSE_PROFILES=cliproxyapi` (no
-   litellm/hindsight/firecrawl active), `just build` still resolves
-   `LITELLM_IMAGE`/`HINDSIGHT_IMAGE`/`FIRECRAWL_*_IMAGE` so `dc up -d
-   cliproxyapi` succeeds (proves B1 is fixed).
+   `stack_profiles | tr ',' ' '`). With `COMPOSE_PROFILES=cliproxyapi` (no
+   litellm/hindsight/firecrawl active), `just build` still populates
+   `LITELLM_IMAGE`, `HINDSIGHT_IMAGE`, **all three of** `FIRECRAWL_API_IMAGE`,
+   `FIRECRAWL_PLAYWRIGHT_IMAGE`, `FIRECRAWL_POSTGRES_IMAGE` in their
+   respective `.stack/<svc>/.generated.env`, so `dc up -d cliproxyapi`
+   succeeds (proves B1 + B2 closed).
 6. **Non-destructive default round-trip**: on the live stack, after the
    refactor, `just build` followed by `dc up -d` recreates **zero**
    containers (all resolved digests/tags match the pre-refactor state).

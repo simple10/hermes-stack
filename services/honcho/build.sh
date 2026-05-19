@@ -9,6 +9,7 @@ if [ -d "$D/_source" ] && [ -f "$D/_source/Dockerfile" ]; then
   log "honcho: _source present (pinned build context) — reusing"
 else
   log "honcho: cloning plastic-labs/honcho @ $HONCHO_PIN"
+  rm -rf "$D/_source"   # recover from a partial/interrupted prior clone
   git clone https://github.com/plastic-labs/honcho "$D/_source"
   git -C "$D/_source" checkout "$HONCHO_PIN"
   rm -rf "$D/_source/.git"
@@ -36,3 +37,11 @@ pw="$(env_get "$GEN" HONCHO_DB_PASSWORD)"
 [ -n "$pw" ] || pw="$(openssl rand -hex 16)"
 env_upsert "$GEN" HONCHO_DB_PASSWORD "$pw"
 log "honcho: HONCHO_DB_PASSWORD owned in honcho.generated.env"
+
+# Eager build (honcho-ui / camofox-browser precedent) — surface the heavy
+# plastic-labs/honcho image build at `just build`, not deep in `just start`'s
+# `dc up -d` after backends+preflight are already up. honcho-api and
+# honcho-deriver share one build context (./_source) → a single image.
+# Layer-cached: a no-op when nothing changed.
+log "honcho: building image (honcho-api + honcho-deriver share one context)"
+dc build honcho-api honcho-deriver

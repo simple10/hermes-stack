@@ -14,6 +14,7 @@ if [ -d "$D/_source" ] && [ -f "$D/_source/package.json" ]; then
   log "honcho-ui: _source present (pinned build context) — reusing"
 else
   log "honcho-ui: cloning offendingcommit/openconcho @ $OPENCONCHO_PIN"
+  rm -rf "$D/_source"   # recover from a partial/interrupted prior clone
   git clone https://github.com/offendingcommit/openconcho "$D/_source"
   git -C "$D/_source" checkout "$OPENCONCHO_PIN"
   rm -rf "$D/_source/.git"

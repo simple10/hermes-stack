@@ -114,16 +114,28 @@ ensure_dockerignore() {
   fi
 }
 
-# stack_source SVC REPO DEFAULT_PIN — clone-and-pin services/SVC/_source/ to
-# ${<SVC_UC>_VERSION:-DEFAULT_PIN}. Reuse fast-path on lock+HEAD match. Always
-# leaves _source at the resolved SHA, keeps .git, ensures _source/.dockerignore.
+# stack_source SVC [REPO DEFAULT_PIN] — clone-and-pin services/SVC/_source/ to
+# ${<SVC_UC>_VERSION:-DEFAULT_PIN}. REPO/DEFAULT_PIN default to
+# <SVC_UC>_SOURCE_REPO / <SVC_UC>_SOURCE_DEFAULT in services/SVC/service.env.
+# Reuse fast-path on lock+HEAD match. Always leaves _source at the resolved SHA,
+# keeps .git, ensures _source/.dockerignore. ALL state (lock + rebuild flag)
+# lives in .stack/SVC/.generated.env under <SVC_UC>_SOURCE_* keys.
 stack_source() {
-  local svc="$1" repo="$2" default_pin="$3"
+  local svc="$1" repo="${2:-}" default_pin="${3:-}"
   local svc_uc; svc_uc="$(_svc_uc "$svc")"
+  local svcenv="$STACK_ROOT/services/$svc/service.env"
+  if [ -z "$repo" ]; then
+    repo="$(env_get "$svcenv" "${svc_uc}_SOURCE_REPO")"
+    [ -n "$repo" ] || die "stack_source($svc): no REPO arg and no ${svc_uc}_SOURCE_REPO in $svcenv"
+  fi
+  if [ -z "$default_pin" ]; then
+    default_pin="$(env_get "$svcenv" "${svc_uc}_SOURCE_DEFAULT")"
+    [ -n "$default_pin" ] || die "stack_source($svc): no DEFAULT_PIN arg and no ${svc_uc}_SOURCE_DEFAULT in $svcenv"
+  fi
   local requested; eval "requested=\${${svc_uc}_VERSION:-\$default_pin}"
   local src="$STACK_ROOT/services/$svc/_source"
-  local lockdir="$STACK_DIR/$svc"
-  local lock="$lockdir/.source.lock"
+  local genenv="$STACK_DIR/$svc/.generated.env"
+  mkdir -p "$STACK_DIR/$svc"
 
   # Identity check on existing _source (refuse if origin doesn't match).
   if [ -d "$src/.git" ]; then
@@ -133,13 +145,13 @@ stack_source() {
     fi
   fi
 
-  # Reuse fast-path: lock matches + HEAD matches -> no network, no marker.
-  if [ -d "$src/.git" ] && [ -f "$lock" ]; then
+  # Reuse fast-path: lock matches + HEAD matches -> no network, no rebuild flag.
+  if [ -d "$src/.git" ] && [ -f "$genenv" ]; then
     local lock_req lock_sha head
-    lock_req="$(env_get "$lock" requested)"
-    lock_sha="$(env_get "$lock" resolved_sha)"
+    lock_req="$(env_get "$genenv" "${svc_uc}_SOURCE_REQUESTED")"
+    lock_sha="$(env_get "$genenv" "${svc_uc}_SOURCE_RESOLVED_SHA")"
     head="$(git -C "$src" rev-parse HEAD 2>/dev/null || true)"
-    if [ "$lock_req" = "$requested" ] && [ "$head" = "$lock_sha" ]; then
+    if [ -n "$lock_req" ] && [ "$lock_req" = "$requested" ] && [ "$head" = "$lock_sha" ]; then
       ensure_dockerignore "$src"
       log "stack_source($svc): reuse — $requested @ ${head:0:12}"
       return 0
@@ -153,11 +165,9 @@ stack_source() {
     git clone "$repo" "$src"
   fi
 
-  # Resolve requested (tag, SHA, or branch).
-  # `--verify` is required: without it, `git rev-parse 'bogus^{commit}'`
-  # prints the literal string to stdout AND exits 128, defeating our
-  # empty-string failure detection. With --verify, failure prints nothing
-  # to stdout (errors go to stderr, suppressed).
+  # Resolve requested (tag, SHA, or branch). `--verify` is mandatory: without
+  # it `git rev-parse 'bogus^{commit}'` prints the literal to stdout AND
+  # exits 128, defeating our empty-string failure detection.
   git -C "$src" fetch --tags origin
   local sha
   sha="$(git -C "$src" rev-parse --verify "${requested}^{commit}" 2>/dev/null || true)"
@@ -173,21 +183,21 @@ stack_source() {
   git -C "$src" checkout --detach "$sha"
   ensure_dockerignore "$src"
 
-  mkdir -p "$lockdir"
-  printf 'requested=%s\nresolved_sha=%s\n' "$requested" "$sha" > "$lock"
-  touch "$lockdir/.source.rebuild"
-  log "stack_source($svc): pinned $requested -> ${sha:0:12} (rebuild marker set)"
+  env_upsert "$genenv" "${svc_uc}_SOURCE_REQUESTED" "$requested"
+  env_upsert "$genenv" "${svc_uc}_SOURCE_RESOLVED_SHA" "$sha"
+  env_upsert "$genenv" "${svc_uc}_SOURCE_REBUILD" "1"
+  log "stack_source($svc): pinned $requested -> ${sha:0:12} (rebuild flag set)"
 }
 
 # stack_image NAME REPO DEFAULT_PIN [SVC] — resolve ${<NAME>_VERSION:-DEFAULT_PIN}
 # (tag or sha256: digest) to a concrete digest; write <NAME>_IMAGE=REPO@digest
-# into .stack/<SVC>/.generated.env. SVC defaults to NAME (single-image services).
+# into .stack/<SVC>/.generated.env (along with <NAME>_IMAGE_REQUESTED +
+# <NAME>_IMAGE_RESOLVED_DIGEST lock state). SVC defaults to NAME.
 stack_image() {
   local name="$1" repo="$2" default_pin="$3"
   local svc="${4:-$1}"
   local requested; eval "requested=\${${name}_VERSION:-\$default_pin}"
   local lockdir="$STACK_DIR/$svc"
-  local lock="$lockdir/.image.${name}.lock"
   local genenv="$lockdir/.generated.env"
 
   local digest
@@ -203,35 +213,32 @@ stack_image() {
   esac
 
   mkdir -p "$lockdir"
-  printf 'requested=%s\nresolved_digest=%s\n' "$requested" "$digest" > "$lock"
+  env_upsert "$genenv" "${name}_IMAGE_REQUESTED" "$requested"
+  env_upsert "$genenv" "${name}_IMAGE_RESOLVED_DIGEST" "$digest"
   env_upsert "$genenv" "${name}_IMAGE" "${repo}@${digest}"
   log "stack_image($name): $requested -> ${digest:0:19}…"
 }
 
-# stack_resolve_images — iterate every services/*/images.env and resolve each
-# image via stack_image. Runs UNCONDITIONALLY from `just build` Phase 1 because
-# compose include: interpolates every file on every dc call.
+# stack_resolve_images — scan every services/*/service.env for *_IMAGE_REPO
+# keys; for each, read the matching *_IMAGE_DEFAULT and call stack_image.
+# Runs UNCONDITIONALLY from `just build` Phase 1 because compose include:
+# interpolates every file on every dc call.
 stack_resolve_images() {
-  local f svc name rest repo_pin repo default
-  for f in "$STACK_ROOT"/services/*/images.env; do
+  local f svc names name repo default
+  for f in "$STACK_ROOT"/services/*/service.env; do
     [ -e "$f" ] || continue
     svc="$(basename "$(dirname "$f")")"
-    while IFS='=' read -r name rest; do
-      # strip CRLF tail from BOTH name and rest (or the no-inline-comment
-      # path leaves a literal \r in the resolved digest value).
-      name="${name%$'\r'}"; rest="${rest%$'\r'}"
-      name="$(printf '%s' "$name" | sed -e 's/^[[:space:]]*//')"
+    # Extract NAME from every "<NAME>_IMAGE_REPO=" key (uppercase, alnum/_).
+    names="$(grep -oE '^[A-Z][A-Z0-9_]*_IMAGE_REPO=' "$f" | sed 's/_IMAGE_REPO=$//' || true)"
+    [ -z "$names" ] && continue
+    while IFS= read -r name; do
       [ -z "$name" ] && continue
-      case "$name" in '#'*) continue;; esac
-      repo_pin="${rest%%#*}"
-      read -r repo_pin <<<"$repo_pin"
-      [ -n "$repo_pin" ] || die "stack_resolve_images: malformed (empty value) in $f: '$name'"
-      repo="${repo_pin%@*}"
-      default="${repo_pin#*@}"
-      [ -n "$repo" ] && [ -n "$default" ] && [ "$repo" != "$repo_pin" ] \
-        || die "stack_resolve_images: malformed (need REPO@PIN) in $f: '$name=$repo_pin'"
+      repo="$(env_get "$f" "${name}_IMAGE_REPO")"
+      default="$(env_get "$f" "${name}_IMAGE_DEFAULT")"
+      [ -n "$repo" ] && [ -n "$default" ] \
+        || die "stack_resolve_images: $f missing ${name}_IMAGE_REPO or ${name}_IMAGE_DEFAULT"
       stack_image "$name" "$repo" "$default" "$svc"
-    done < "$f"
+    done <<<"$names"
   done
 }
 

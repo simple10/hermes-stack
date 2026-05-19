@@ -75,9 +75,28 @@ test_stack_source_tag_resolve_and_dockerignore() {
   STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" v1
   [ -d "$svc_dir/_source/.git" ] || { echo "FAIL: .git not retained"; return 1; }
   local sha; sha=$(git -C "$svc_dir/_source" rev-parse HEAD)
-  grep -q "resolved_sha=$sha" "$d/.stack/$svc/.source.lock" || { echo "FAIL: lock missing resolved_sha"; return 1; }
+  local genenv="$d/.stack/$svc/.generated.env"
+  [ "$(env_get "$genenv" TESTSVC_SOURCE_RESOLVED_SHA)" = "$sha" ] \
+    || { echo "FAIL: generated.env missing TESTSVC_SOURCE_RESOLVED_SHA=$sha"; cat "$genenv"; return 1; }
+  [ "$(env_get "$genenv" TESTSVC_SOURCE_REQUESTED)" = "v1" ] \
+    || { echo "FAIL: TESTSVC_SOURCE_REQUESTED != v1"; return 1; }
+  [ "$(env_get "$genenv" TESTSVC_SOURCE_REBUILD)" = "1" ] \
+    || { echo "FAIL: rebuild flag not set"; return 1; }
   grep -qFx '.git/' "$svc_dir/_source/.dockerignore" || { echo "FAIL: .dockerignore not written"; return 1; }
-  echo "ok: stack_source tag-resolve + .dockerignore + lock"
+  echo "ok: stack_source tag-resolve + .dockerignore + .generated.env"
+}
+
+test_stack_source_reads_service_env_when_args_missing() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _stack_source_make_upstream "$d"
+  mkdir -p "$d/services/testsvc"
+  cat > "$d/services/testsvc/service.env" <<EOF
+TESTSVC_SOURCE_REPO=$d/upstream.git
+TESTSVC_SOURCE_DEFAULT=v1
+EOF
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc
+  [ -d "$d/services/testsvc/_source/.git" ] || { echo "FAIL: service.env-driven clone missed"; return 1; }
+  echo "ok: stack_source reads service.env when args omitted"
 }
 
 test_stack_source_reuse_no_network() {
@@ -118,11 +137,12 @@ test_stack_source_change_detection() {
   _stack_source_make_upstream "$d"
   mkdir -p "$d/services/testsvc"
   STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" v1
-  rm -f "$d/.stack/testsvc/.source.rebuild"
+  # Simulate caller consuming the flag by clearing it.
+  env_upsert "$d/.stack/testsvc/.generated.env" TESTSVC_SOURCE_REBUILD ""
   STACK_ROOT="$d" STACK_DIR="$d/.stack" _stack_source_run testsvc "$d/upstream.git" v2
-  [ -f "$d/.stack/testsvc/.source.rebuild" ] \
-    || { echo "FAIL: rebuild marker missing after version change"; return 1; }
-  echo "ok: stack_source change-detection sets rebuild marker"
+  [ "$(env_get "$d/.stack/testsvc/.generated.env" TESTSVC_SOURCE_REBUILD)" = "1" ] \
+    || { echo "FAIL: rebuild flag missing after version change"; return 1; }
+  echo "ok: stack_source change-detection sets rebuild flag"
 }
 
 test_stack_source_origin_url_mismatch_fails_loud() {
@@ -168,10 +188,13 @@ test_stack_image_digest_passthrough() {
   _fake_docker_dir "$d"
   PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
     stack_image LITELLM ghcr.io/x/y sha256:abc123 litellm
-  grep -q '^LITELLM_IMAGE=ghcr.io/x/y@sha256:abc123$' "$d/.stack/litellm/.generated.env" \
-    || { echo "FAIL: LITELLM_IMAGE not written or wrong value"; return 1; }
-  grep -q 'requested=sha256:abc123' "$d/.stack/litellm/.image.LITELLM.lock" \
-    || { echo "FAIL: lock missing requested"; return 1; }
+  local g="$d/.stack/litellm/.generated.env"
+  grep -q '^LITELLM_IMAGE=ghcr.io/x/y@sha256:abc123$' "$g" \
+    || { echo "FAIL: LITELLM_IMAGE not written"; return 1; }
+  [ "$(env_get "$g" LITELLM_IMAGE_REQUESTED)" = "sha256:abc123" ] \
+    || { echo "FAIL: LITELLM_IMAGE_REQUESTED missing"; return 1; }
+  [ "$(env_get "$g" LITELLM_IMAGE_RESOLVED_DIGEST)" = "sha256:abc123" ] \
+    || { echo "FAIL: LITELLM_IMAGE_RESOLVED_DIGEST missing"; return 1; }
   echo "ok: stack_image digest passthrough"
 }
 
@@ -200,11 +223,12 @@ test_stack_image_multi_image_coresident() {
     && grep -q '^FIRECRAWL_PLAYWRIGHT_IMAGE=' "$g" \
     && grep -q '^FIRECRAWL_POSTGRES_IMAGE=' "$g" \
     || { echo "FAIL: multi-image env vars missing"; return 1; }
-  ls "$d/.stack/firecrawl/.image.FIRECRAWL_API.lock" \
-     "$d/.stack/firecrawl/.image.FIRECRAWL_PLAYWRIGHT.lock" \
-     "$d/.stack/firecrawl/.image.FIRECRAWL_POSTGRES.lock" >/dev/null \
-    || { echo "FAIL: per-image lock files missing"; return 1; }
-  echo "ok: stack_image multi-image co-resident"
+  # All 3 image's lock state co-resident in ONE .generated.env via prefixed keys.
+  [ "$(env_get "$g" FIRECRAWL_API_IMAGE_RESOLVED_DIGEST)" = "sha256:aaa" ] \
+    && [ "$(env_get "$g" FIRECRAWL_PLAYWRIGHT_IMAGE_RESOLVED_DIGEST)" = "sha256:bbb" ] \
+    && [ "$(env_get "$g" FIRECRAWL_POSTGRES_IMAGE_RESOLVED_DIGEST)" = "sha256:ccc" ] \
+    || { echo "FAIL: per-image lock keys missing"; return 1; }
+  echo "ok: stack_image multi-image co-resident (one .generated.env)"
 }
 
 test_stack_image_fail_loud_on_bad_ref() {
@@ -217,48 +241,40 @@ test_stack_image_fail_loud_on_bad_ref() {
   echo "ok: stack_image fail-loud on bad ref"
 }
 
-test_stack_resolve_images_parses_real_format() {
+test_stack_resolve_images_reads_service_env() {
   local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
   _fake_docker_dir "$d"
-  mkdir -p "$d/services/litellm" "$d/services/firecrawl"
-  cat > "$d/services/litellm/images.env" <<'EOF'
-# litellm digest-class
-LITELLM=ghcr.io/berriai/litellm-database@sha256:7bb80500  # tag v1.78.6
+  mkdir -p "$d/services/litellm" "$d/services/firecrawl" "$d/services/no_images"
+  cat > "$d/services/litellm/service.env" <<'EOF'
+SERVICE_REQUIRES=pg,redis
+LITELLM_IMAGE_REPO=ghcr.io/berriai/litellm-database
+LITELLM_IMAGE_DEFAULT=sha256:7bb80500
 EOF
-  cat > "$d/services/firecrawl/images.env" <<'EOF'
-FIRECRAWL_API=ghcr.io/firecrawl/firecrawl@sha256:fb156ea5    # tag X
-
-# blank line above and inline comment ok
-FIRECRAWL_PLAYWRIGHT=ghcr.io/firecrawl/playwright-service@sha256:9e0737bc # tag Y
-FIRECRAWL_POSTGRES=ghcr.io/firecrawl/nuq-postgres@sha256:f9388bd2# tag Z
+  cat > "$d/services/firecrawl/service.env" <<'EOF'
+SERVICE_REQUIRES=redis,rabbitmq,litellm
+FIRECRAWL_API_IMAGE_REPO=ghcr.io/firecrawl/firecrawl
+FIRECRAWL_API_IMAGE_DEFAULT=sha256:fb156ea5
+FIRECRAWL_PLAYWRIGHT_IMAGE_REPO=ghcr.io/firecrawl/playwright-service
+FIRECRAWL_PLAYWRIGHT_IMAGE_DEFAULT=sha256:9e0737bc
+FIRECRAWL_POSTGRES_IMAGE_REPO=ghcr.io/firecrawl/nuq-postgres
+FIRECRAWL_POSTGRES_IMAGE_DEFAULT=sha256:f9388bd2
+EOF
+  # Service without image keys — must be skipped silently.
+  cat > "$d/services/no_images/service.env" <<'EOF'
+SERVICE_REQUIRES=pg
 EOF
   PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_resolve_images
-  local lg="$d/.stack/litellm/.generated.env"
+  grep -q '^LITELLM_IMAGE=ghcr.io/berriai/litellm-database@sha256:7bb80500$' \
+    "$d/.stack/litellm/.generated.env" \
+    || { echo "FAIL: LITELLM_IMAGE wrong"; return 1; }
   local fg="$d/.stack/firecrawl/.generated.env"
-  grep -q '^LITELLM_IMAGE=ghcr.io/berriai/litellm-database@sha256:7bb80500$' "$lg" \
-    || { echo "FAIL: LITELLM_IMAGE wrong"; cat "$lg"; return 1; }
   grep -q '^FIRECRAWL_API_IMAGE=ghcr.io/firecrawl/firecrawl@sha256:fb156ea5$' "$fg" \
     && grep -q '^FIRECRAWL_PLAYWRIGHT_IMAGE=' "$fg" \
     && grep -q '^FIRECRAWL_POSTGRES_IMAGE=' "$fg" \
-    || { echo "FAIL: firecrawl multi-image"; cat "$fg"; return 1; }
-  echo "ok: stack_resolve_images parses real format"
-}
-
-test_stack_resolve_images_skips_blank_and_comment_lines() {
-  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
-  _fake_docker_dir "$d"
-  mkdir -p "$d/services/hindsight"
-  cat > "$d/services/hindsight/images.env" <<'EOF'
-# all comments
-
-#   indented comment
-HINDSIGHT=ghcr.io/vectorize-io/hindsight@sha256:cafef00d  # tag t
-EOF
-  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_resolve_images
-  grep -q '^HINDSIGHT_IMAGE=ghcr.io/vectorize-io/hindsight@sha256:cafef00d$' \
-    "$d/.stack/hindsight/.generated.env" \
-    || { echo "FAIL: hindsight not resolved"; return 1; }
-  echo "ok: stack_resolve_images skips blanks + comments"
+    || { echo "FAIL: firecrawl multi-image"; return 1; }
+  [ ! -e "$d/.stack/no_images/.generated.env" ] \
+    || { echo "FAIL: no_images should not have a .generated.env (no image keys)"; return 1; }
+  echo "ok: stack_resolve_images reads service.env (incl. multi-image; skips service.env without image keys)"
 }
 
 run_helpers_tests() {
@@ -279,8 +295,8 @@ run_helpers_tests() {
   test_stack_image_tag_resolve_via_fake_docker || return 1
   test_stack_image_multi_image_coresident || return 1
   test_stack_image_fail_loud_on_bad_ref || return 1
-  test_stack_resolve_images_parses_real_format || return 1
-  test_stack_resolve_images_skips_blank_and_comment_lines || return 1
+  test_stack_resolve_images_reads_service_env || return 1
+  test_stack_source_reads_service_env_when_args_missing || return 1
 }
 
 run_helpers_tests || fail=1

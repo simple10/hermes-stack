@@ -208,6 +208,33 @@ stack_image() {
   log "stack_image($name): $requested -> ${digest:0:19}…"
 }
 
+# stack_resolve_images — iterate every services/*/images.env and resolve each
+# image via stack_image. Runs UNCONDITIONALLY from `just build` Phase 1 because
+# compose include: interpolates every file on every dc call.
+stack_resolve_images() {
+  local f svc name rest repo_pin repo default
+  for f in "$STACK_ROOT"/services/*/images.env; do
+    [ -e "$f" ] || continue
+    svc="$(basename "$(dirname "$f")")"
+    while IFS='=' read -r name rest; do
+      # strip CRLF tail from BOTH name and rest (or the no-inline-comment
+      # path leaves a literal \r in the resolved digest value).
+      name="${name%$'\r'}"; rest="${rest%$'\r'}"
+      name="$(printf '%s' "$name" | sed -e 's/^[[:space:]]*//')"
+      [ -z "$name" ] && continue
+      case "$name" in '#'*) continue;; esac
+      repo_pin="${rest%%#*}"
+      read -r repo_pin <<<"$repo_pin"
+      [ -n "$repo_pin" ] || die "stack_resolve_images: malformed (empty value) in $f: '$name'"
+      repo="${repo_pin%@*}"
+      default="${repo_pin#*@}"
+      [ -n "$repo" ] && [ -n "$default" ] && [ "$repo" != "$repo_pin" ] \
+        || die "stack_resolve_images: malformed (need REPO@PIN) in $f: '$name=$repo_pin'"
+      stack_image "$name" "$repo" "$default" "$svc"
+    done < "$f"
+  done
+}
+
 # dc — `docker compose` for THIS stack, run HERMETICALLY. Compose sees ONLY
 # .stack/.env (+ .stack/*.generated.env), passed as ABSOLUTE --env-file args,
 # with the host environment STRIPPED (env -i + a tight docker-operational

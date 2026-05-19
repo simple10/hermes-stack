@@ -217,6 +217,50 @@ test_stack_image_fail_loud_on_bad_ref() {
   echo "ok: stack_image fail-loud on bad ref"
 }
 
+test_stack_resolve_images_parses_real_format() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _fake_docker_dir "$d"
+  mkdir -p "$d/services/litellm" "$d/services/firecrawl"
+  cat > "$d/services/litellm/images.env" <<'EOF'
+# litellm digest-class
+LITELLM=ghcr.io/berriai/litellm-database@sha256:7bb80500  # tag v1.78.6
+EOF
+  cat > "$d/services/firecrawl/images.env" <<'EOF'
+FIRECRAWL_API=ghcr.io/firecrawl/firecrawl@sha256:fb156ea5    # tag X
+
+# blank line above and inline comment ok
+FIRECRAWL_PLAYWRIGHT=ghcr.io/firecrawl/playwright-service@sha256:9e0737bc # tag Y
+FIRECRAWL_POSTGRES=ghcr.io/firecrawl/nuq-postgres@sha256:f9388bd2# tag Z
+EOF
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_resolve_images
+  local lg="$d/.stack/litellm/.generated.env"
+  local fg="$d/.stack/firecrawl/.generated.env"
+  grep -q '^LITELLM_IMAGE=ghcr.io/berriai/litellm-database@sha256:7bb80500$' "$lg" \
+    || { echo "FAIL: LITELLM_IMAGE wrong"; cat "$lg"; return 1; }
+  grep -q '^FIRECRAWL_API_IMAGE=ghcr.io/firecrawl/firecrawl@sha256:fb156ea5$' "$fg" \
+    && grep -q '^FIRECRAWL_PLAYWRIGHT_IMAGE=' "$fg" \
+    && grep -q '^FIRECRAWL_POSTGRES_IMAGE=' "$fg" \
+    || { echo "FAIL: firecrawl multi-image"; cat "$fg"; return 1; }
+  echo "ok: stack_resolve_images parses real format"
+}
+
+test_stack_resolve_images_skips_blank_and_comment_lines() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _fake_docker_dir "$d"
+  mkdir -p "$d/services/hindsight"
+  cat > "$d/services/hindsight/images.env" <<'EOF'
+# all comments
+
+#   indented comment
+HINDSIGHT=ghcr.io/vectorize-io/hindsight@sha256:cafef00d  # tag t
+EOF
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_resolve_images
+  grep -q '^HINDSIGHT_IMAGE=ghcr.io/vectorize-io/hindsight@sha256:cafef00d$' \
+    "$d/.stack/hindsight/.generated.env" \
+    || { echo "FAIL: hindsight not resolved"; return 1; }
+  echo "ok: stack_resolve_images skips blanks + comments"
+}
+
 run_helpers_tests() {
   # Isolation: clear any user-set version overrides so default-pin path is
   # actually exercised in tests.
@@ -235,6 +279,8 @@ run_helpers_tests() {
   test_stack_image_tag_resolve_via_fake_docker || return 1
   test_stack_image_multi_image_coresident || return 1
   test_stack_image_fail_loud_on_bad_ref || return 1
+  test_stack_resolve_images_parses_real_format || return 1
+  test_stack_resolve_images_skips_blank_and_comment_lines || return 1
 }
 
 run_helpers_tests || fail=1

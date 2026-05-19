@@ -1,6 +1,11 @@
-# rabbitmq. No profile => always-on shared backend (nuq transport for
-# firecrawl; reusable by future services). Project-scoped (no container_name
-# / no shared network). Siblings reach it at host `rabbitmq:5672`; mgmt UI
+# rabbitmq. profile [firecrawl] — firecrawl-api is its ONLY consumer (nuq
+# notify/prefetch transport); it is NOT shared substrate, so it must not run
+# when firecrawl is off. No backends-line entry: it comes up (and is waited
+# on, healthy) via firecrawl-api's `depends_on: rabbitmq` inside `dc up -d`
+# when the firecrawl profile is active. If a future service genuinely needs
+# AMQP, widen this profile list then (don't pre-generalize — YAGNI).
+# Project-scoped (no container_name / no shared network). Siblings reach it
+# at host `rabbitmq:5672`; mgmt UI
 # at rabbitmq.<project>.orb.local:15672 (default guest/guest — localhost-only
 # by RabbitMQ default, so orb-DNS is effectively read-blocked; the AMQP path
 # on the project net is unauthenticated, same as upstream firecrawl). Tag-
@@ -8,6 +13,7 @@
 services:
   rabbitmq:
     image: rabbitmq:4.3.0-management
+    profiles: ["firecrawl"]
     restart: unless-stopped
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq

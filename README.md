@@ -110,8 +110,10 @@ project) reaches services via OrbStack DNS `<service>.<project>.orb.local`.
   into Hermes.
 - **firecrawl** — service `firecrawl` (optional), web-scraper API backed by the
   nuq (non-uniform queue) engine. Profile `[firecrawl]`; opt-in via the
-  `firecrawl` profile; needs the always-on `rabbitmq` backend (stateless
-  notify/prefetch transport). Uses a **dedicated `firecrawl-postgres`** appliance
+  `firecrawl` profile, which also brings up a `rabbitmq` backend (stateless
+  notify/prefetch transport; profile-scoped to `[firecrawl]`, its only
+  consumer — not started when firecrawl is off). Uses a **dedicated
+  `firecrawl-postgres`** appliance
   — never the shared `pg` — for its pg_cron-driven queue engine. Extract
   routed via LiteLLM.
 - **cliproxyapi** — service `cliproxyapi` (optional), router-for-me/CLIProxyAPI
@@ -361,7 +363,9 @@ provisions, `poststart` finalizes.
     `shared_preload_libraries` + cluster-wide `ALTER SYSTEM` + ~40 cron jobs
     that ARE the queue engine (reapers/GC/REINDEX). It self-initializes its
     own single-tenant `firecrawl-pg-data` volume (no provisioner). `rabbitmq`
-    is a stateless nuq notify/prefetch transport → shared always-on backend.
+    is a stateless nuq notify/prefetch transport → profile-scoped to
+    `[firecrawl]` (its only consumer), pulled up healthy via
+    `firecrawl-api`'s `depends_on`, NOT a backends-line always-on substrate.
     Losing `firecrawl-pg-data` loses only in-flight jobs (ephemeral queue).
 15. **Self-hosted Firecrawl has NO interactive browser-session feature.**
     The v2 `/browser*` routes + `scrape-browser` (and `/v2/scrape` with

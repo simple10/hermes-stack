@@ -178,3 +178,24 @@ profile doc, `FIRECRAWL_MODEL=${STACK_LLM_MODEL}`, resource levers,
 - Adding firecrawl touched only `services/firecrawl/`, `services/rabbitmq/`, root `include:`, the justfile backends line, `.stack.env.example`, README — zero changes to shared `pg` or any sub-project-1 service.
 - No regression to the lifecycle refactor or existing services.
 
+## As-built correction (2026-05-18, post-merge)
+
+Decision #1 ("RabbitMQ = shared always-on backend, no profile, on the
+`dc up -d pg redis rabbitmq` backends line, reusable by future services")
+was reversed as a YAGNI mis-classification. `firecrawl-api` is rabbitmq's
+**only** consumer, so running a full Erlang/RabbitMQ node + volume whenever
+the stack is up (firecrawl off included) is pure waste, and it contradicts
+the lifecycle principle that only genuinely-shared substrate (pg/redis —
+needed by litellm/honcho/hindsight, and by litellm preflight to mint keys)
+is hoisted ahead of preflight while everything service-specific comes up via
+its profile + `depends_on` in `dc up -d`.
+
+**As shipped:** `rabbitmq` carries `profiles: ["firecrawl"]` and is removed
+from the backends line (now `dc up -d pg redis`). It is pulled up — and
+waited on `service_healthy` — by `firecrawl-api`'s existing
+`depends_on: rabbitmq` when the firecrawl profile is active; nothing in
+firecrawl's lifecycle (build.sh only — no preflight/prestart/poststart)
+needs it earlier. Supersedes the two Acceptance bullets above that reference
+rabbitmq as "always-on": when `firecrawl` is absent from `COMPOSE_PROFILES`,
+`rabbitmq` does NOT start.
+

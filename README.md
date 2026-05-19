@@ -54,12 +54,28 @@ fixpoint: `stack_profiles` (= `COMPOSE_PROFILES` ∪ required, injected by
 `just start` brings up first). Adding a new consumer = one line in *its*
 `service.env`; the dependency's compose is never touched.
 
+**Version pinning.** One model for every externally-sourced thing: a
+`<NAME>_VERSION` lever in `.stack/.env` (optional, per-stack), an annotated
+immutable default tracked in code (`services/<svc>/images.env` for
+digest-class images; the `stack_source` call's third arg in `build.sh` for
+`_source` services), and an auto-detected lock at
+`.stack/<svc>/.image.<NAME>.lock` or `.stack/<svc>/.source.lock`. `just
+build` runs in two explicit phases: Phase 1 (`stack_resolve_images`)
+unconditionally resolves every digest-class image (compose `include:`
+parses the whole tree on every `dc` call, so partial resolution is fatal);
+Phase 2 iterates `stack_profiles | tr ',' ' '` (transitive) for per-service
+`build.sh` runs. Tag-class images (Docker Hub-style — `pg`/`redis`/
+`rabbitmq`/`cliproxyapi`) interpolate `image: repo:${VAR:-default}`
+directly. Bump: edit `.stack/.env`, `just build`, `just up` — auto-detected,
+rebuilt if needed, no code edits.
+
 - **pg / redis** — `pgvector/pgvector:pg18` (service `pg`, dir `services/pg/`;
   DBs `honcho` + `litellm`, each a least-priv role) and `redis:8.6.3` (service
   `redis`). Each owns its profile (`[pg]` / `[redis]`), pulled in by any
   consumer's `SERVICE_REQUIRES` — only run when something needs them.
-- **litellm** — service `litellm`, official `litellm-database` image **pinned
-  by digest**. Profile `[litellm]`.
+- **litellm** — service `litellm`, official `litellm-database` image,
+  digest-pinned via `services/litellm/images.env` (bump tag/digest via
+  `LITELLM_VERSION` in `.stack/.env`). Profile `[litellm]`.
 - **honcho** — services `honcho-api` + `honcho-deriver`, built from a
   **pinned** `plastic-labs/honcho` commit. Profile `[honcho]`;
   `SERVICE_REQUIRES=pg,redis,litellm` (honcho-api `depends_on` all three).
@@ -110,7 +126,9 @@ fixpoint: `stack_profiles` (= `COMPOSE_PROFILES` ∪ required, injected by
   recreating (no edit to the git-tracked compose; `:3113` then stays
   loopback-only). Not yet wired into Hermes (next step).
 - **hindsight** — service `hindsight` (optional), prebuilt
-  `vectorize-io/hindsight` all-in-one image **pinned by digest**. Profile
+  `vectorize-io/hindsight` all-in-one image, digest-pinned via
+  `services/hindsight/images.env` (bump tag/digest via `HINDSIGHT_VERSION`
+  in `.stack/.env`). Profile
   `[hindsight]`; `SERVICE_REQUIRES=pg,litellm` (`depends_on` both; litellm
   pulls redis). LLM via cliproxy through LiteLLM (`HINDSIGHT_MODEL`
   lever) + Voyage embeddings (`HINDSIGHT_EMBEDDING_MODEL`). **Reranker** is

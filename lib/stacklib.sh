@@ -179,6 +179,35 @@ stack_source() {
   log "stack_source($svc): pinned $requested -> ${sha:0:12} (rebuild marker set)"
 }
 
+# stack_image NAME REPO DEFAULT_PIN [SVC] — resolve ${<NAME>_VERSION:-DEFAULT_PIN}
+# (tag or sha256: digest) to a concrete digest; write <NAME>_IMAGE=REPO@digest
+# into .stack/<SVC>/.generated.env. SVC defaults to NAME (single-image services).
+stack_image() {
+  local name="$1" repo="$2" default_pin="$3"
+  local svc="${4:-$1}"
+  local requested; eval "requested=\${${name}_VERSION:-\$default_pin}"
+  local lockdir="$STACK_DIR/$svc"
+  local lock="$lockdir/.image.${name}.lock"
+  local genenv="$lockdir/.generated.env"
+
+  local digest
+  case "$requested" in
+    sha256:*) digest="$requested" ;;
+    *)
+      digest="$(docker buildx imagetools inspect "${repo}:${requested}" \
+                  --format '{{.Manifest.Digest}}')" \
+        || die "stack_image($name): 'docker buildx imagetools inspect ${repo}:${requested}' failed (network/auth/unknown tag)"
+      [ -n "$digest" ] \
+        || die "stack_image($name): empty digest for ${repo}:${requested}"
+      ;;
+  esac
+
+  mkdir -p "$lockdir"
+  printf 'requested=%s\nresolved_digest=%s\n' "$requested" "$digest" > "$lock"
+  env_upsert "$genenv" "${name}_IMAGE" "${repo}@${digest}"
+  log "stack_image($name): $requested -> ${digest:0:19}…"
+}
+
 # dc — `docker compose` for THIS stack, run HERMETICALLY. Compose sees ONLY
 # .stack/.env (+ .stack/*.generated.env), passed as ABSOLUTE --env-file args,
 # with the host environment STRIPPED (env -i + a tight docker-operational

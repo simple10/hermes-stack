@@ -142,6 +142,81 @@ _stack_source_run() {
   ( set -e; stack_source "$@" )
 }
 
+# --- stack_image (fake-docker shim) ----------------------------------------
+_fake_docker_dir() {
+  local d="$1"
+  mkdir -p "$d/bin"
+  cat > "$d/bin/docker" <<'SH'
+#!/usr/bin/env bash
+set -e
+if [ "$1" = "buildx" ] && [ "$2" = "imagetools" ] && [ "$3" = "inspect" ]; then
+  ref="$4"
+  case "$ref" in
+    *":BADTAG") echo "fake-docker: not found" >&2; exit 1 ;;
+    *)          digest="sha256:$(printf '%s' "$ref" | shasum -a 256 | cut -c1-64)"
+                echo "$digest" ;;
+  esac
+  exit 0
+fi
+echo "fake-docker: unsupported args: $*" >&2; exit 2
+SH
+  chmod +x "$d/bin/docker"
+}
+
+test_stack_image_digest_passthrough() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _fake_docker_dir "$d"
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
+    stack_image LITELLM ghcr.io/x/y sha256:abc123 litellm
+  grep -q '^LITELLM_IMAGE=ghcr.io/x/y@sha256:abc123$' "$d/.stack/litellm/.generated.env" \
+    || { echo "FAIL: LITELLM_IMAGE not written or wrong value"; return 1; }
+  grep -q 'requested=sha256:abc123' "$d/.stack/litellm/.image.LITELLM.lock" \
+    || { echo "FAIL: lock missing requested"; return 1; }
+  echo "ok: stack_image digest passthrough"
+}
+
+test_stack_image_tag_resolve_via_fake_docker() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _fake_docker_dir "$d"
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
+    stack_image LITELLM ghcr.io/x/y v1.78.6 litellm
+  local val; val="$(env_get "$d/.stack/litellm/.generated.env" LITELLM_IMAGE)"
+  [[ "$val" =~ ^ghcr.io/x/y@sha256:[0-9a-f]{64}$ ]] \
+    || { echo "FAIL: tag-resolved LITELLM_IMAGE shape wrong: $val"; return 1; }
+  echo "ok: stack_image tag-resolve"
+}
+
+test_stack_image_multi_image_coresident() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _fake_docker_dir "$d"
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
+    stack_image FIRECRAWL_API ghcr.io/firecrawl/firecrawl sha256:aaa firecrawl
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
+    stack_image FIRECRAWL_PLAYWRIGHT ghcr.io/firecrawl/playwright-service sha256:bbb firecrawl
+  PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
+    stack_image FIRECRAWL_POSTGRES ghcr.io/firecrawl/nuq-postgres sha256:ccc firecrawl
+  local g="$d/.stack/firecrawl/.generated.env"
+  grep -q '^FIRECRAWL_API_IMAGE=ghcr.io/firecrawl/firecrawl@sha256:aaa$' "$g" \
+    && grep -q '^FIRECRAWL_PLAYWRIGHT_IMAGE=' "$g" \
+    && grep -q '^FIRECRAWL_POSTGRES_IMAGE=' "$g" \
+    || { echo "FAIL: multi-image env vars missing"; return 1; }
+  ls "$d/.stack/firecrawl/.image.FIRECRAWL_API.lock" \
+     "$d/.stack/firecrawl/.image.FIRECRAWL_PLAYWRIGHT.lock" \
+     "$d/.stack/firecrawl/.image.FIRECRAWL_POSTGRES.lock" >/dev/null \
+    || { echo "FAIL: per-image lock files missing"; return 1; }
+  echo "ok: stack_image multi-image co-resident"
+}
+
+test_stack_image_fail_loud_on_bad_ref() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _fake_docker_dir "$d"
+  if ( PATH="$d/bin:$PATH" STACK_ROOT="$d" STACK_DIR="$d/.stack" \
+       stack_image LITELLM ghcr.io/x/y BADTAG litellm ) 2>/dev/null; then
+    echo "FAIL: bad ref did not die"; return 1
+  fi
+  echo "ok: stack_image fail-loud on bad ref"
+}
+
 run_helpers_tests() {
   # Isolation: clear any user-set version overrides so default-pin path is
   # actually exercised in tests.
@@ -156,6 +231,10 @@ run_helpers_tests() {
   test_stack_source_unknown_ref_fails_loud || return 1
   test_stack_source_sidebranch_sha_fetch_fallback || return 1
   test_stack_source_change_detection || return 1
+  test_stack_image_digest_passthrough || return 1
+  test_stack_image_tag_resolve_via_fake_docker || return 1
+  test_stack_image_multi_image_coresident || return 1
+  test_stack_image_fail_loud_on_bad_ref || return 1
 }
 
 run_helpers_tests || fail=1

@@ -87,13 +87,14 @@ start:
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
      set +e; \
-     for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
-       [ -n "$mch" ] || continue; \
-       orb_set_machine_isolation "$mch"; rc=$?; \
+     for svc in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
+       [ -n "$svc" ] || continue; \
+       vm="$(stack_vm_name "$svc")"; \
+       orb_set_machine_isolation "$vm"; rc=$?; \
        case "$rc" in \
          0) ;; \
-         1) die "machine '$mch': isolation flags were FALSE — flipped to true in orb config. Run 'just restart' to apply (config changes take effect on next VM start)." ;; \
-         2) die "machine '$mch': 'orb config set' failed (is OrbStack running?)" ;; \
+         1) die "machine '$vm': isolation flags were FALSE — flipped to true in orb config. Run 'just restart' to apply (config changes take effect on next VM start)." ;; \
+         2) die "machine '$vm': 'orb config set' failed (is OrbStack running?)" ;; \
        esac; \
      done; \
      set -e; \
@@ -182,33 +183,34 @@ chrome-cdp:
      mkdir -p "$STACK_DIR/localhost-proxy"; \
      env_upsert "$STACK_DIR/localhost-proxy/.generated.env" LOCALHOST_PROXY_PORTS "$merged"; \
      dc --profile localhost-proxy up -d --force-recreate localhost-proxy >/dev/null; \
-     first_mch="$(echo "${STACK_MACHINES:-hermes}" | tr ', ' ' ' | awk '{print $1}')"; \
-     mch_running="$(orb list 2>/dev/null | awk -v m="$first_mch" '$1==m && $2=="running"{print "1"}')"; \
-     [ -n "$mch_running" ] || die "machine '$first_mch' not running — start it first ('just start') so chrome-cdp can resolve the proxy IP from the VM's perspective (orb-DNS NAT differs from docker inspect; printing the docker IP would give Hermes an address it can't reach under --isolate-network)."; \
+     first_svc="$(echo "${STACK_MACHINES:-hermes}" | tr ', ' ' ' | awk '{print $1}')"; \
+     first_vm="$(stack_vm_name "$first_svc")"; \
+     mch_running="$(orb list 2>/dev/null | awk -v m="$first_vm" '$1==m && $2=="running"{print "1"}')"; \
+     [ -n "$mch_running" ] || die "machine '$first_vm' not running — start it first ('just start') so chrome-cdp can resolve the proxy IP from the VM's perspective (orb-DNS NAT differs from docker inspect; printing the docker IP would give Hermes an address it can't reach under --isolate-network)."; \
      for i in $(seq 1 30); do \
-       proxy_ip="$(orb -m "$first_mch" bash -lc "getent hosts localhost-proxy.$proj.orb.local 2>/dev/null | awk '{print \$1}'" 2>/dev/null)"; \
+       proxy_ip="$(orb -m "$first_vm" bash -lc "getent hosts localhost-proxy.$proj.orb.local 2>/dev/null | awk '{print \$1}'" 2>/dev/null)"; \
        [ -n "$proxy_ip" ] && break; sleep 0.3; \
      done; \
-     [ -n "$proxy_ip" ] || die "could not resolve localhost-proxy.$proj.orb.local from machine '$first_mch' — check 'dc logs localhost-proxy' and that orb DNS is up"; \
+     [ -n "$proxy_ip" ] || die "could not resolve localhost-proxy.$proj.orb.local from machine '$first_vm' — check 'dc logs localhost-proxy' and that orb DNS is up"; \
      cdp_url="http://$proxy_ip:$bport"; \
      log "chrome-cdp: ready"; \
      log "  Hermes URL:  $cdp_url   (IP literal, VM-resolved — Chrome 111+ rejects hostname Host headers)"; \
      log "  port list:   LOCALHOST_PROXY_PORTS=$merged"; \
      if [ ! -t 0 ]; then \
        log "  non-interactive — wire Hermes manually:"; \
-       log "    orb -m $first_mch bash -lc 'sed -i \"/^BROWSER_CDP_URL=/d\" ~/.hermes/.env; echo BROWSER_CDP_URL=$cdp_url >> ~/.hermes/.env; sudo systemctl restart hermes-gateway'"; \
+       log "    orb -m $first_vm bash -lc 'sed -i \"/^BROWSER_CDP_URL=/d\" ~/.hermes/.env; echo BROWSER_CDP_URL=$cdp_url >> ~/.hermes/.env; sudo systemctl restart hermes-gateway'"; \
        exit 0; \
      fi; \
-     printf "\nWire BROWSER_CDP_URL=%s into machine '%s' and restart hermes-gateway? [y/N] " "$cdp_url" "$first_mch"; \
+     printf "\nWire BROWSER_CDP_URL=%s into machine '%s' and restart hermes-gateway? [y/N] " "$cdp_url" "$first_vm"; \
      read -r ans; \
      case "$ans" in \
        y|Y|yes|YES) \
-         orb -m "$first_mch" bash -lc "set -e; umask 077; \
+         orb -m "$first_vm" bash -lc "set -e; umask 077; \
            sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; \
            echo 'BROWSER_CDP_URL=$cdp_url' >> ~/.hermes/.env; \
            sudo systemctl restart hermes-gateway"; \
          log "  Hermes: BROWSER_CDP_URL=$cdp_url applied, hermes-gateway restarted" ;; \
-       *) log "  skipped — apply later with: orb -m $first_mch bash -lc 'hermes config set browser.cdp_url $cdp_url'" ;; \
+       *) log "  skipped — apply later with: orb -m $first_vm bash -lc 'hermes config set browser.cdp_url $cdp_url'" ;; \
      esac
 
 # Tear down Mac-host Chrome + localhost-proxy + ALWAYS clear stale
@@ -235,29 +237,31 @@ chrome-cdp-stop:
        dc --profile localhost-proxy rm -f localhost-proxy >/dev/null 2>&1 || true; \
        rm -f "$STACK_DIR/localhost-proxy/.generated.env"; \
      fi; \
-     first_mch="$(env_get "$STACK_DIR/.env" STACK_MACHINES 2>/dev/null | tr ', ' ' ' | awk '{print $1}')"; \
-     [ -z "$first_mch" ] && exit 0; \
-     orb list 2>/dev/null | awk '{print $1}' | grep -qx "$first_mch" || exit 0; \
-     orb -m "$first_mch" bash -lc 'test -f ~/.hermes/.env && grep -q "^BROWSER_CDP_URL=" ~/.hermes/.env' 2>/dev/null \
+     first_svc="$(env_get "$STACK_DIR/.env" STACK_MACHINES 2>/dev/null | tr ', ' ' ' | awk '{print $1}')"; \
+     [ -z "$first_svc" ] && exit 0; \
+     first_vm="$(stack_vm_name "$first_svc")"; \
+     orb list 2>/dev/null | awk '{print $1}' | grep -qx "$first_vm" || exit 0; \
+     orb -m "$first_vm" bash -lc 'test -f ~/.hermes/.env && grep -q "^BROWSER_CDP_URL=" ~/.hermes/.env' 2>/dev/null \
        || exit 0; \
-     echo "== chrome-cdp: clearing stale BROWSER_CDP_URL on '$first_mch' =="; \
-     orb -m "$first_mch" bash -lc "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; sudo systemctl restart hermes-gateway 2>/dev/null || true"
+     echo "== chrome-cdp: clearing stale BROWSER_CDP_URL on '$first_vm' =="; \
+     orb -m "$first_vm" bash -lc "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; sudo systemctl restart hermes-gateway 2>/dev/null || true"
 
 # chrome-cdp stops FIRST (depends_on) so a stale CDP can't be reattached
 # accidentally on next start. Only machines in STACK_MACHINES are touched.
 # Stop this stack's chrome-cdp + machines, then bring containers down (keep volumes).
 stop: chrome-cdp-stop
     @set -a; source "{{lib}}"; set +a; \
-     mch="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ', ' ' ')"; \
-     if [ -n "$(echo "$mch" | tr -d '[:space:]')" ]; then \
+     svcs="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ', ' ' ')"; \
+     if [ -n "$(echo "$svcs" | tr -d '[:space:]')" ]; then \
        ol="$(orb list 2>/dev/null || true)"; \
-       for m in $mch; do \
-         [ -n "$m" ] || continue; \
-         row="$(echo "$ol" | awk -v m="$m" '$1==m')"; \
+       for svc in $svcs; do \
+         [ -n "$svc" ] || continue; \
+         vm="$(stack_vm_name "$svc")"; \
+         row="$(echo "$ol" | awk -v m="$vm" '$1==m')"; \
          if [ -n "$row" ]; then \
-           echo "== stopping machine: $m =="; orb stop "$m" || true; \
+           echo "== stopping machine: $vm =="; orb stop "$vm" || true; \
          else \
-           echo "(machine $m not created — skipping)"; \
+           echo "(machine $vm not created — skipping)"; \
          fi; \
        done; \
      fi; \
@@ -288,20 +292,25 @@ status:
        --format "table {{{{.Label \"com.docker.compose.service\"}}\t{{{{.Status}}\t{{{{.Ports}}"; \
      echo ""; \
      echo "------- VMs -------"; \
-     mch="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ',' ' ')"; \
-     if [ -z "$(echo "$mch" | tr -d '[:space:]')" ]; then \
+     svcs="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ',' ' ')"; \
+     if [ -z "$(echo "$svcs" | tr -d '[:space:]')" ]; then \
        echo "(no STACK_MACHINES configured for this stack)"; \
      else \
        ol="$(orb list 2>/dev/null || true)"; \
-       for m in $mch; do \
-         row="$(echo "$ol" | awk -v m="$m" '$1==m')"; \
-         [ -n "$row" ] && echo "$row" || echo "$m  (not created)"; \
+       for svc in $svcs; do \
+         vm="$(stack_vm_name "$svc")"; \
+         row="$(echo "$ol" | awk -v m="$vm" '$1==m')"; \
+         [ -n "$row" ] && echo "$row" || echo "$vm  (not created)"; \
        done; \
      fi
 
 # Tail an Orb machine console (OrbStack Logs tab = console).
-logs machine="hermes":
-    orb logs {{machine}}
+# Arg is the SERVICE name (matches STACK_MACHINES); we translate to the
+# project-prefixed VM name via stack_vm_name.
+logs svc="hermes":
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     orb logs "$(stack_vm_name "{{svc}}")"
 
 # Re-render a service runtime config from its template (backs up the old one).
 reconfigure svc:

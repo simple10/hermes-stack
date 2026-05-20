@@ -2,7 +2,7 @@
 # setup.sh — initialize .stack/.env. Safe to re-run.
 #
 # Flow:
-#   1. Seed .stack/.env from .stack.env.defaults (first run = copy; every
+#   1. Seed .stack/.env from .stack.defaults.env (first run = copy; every
 #      run = additive merge of missing keys).
 #   2. Show available services + prompt the user for which to enable.
 #   3. For each selected service: lib_enable_service (cascades
@@ -15,7 +15,7 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/stacklib.sh"
 
 ENVF="$STACK_DIR/.env"
-DEFAULTS="$STACK_ROOT/.stack.env.defaults"
+DEFAULTS="$STACK_ROOT/.stack.defaults.env"
 [ -f "$DEFAULTS" ] || die "missing $DEFAULTS — refusing to setup blind"
 mkdir -p "$STACK_DIR"
 
@@ -51,12 +51,12 @@ gen_if_missing() {  # gen_if_missing VAR PREFIX BYTES
   stack_upsert "$var" "$cur"
 }
 
-# ---- step 1: seed .stack/.env from .stack.env.defaults ---------------------
+# ---- step 1: seed .stack/.env from .stack.defaults.env ---------------------
 
 if [ ! -f "$ENVF" ]; then
   cp "$DEFAULTS" "$ENVF"
   chmod 600 "$ENVF"
-  log "$ENVF created from .stack.env.defaults"
+  log "$ENVF created from .stack.defaults.env"
 else
   # Additive merge: any key in defaults that's not already in .stack/.env.
   while IFS= read -r line; do

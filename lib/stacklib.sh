@@ -326,10 +326,29 @@ require_stack_env() {
   [ -f "$STACK_DIR/.env" ] || die ".stack/.env missing — run: just setup"
 }
 
+# stack_vm_name SVC — print the OrbStack VM name for a service. Always
+# project-prefixed (e.g. for COMPOSE_PROJECT_NAME=aitools, service 'hermes'
+# becomes 'aitools_hermes'). This centralizes the naming convention so:
+#   - STACK_MACHINES stays as a list of SERVICE names (matches services/<svc>/
+#     and COMPOSE_PROFILES conventions).
+#   - The actual orb VM name is always project-prefixed, so multi-stack runs
+#     can't collide on the global `orb list` namespace.
+# Every site that calls `orb -m/stop/create/delete/list-grep/logs/config`
+# MUST go through this helper — never use the bare service name as the
+# machine name. User-renamed machines in OrbStack get orphaned from this
+# project naturally (no auto-rename); add a per-service _VM_NAME override
+# later if/when needed.
+stack_vm_name() {
+  local svc="$1"
+  printf '%s_%s' "$(stack_project)" "$svc"
+}
+
 # orb_get_machine_flag MACHINE FLAG — print the boolean value of
 # machine.<MACHINE>.<FLAG> from `orb config show` (or empty if unset).
 # `orb config get` returns a non-zero status with no output when the key is
 # unset; we don't want callers to have to handle that.
+# NOTE: MACHINE is the actual orb VM name (resolved by stack_vm_name),
+# not the service name. Caller is responsible for that translation.
 orb_get_machine_flag() {
   local mch="$1" flag="$2"
   orb config show 2>/dev/null \

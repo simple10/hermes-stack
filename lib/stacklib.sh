@@ -495,13 +495,22 @@ stack_env_block_sync() {
   chmod 600 "$f"
 }
 
-# find_dependants SVC — print space-separated list of enabled docker
-# services whose SERVICE_REQUIRES contains SVC. (VM services don't declare
-# SERVICE_REQUIRES in this stack; they consume via env at runtime.)
+# _is_enabled SVC — return 0 if SVC is in COMPOSE_PROFILES or STACK_MACHINES.
+_is_enabled() {
+  local svc="$1" lists v
+  for v in COMPOSE_PROFILES STACK_MACHINES; do
+    lists="$(env_get "$STACK_DIR/.env" "$v")"
+    case ",$lists," in *",$svc,"*) return 0 ;; esac
+  done
+  return 1
+}
+
+# find_dependants SVC — print space-separated list of enabled services
+# (docker + vm) whose SERVICE_REQUIRES contains SVC.
 find_dependants() {
-  local svc="$1" profs dep req deps=""
-  profs="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)"
-  for dep in $(printf '%s' "$profs" | tr ',' ' '); do
+  local svc="$1" all dep req deps=""
+  all="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES),$(env_get "$STACK_DIR/.env" STACK_MACHINES)"
+  for dep in $(printf '%s' "$all" | tr ',' ' '); do
     [ -z "$dep" ] && continue
     [ "$dep" = "$svc" ] && continue
     req="$(_svc_requires "$dep")"
@@ -510,8 +519,9 @@ find_dependants() {
   printf '%s' "${deps% }"
 }
 
-# lib_enable_service SVC — idempotently enable a service in .stack/.env.
-lib_enable_service() {
+# _enable_one SVC — do the actual enable for one service (no dep cascade).
+# Caller is lib_enable_service (which handles transitive SERVICE_REQUIRES).
+_enable_one() {
   local svc="$1"
   local svc_env="$STACK_ROOT/services/$svc/service.env"
   [ -f "$svc_env" ] || die "no such service: $svc (services/$svc/service.env not found)"
@@ -536,39 +546,85 @@ lib_enable_service() {
       [ -n "$stack_env" ] && printf '%s' "$stack_env" | stack_env_block_append "$svc"
       ;;
   esac
-  # Additive sync — only on existing (now-enabled) blocks, never on missing
-  # (the append step already wrote everything).
   if [ -n "$stack_env" ] && [ "$status" != "missing" ]; then
     stack_env_block_sync "$svc" "$stack_env"
   fi
 
   [ -x "$STACK_ROOT/services/$svc/enable.sh" ] && bash "$STACK_ROOT/services/$svc/enable.sh"
-  log "$svc enabled  (runner=$runner profile=$profile virtkey=${virtkey:-false} block=${status})"
+  # No per-service log here — lib_enable_service emits one summary line at
+  # the top. Cascade activations are communicated via the "auto-enabling X
+  # (required by Y)" lines printed in _enable_with_deps.
 }
 
-# lib_disable_service SVC — idempotently disable. Warns + prompts if other
-# enabled services depend on this one (STACK_FORCE=1 to skip prompt).
+# __ENABLE_VISITED — global colon-delimited dedup set for the cascade.
+# Reset at the top of every lib_enable_service call. Global (not passed)
+# so SIBLING branches of the recursion see each other's marks (passing it
+# by-value gave each branch its own copy → dupes when the same service
+# was a transitive dep of two siblings). bash 3.2 has no associative
+# arrays — macOS /bin/bash is 3.2.
+__ENABLE_VISITED=""
+
+_enable_with_deps() {
+  local s="$1" req r
+  case ":$__ENABLE_VISITED:" in *":$s:"*) return 0 ;; esac
+  __ENABLE_VISITED="$__ENABLE_VISITED:$s"
+  [ -f "$STACK_ROOT/services/$s/service.env" ] \
+    || die "no such service: $s (services/$s/service.env not found)"
+  req="$(_svc_requires "$s")"
+  for r in $(printf '%s' "$req" | tr ',' ' '); do
+    [ -z "$r" ] && continue
+    if ! _is_enabled "$r"; then
+      printf 'auto-enabling %s (required by %s)\n' "$r" "$s"
+    fi
+    _enable_with_deps "$r"
+  done
+  _enable_one "$s"
+}
+
+# lib_enable_service SVC — idempotently enable; auto-enables (leaf-first)
+# every service in the transitive SERVICE_REQUIRES closure. Cycle-safe.
+# Compares before/after .stack/.env CSVs to decide whether to log "X
+# enabled" or "X already enabled — no changes" (block-only changes from
+# SERVICE_STACK_ENV sync also count as changes via the file hash check).
+lib_enable_service() {
+  local svc="$1"
+  local before_csv before_hash after_csv after_hash
+  before_csv="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES),$(env_get "$STACK_DIR/.env" STACK_MACHINES),$(env_get "$STACK_DIR/.env" LITELLM_VIRTKEYS)"
+  before_hash="$(shasum -a 256 "$STACK_DIR/.env" 2>/dev/null | cut -d' ' -f1)"
+  __ENABLE_VISITED=""
+  _enable_with_deps "$svc"
+  __ENABLE_VISITED=""
+  after_csv="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES),$(env_get "$STACK_DIR/.env" STACK_MACHINES),$(env_get "$STACK_DIR/.env" LITELLM_VIRTKEYS)"
+  after_hash="$(shasum -a 256 "$STACK_DIR/.env" 2>/dev/null | cut -d' ' -f1)"
+  if [ "$before_csv" = "$after_csv" ] && [ "$before_hash" = "$after_hash" ]; then
+    log "$svc already enabled — no changes"
+  else
+    log "$svc enabled"
+  fi
+}
+
+# lib_disable_service SVC — idempotently disable. REFUSES (exit 1) if any
+# enabled service has SERVICE_REQUIRES containing this one. No force flag —
+# the user disables dependants first, period. No "required" services
+# either; only the dependency graph matters.
 lib_disable_service() {
   local svc="$1"
   local svc_env="$STACK_ROOT/services/$svc/service.env"
   [ -f "$svc_env" ] || die "no such service: $svc"
-  local runner profile virtkey deps status ans
+  local runner profile virtkey deps status
   runner="$(env_get  "$svc_env" SERVICE_RUNNER)";       runner="${runner:-docker}"
   profile="$(env_get "$svc_env" SERVICE_PROFILE)";      profile="${profile:-$svc}"
   virtkey="$(env_get "$svc_env" SERVICE_LITELLM_KEY)"
 
   deps="$(find_dependants "$svc")"
   if [ -n "$deps" ]; then
-    warn "Disabling '$svc' would orphan: $deps  (their SERVICE_REQUIRES depends on it)"
-    if [ "${STACK_FORCE:-}" = "1" ]; then
-      warn "STACK_FORCE=1 — proceeding"
-    elif [ ! -t 0 ]; then
-      die "non-interactive: refusing. Disable the dependants first, or set STACK_FORCE=1."
-    else
-      printf "Continue anyway? [y/N] "; read -r ans
-      case "$ans" in y|Y|yes|YES) ;; *) die "aborted" ;; esac
-    fi
+    warn "refusing to disable '$svc' — these enabled services depend on it:"
+    printf '         %s\n' "$deps"
+    die  "disable them first:  just disable $deps"
   fi
+
+  # Snapshot before so we can tell "no change" vs "actually disabled"
+  local before_hash; before_hash="$(shasum -a 256 "$STACK_DIR/.env" 2>/dev/null | cut -d' ' -f1)"
 
   case "$runner" in
     docker) csv_remove "$STACK_DIR/.env" COMPOSE_PROFILES "$profile" ;;
@@ -584,7 +640,12 @@ lib_disable_service() {
   esac
 
   [ -x "$STACK_ROOT/services/$svc/disable.sh" ] && bash "$STACK_ROOT/services/$svc/disable.sh"
-  log "$svc disabled (runner=$runner profile=$profile block=${status})"
+  local after_hash; after_hash="$(shasum -a 256 "$STACK_DIR/.env" 2>/dev/null | cut -d' ' -f1)"
+  if [ "$before_hash" = "$after_hash" ]; then
+    log "$svc already disabled — no changes"
+  else
+    log "$svc disabled"
+  fi
 }
 
 # lib_list_enabled_services — pretty-print current COMPOSE_PROFILES + STACK_MACHINES.

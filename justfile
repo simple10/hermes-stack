@@ -21,6 +21,36 @@ default:
 setup:
     @bash "{{root}}/lib/setup.sh"
 
+# Add a service to .stack/.env (idempotent). Reads services/<svc>/service.env
+# for SERVICE_RUNNER (docker|vm), SERVICE_PROFILE, SERVICE_LITELLM_KEY,
+# SERVICE_STACK_ENV. Toggles the #>--- svc --- block back from disabled if
+# present. Then prints the next-step commands.
+# Enable a service — toggle into .stack/.env (CSV + #>--- svc --- block).
+enable svc:
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     lib_enable_service "{{svc}}"; \
+     echo ""; \
+     echo "next: just build && just start    (or 'just restart' if the stack is already up)"
+
+# Remove a service from .stack/.env (idempotent). Comments out its
+# #>--- svc --- block so user edits inside are preserved for re-enable.
+# Warns + prompts if other enabled services depend on this one
+# (STACK_FORCE=1 to skip).
+# Disable a service — remove from CSVs, comment out its #>--- svc --- block.
+disable svc:
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     lib_disable_service "{{svc}}"; \
+     echo ""; \
+     echo "next: just stop && just start    (to remove the service's containers; volumes stay)"
+
+# List currently-enabled services in .stack/.env (COMPOSE_PROFILES + STACK_MACHINES).
+enabled:
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     lib_list_enabled_services
+
 # Render configs, fetch pinned sources, generate DB passwords, provision machines.
 build:
     @set -a; source "{{lib}}"; set +a; \

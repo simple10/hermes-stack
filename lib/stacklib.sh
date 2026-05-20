@@ -354,3 +354,250 @@ orb_set_machine_isolation() {
 # (compose env-file wiring lives solely in dc() now — it passes absolute
 # --env-file args under a stripped env. No separate COMPOSE_ENV_FILES export
 # anywhere: that was relative-path + host-precedence prone. Single source.)
+
+# ============================================================================
+# enable / disable plumbing — used by `just enable <svc>` / `just disable <svc>`
+# ============================================================================
+# Each service declares (in services/<svc>/service.env, all optional):
+#   SERVICE_RUNNER=docker|vm        # default docker; routes to COMPOSE_PROFILES or STACK_MACHINES
+#   SERVICE_PROFILE=<name>          # default = <svc>; CSV-member name
+#   SERVICE_LITELLM_KEY=true|false  # default false; mints <profile>_VIRTUAL_KEY
+#   SERVICE_STACK_ENV='<multi-line>'# default empty; vars injected into .stack/.env
+#                                   # as a #>--- svc --- ... #<--- svc --- block.
+# Optional services/<svc>/{enable,disable}.sh run AFTER the lib logic.
+#
+# Block on/off state in .stack/.env: ENABLED = bare markers + body; DISABLED
+# = every line in the block (markers included) prefixed with "# ". Detection
+# of disabled state = start marker begins with "# #>---". Round-trips
+# preserve user edits inside the block (one-char-deep "# " prefix only).
+
+# csv_add FILE KEY VAL — add VAL to CSV at KEY (idempotent; init if missing).
+csv_add() {
+  local file="$1" key="$2" val="$3" cur
+  cur="$(env_get "$file" "$key")"
+  case ",$cur," in *",$val,"*) return 0 ;; esac
+  env_upsert "$file" "$key" "${cur:+$cur,}$val"
+}
+
+# csv_remove FILE KEY VAL — remove VAL from CSV at KEY (idempotent).
+csv_remove() {
+  local file="$1" key="$2" val="$3" cur new
+  cur="$(env_get "$file" "$key")"
+  [ -z "$cur" ] && return 0
+  new="$(printf '%s\n' "$cur" | tr ',' '\n' | grep -vxF "$val" | paste -sd, - 2>/dev/null)"
+  env_upsert "$file" "$key" "$new"
+}
+
+# _svc_env_field SVC FIELD — read FIELD from services/SVC/service.env (or "").
+_svc_env_field() {
+  local svc="$1" field="$2" f="$STACK_ROOT/services/$1/service.env"
+  [ -f "$f" ] || return 0
+  env_get "$f" "$field"
+}
+
+# stack_env_block_status SVC — print enabled|disabled|missing.
+stack_env_block_status() {
+  local svc="$1" f="$STACK_DIR/.env"
+  [ -f "$f" ] || { echo missing; return; }
+  if   grep -qE "^#>--- $svc ---"   "$f"; then echo enabled
+  elif grep -qE "^# +#>--- $svc ---" "$f"; then echo disabled
+  else echo missing
+  fi
+}
+
+# stack_env_block_append SVC < body
+# Append a new ENABLED block at the end of .stack/.env (caller ensures it
+# doesn't already exist; use after stack_env_block_status == "missing").
+stack_env_block_append() {
+  local svc="$1" f="$STACK_DIR/.env" body
+  body="$(cat)"
+  {
+    echo ""
+    echo "#>--- $svc ---"
+    printf '%s\n' "$body"
+    echo "#<--- $svc ---"
+  } >> "$f"
+  chmod 600 "$f"
+}
+
+# stack_env_block_toggle SVC enabled|disabled
+# Flip in-place: prefix every line in the block with "# " (disable) or strip
+# one "# " (enable). No-op if already in target state. Markers themselves
+# are also toggled, so detection-by-marker keeps working.
+stack_env_block_toggle() {
+  local svc="$1" target="$2" f="$STACK_DIR/.env" tmp
+  tmp="$(mktemp)"
+  awk -v svc="$svc" -v target="$target" '
+    BEGIN { in_block = 0; state = "" }
+    {
+      orig = $0; out = $0
+      if (orig ~ "^#>--- " svc " ---")     { in_block = 1; state = "enabled" }
+      else if (orig ~ "^# +#>--- " svc " ---") { in_block = 1; state = "disabled" }
+      if (in_block) {
+        if (target == "disabled" && state == "enabled")  { out = "# " orig }
+        else if (target == "enabled" && state == "disabled") {
+          out = orig; sub(/^# /, "", out)
+        }
+      }
+      print out
+      if (orig ~ "^#<--- " svc " ---" || orig ~ "^# +#<--- " svc " ---") {
+        in_block = 0; state = ""
+      }
+    }
+  ' "$f" > "$tmp"
+  mv "$tmp" "$f"
+  chmod 600 "$f"
+}
+
+# stack_env_block_sync SVC SCHEMA — additive sync (option b). For each
+# KEY=... line in SCHEMA, if KEY is not present in the current (enabled)
+# block, append it just before the end marker. Preserves user values for
+# existing KEYs.
+stack_env_block_sync() {
+  local svc="$1" schema="$2" f="$STACK_DIR/.env" body new_lines="" key line tmp
+  body="$(awk -v svc="$svc" '
+    BEGIN { in_block = 0 }
+    {
+      if ($0 ~ "^#>--- " svc " ---") { in_block = 1; next }
+      if ($0 ~ "^#<--- " svc " ---") { in_block = 0; next }
+      if (in_block) print
+    }
+  ' "$f")"
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in '#'*) continue ;; esac
+    key="${line%%=*}"
+    [ -z "$key" ] && continue
+    if ! printf '%s\n' "$body" | grep -qE "^${key}="; then
+      new_lines+="$line"$'\n'
+    fi
+  done <<< "$schema"
+  [ -z "$new_lines" ] && return 0
+  # awk -v can't carry literal newlines, so stash new_lines in a tempfile
+  # and have awk slurp it in BEGIN. Cheaper than per-line subprocess calls.
+  local newf; newf="$(mktemp)"
+  printf '%s' "$new_lines" > "$newf"
+  tmp="$(mktemp)"
+  awk -v svc="$svc" -v newf="$newf" '
+    BEGIN {
+      while ((getline ln < newf) > 0) new = new ln "\n"
+      close(newf)
+      in_block = 0
+    }
+    {
+      if ($0 ~ "^#<--- " svc " ---" && in_block) { printf "%s", new; in_block = 0 }
+      if ($0 ~ "^#>--- " svc " ---") in_block = 1
+      print
+    }
+  ' "$f" > "$tmp"
+  mv "$tmp" "$f"
+  rm -f "$newf"
+  chmod 600 "$f"
+}
+
+# find_dependants SVC — print space-separated list of enabled docker
+# services whose SERVICE_REQUIRES contains SVC. (VM services don't declare
+# SERVICE_REQUIRES in this stack; they consume via env at runtime.)
+find_dependants() {
+  local svc="$1" profs dep req deps=""
+  profs="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)"
+  for dep in $(printf '%s' "$profs" | tr ',' ' '); do
+    [ -z "$dep" ] && continue
+    [ "$dep" = "$svc" ] && continue
+    req="$(_svc_requires "$dep")"
+    case ",$req," in *",$svc,"*) deps+="$dep " ;; esac
+  done
+  printf '%s' "${deps% }"
+}
+
+# lib_enable_service SVC — idempotently enable a service in .stack/.env.
+lib_enable_service() {
+  local svc="$1"
+  local svc_env="$STACK_ROOT/services/$svc/service.env"
+  [ -f "$svc_env" ] || die "no such service: $svc (services/$svc/service.env not found)"
+  local runner profile virtkey stack_env status
+  runner="$(env_get  "$svc_env" SERVICE_RUNNER)";       runner="${runner:-docker}"
+  profile="$(env_get "$svc_env" SERVICE_PROFILE)";      profile="${profile:-$svc}"
+  virtkey="$(env_get "$svc_env" SERVICE_LITELLM_KEY)"
+  stack_env="$(env_get "$svc_env" SERVICE_STACK_ENV)"
+
+  case "$runner" in
+    docker) csv_add "$STACK_DIR/.env" COMPOSE_PROFILES "$profile" ;;
+    vm)     csv_add "$STACK_DIR/.env" STACK_MACHINES   "$profile" ;;
+    *)      die "$svc: unknown SERVICE_RUNNER=$runner (expected docker|vm)" ;;
+  esac
+  [ "$virtkey" = "true" ] && csv_add "$STACK_DIR/.env" LITELLM_VIRTKEYS "$profile"
+
+  status="$(stack_env_block_status "$svc")"
+  case "$status" in
+    enabled)  : ;;
+    disabled) stack_env_block_toggle "$svc" enabled ;;
+    missing)
+      [ -n "$stack_env" ] && printf '%s' "$stack_env" | stack_env_block_append "$svc"
+      ;;
+  esac
+  # Additive sync — only on existing (now-enabled) blocks, never on missing
+  # (the append step already wrote everything).
+  if [ -n "$stack_env" ] && [ "$status" != "missing" ]; then
+    stack_env_block_sync "$svc" "$stack_env"
+  fi
+
+  [ -x "$STACK_ROOT/services/$svc/enable.sh" ] && bash "$STACK_ROOT/services/$svc/enable.sh"
+  log "$svc enabled  (runner=$runner profile=$profile virtkey=${virtkey:-false} block=${status})"
+}
+
+# lib_disable_service SVC — idempotently disable. Warns + prompts if other
+# enabled services depend on this one (STACK_FORCE=1 to skip prompt).
+lib_disable_service() {
+  local svc="$1"
+  local svc_env="$STACK_ROOT/services/$svc/service.env"
+  [ -f "$svc_env" ] || die "no such service: $svc"
+  local runner profile virtkey deps status ans
+  runner="$(env_get  "$svc_env" SERVICE_RUNNER)";       runner="${runner:-docker}"
+  profile="$(env_get "$svc_env" SERVICE_PROFILE)";      profile="${profile:-$svc}"
+  virtkey="$(env_get "$svc_env" SERVICE_LITELLM_KEY)"
+
+  deps="$(find_dependants "$svc")"
+  if [ -n "$deps" ]; then
+    warn "Disabling '$svc' would orphan: $deps  (their SERVICE_REQUIRES depends on it)"
+    if [ "${STACK_FORCE:-}" = "1" ]; then
+      warn "STACK_FORCE=1 — proceeding"
+    elif [ ! -t 0 ]; then
+      die "non-interactive: refusing. Disable the dependants first, or set STACK_FORCE=1."
+    else
+      printf "Continue anyway? [y/N] "; read -r ans
+      case "$ans" in y|Y|yes|YES) ;; *) die "aborted" ;; esac
+    fi
+  fi
+
+  case "$runner" in
+    docker) csv_remove "$STACK_DIR/.env" COMPOSE_PROFILES "$profile" ;;
+    vm)     csv_remove "$STACK_DIR/.env" STACK_MACHINES   "$profile" ;;
+  esac
+  [ "$virtkey" = "true" ] && csv_remove "$STACK_DIR/.env" LITELLM_VIRTKEYS "$profile"
+
+  status="$(stack_env_block_status "$svc")"
+  case "$status" in
+    enabled)  stack_env_block_toggle "$svc" disabled ;;
+    disabled) : ;;
+    missing)  : ;;
+  esac
+
+  [ -x "$STACK_ROOT/services/$svc/disable.sh" ] && bash "$STACK_ROOT/services/$svc/disable.sh"
+  log "$svc disabled (runner=$runner profile=$profile block=${status})"
+}
+
+# lib_list_enabled_services — pretty-print current COMPOSE_PROFILES + STACK_MACHINES.
+lib_list_enabled_services() {
+  local profs machines svc
+  profs="$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)"
+  machines="$(env_get "$STACK_DIR/.env" STACK_MACHINES)"
+  printf 'Docker services (COMPOSE_PROFILES):\n'
+  for svc in $(printf '%s' "$profs" | tr ',' ' '); do
+    [ -n "$svc" ] && printf '  - %s\n' "$svc"
+  done
+  printf 'VM services (STACK_MACHINES):\n'
+  for svc in $(printf '%s' "$machines" | tr ',' ' '); do
+    [ -n "$svc" ] && printf '  - %s\n' "$svc"
+  done
+}

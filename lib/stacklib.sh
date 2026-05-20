@@ -375,6 +375,8 @@ orb_set_machine_isolation() {
 # SERVICE_STACK_ENV (i.e., this KEY belongs INSIDE that service's
 # #>--- svc --- block in .stack/.env), or empty if no service owns it.
 # Scans every services/*/service.env; cheap (~14 files).
+# ALWAYS returns 0: a "no owner" result is normal (top-level key) and
+# shouldn't trip `set -e` in `var="$(_owning_service ...)"` callers.
 _owning_service() {
   local key="$1" d svc stack_env
   for d in "$STACK_ROOT"/services/*/; do
@@ -387,7 +389,7 @@ _owning_service() {
       return 0
     fi
   done
-  return 1
+  return 0
 }
 
 # stack_get KEY — block-aware read. If KEY is owned by a service AND that
@@ -680,10 +682,35 @@ _enable_one() {
     stack_env_block_sync "$svc" "$stack_env"
   fi
 
-  [ -x "$STACK_ROOT/services/$svc/enable.sh" ] && bash "$STACK_ROOT/services/$svc/enable.sh"
+  # Consolidate: for every KEY this service declares, ensure the effective
+  # value lives INSIDE the block and any top-level orphan (e.g., from a
+  # pre-refactor .stack/.env) gets removed by stack_upsert's cleanup.
+  # No-op for fresh enables (block already has the right values, no
+  # orphans to clean); migration path for everyone else.
+  if [ -n "$stack_env" ] && [ "$(stack_env_block_status "$svc")" = "enabled" ]; then
+    local _ln _k _v
+    while IFS= read -r _ln; do
+      case "$_ln" in ''|'#'*) continue ;; esac
+      case "$_ln" in *=*) : ;; *) continue ;; esac
+      _k="${_ln%%=*}"
+      [ -z "$_k" ] && continue
+      _v="$(stack_get "$_k")"
+      stack_upsert "$_k" "$_v"
+    done <<< "$stack_env"
+  fi
+
+  # Optional per-service enable.sh. Use `if` (not `[ -x ] && bash`) so the
+  # absent-script case returns 0 — otherwise `set -e` fires when the
+  # function returns from a `_enable_with_deps "$r"` call inside the
+  # cascade loop (the last command in _enable_one is then the failed
+  # `[ -x ]` test, propagating exit-1 through the recursion).
+  if [ -x "$STACK_ROOT/services/$svc/enable.sh" ]; then
+    bash "$STACK_ROOT/services/$svc/enable.sh"
+  fi
   # No per-service log here — lib_enable_service emits one summary line at
   # the top. Cascade activations are communicated via the "auto-enabling X
   # (required by Y)" lines printed in _enable_with_deps.
+  return 0
 }
 
 # __ENABLE_VISITED — global colon-delimited dedup set for the cascade.
@@ -770,7 +797,9 @@ lib_disable_service() {
     missing)  : ;;
   esac
 
-  [ -x "$STACK_ROOT/services/$svc/disable.sh" ] && bash "$STACK_ROOT/services/$svc/disable.sh"
+  if [ -x "$STACK_ROOT/services/$svc/disable.sh" ]; then
+    bash "$STACK_ROOT/services/$svc/disable.sh"
+  fi
   local after_hash; after_hash="$(shasum -a 256 "$STACK_DIR/.env" 2>/dev/null | cut -d' ' -f1)"
   if [ "$before_hash" = "$after_hash" ]; then
     log "$svc already disabled — no changes"

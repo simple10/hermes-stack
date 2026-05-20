@@ -555,7 +555,8 @@ _enable_one() {
   local svc="$1"
   local svc_env="$STACK_ROOT/services/$svc/service.env"
   [ -f "$svc_env" ] || die "no such service: $svc (services/$svc/service.env not found)"
-  local runner profile virtkey stack_env status
+  # `status` is read-only in zsh (exit code of last fg pipe) — use blk_state.
+  local runner profile virtkey stack_env blk_state
   runner="$(env_get  "$svc_env" SERVICE_RUNNER)";       runner="${runner:-docker}"
   profile="$(env_get "$svc_env" SERVICE_PROFILE)";      profile="${profile:-$svc}"
   virtkey="$(env_get "$svc_env" SERVICE_LITELLM_KEY)"
@@ -568,15 +569,15 @@ _enable_one() {
   esac
   [ "$virtkey" = "true" ] && csv_add "$STACK_DIR/.env" LITELLM_VIRTKEYS "$profile"
 
-  status="$(stack_env_block_status "$svc")"
-  case "$status" in
+  blk_state="$(stack_env_block_status "$svc")"
+  case "$blk_state" in
     enabled)  : ;;
     disabled) stack_env_block_toggle "$svc" enabled ;;
     missing)
       [ -n "$stack_env" ] && printf '%s' "$stack_env" | stack_env_block_append "$svc"
       ;;
   esac
-  if [ -n "$stack_env" ] && [ "$status" != "missing" ]; then
+  if [ -n "$stack_env" ] && [ "$blk_state" != "missing" ]; then
     stack_env_block_sync "$svc" "$stack_env"
   fi
 
@@ -641,7 +642,8 @@ lib_disable_service() {
   local svc="$1"
   local svc_env="$STACK_ROOT/services/$svc/service.env"
   [ -f "$svc_env" ] || die "no such service: $svc"
-  local runner profile virtkey deps status
+  # `status` is read-only in zsh — use blk_state.
+  local runner profile virtkey deps blk_state
   runner="$(env_get  "$svc_env" SERVICE_RUNNER)";       runner="${runner:-docker}"
   profile="$(env_get "$svc_env" SERVICE_PROFILE)";      profile="${profile:-$svc}"
   virtkey="$(env_get "$svc_env" SERVICE_LITELLM_KEY)"
@@ -662,8 +664,8 @@ lib_disable_service() {
   esac
   [ "$virtkey" = "true" ] && csv_remove "$STACK_DIR/.env" LITELLM_VIRTKEYS "$profile"
 
-  status="$(stack_env_block_status "$svc")"
-  case "$status" in
+  blk_state="$(stack_env_block_status "$svc")"
+  case "$blk_state" in
     enabled)  stack_env_block_toggle "$svc" disabled ;;
     disabled) : ;;
     missing)  : ;;

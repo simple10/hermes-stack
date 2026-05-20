@@ -38,7 +38,7 @@ services:
         # OrbStack serves, so no mixed-content). Project-scoped so multi-stack
         # stays correct; default keeps a plain `docker compose build` working
         # outside `just`.
-        HONCHO_BASE_URL: https://honcho-ui.${COMPOSE_PROJECT_NAME:-aitools}.orb.local/honcho
+        HONCHO_BASE_URL: https://honcho-ui.${COMPOSE_PROJECT_NAME}.orb.local/honcho
     profiles: [honcho-ui]
     restart: unless-stopped
     expose:

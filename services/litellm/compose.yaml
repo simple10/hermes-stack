@@ -40,7 +40,7 @@ services:
   # sh -c so the CONTAINER expands $SVC_DB_PASSWORD (compose-interpolated in
   # the environment: map); a bare command would pass psql the literal token.
   litellm-provision:
-    image: "pgvector/pgvector:${PG_VERSION:-pg18}"
+    image: "pgvector/pgvector:${PG_VERSION}"
     profiles: [litellm]
     restart: "no"
     labels:

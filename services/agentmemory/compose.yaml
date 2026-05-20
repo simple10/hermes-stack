@@ -52,7 +52,7 @@ services:
       # .stack/.env (NOT here — this file is git-tracked). When 0 the
       # entrypoint skips the socat forwarder and the viewer stays
       # 127.0.0.1-only inside the container (unreachable via orb DNS).
-      AGENTMEMORY_EXPOSE_VIEWER: ${AGENTMEMORY_EXPOSE_VIEWER:-1}
+      AGENTMEMORY_EXPOSE_VIEWER: ${AGENTMEMORY_EXPOSE_VIEWER}
     expose:
       - "3111"
       - "3112"

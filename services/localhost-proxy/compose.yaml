@@ -18,11 +18,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      LOCALHOST_PROXY_PORTS: ${LOCALHOST_PROXY_PORTS:-}
+      LOCALHOST_PROXY_PORTS: ${LOCALHOST_PROXY_PORTS}
     healthcheck:
       # liveness only — if LOCALHOST_PROXY_PORTS is empty the container is
       # sleeping (no socat process), which is a healthy idle state.
-      test: ["CMD-SHELL", "[ -z \"${LOCALHOST_PROXY_PORTS:-}\" ] || pgrep socat >/dev/null"]
+      test: ["CMD-SHELL", "[ -z \"${LOCALHOST_PROXY_PORTS}\" ] || pgrep socat >/dev/null"]
       interval: 30s
       timeout: 3s
       retries: 3

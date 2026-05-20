@@ -16,8 +16,8 @@ services:
       - "9377"
     environment:
       CAMOFOX_PORT: "9377"
-      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY:-}
-      MAX_OLD_SPACE_SIZE: ${CAMOFOX_HEAP_MB:-128}
+      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY}
+      MAX_OLD_SPACE_SIZE: ${CAMOFOX_HEAP_MB}
     volumes:
       - camofox-data:/root/.camofox
     healthcheck:
@@ -28,8 +28,8 @@ services:
       timeout: 6s
       retries: 20
       start_period: 30s
-    cpus: ${CAMOFOX_CPU:-2}
-    mem_limit: ${CAMOFOX_MEM:-2g}
+    cpus: ${CAMOFOX_CPU}
+    mem_limit: ${CAMOFOX_MEM}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

@@ -395,6 +395,21 @@ _svc_env_field() {
   env_get "$f" "$field"
 }
 
+# _svc_stack_env SVC — print SERVICE_STACK_ENV from services/SVC/service.env
+# (multi-line capable; env_get can't read multi-line values). Sources the
+# file in a subshell so the caller's env isn't polluted. SERVICE_STACK_ENV
+# should be SINGLE-QUOTED so any ${...} refs inside it are preserved
+# literally and only expanded later when .stack/.env itself is sourced.
+_svc_stack_env() {
+  local svc="$1" f="$STACK_ROOT/services/$svc/service.env"
+  [ -f "$f" ] || return 0
+  (
+    SERVICE_STACK_ENV=""
+    . "$f"
+    printf '%s' "$SERVICE_STACK_ENV"
+  )
+}
+
 # stack_env_block_status SVC — print enabled|disabled|missing.
 stack_env_block_status() {
   local svc="$1" f="$STACK_DIR/.env"
@@ -408,9 +423,24 @@ stack_env_block_status() {
 # stack_env_block_append SVC < body
 # Append a new ENABLED block at the end of .stack/.env (caller ensures it
 # doesn't already exist; use after stack_env_block_status == "missing").
+# Strips leading/trailing blank lines from body — service.env conventionally
+# wraps SERVICE_STACK_ENV in newlines for readability:
+#   SERVICE_STACK_ENV='
+#   PG_VERSION=pg18
+#   '
+# but those literal newlines would otherwise become empty lines inside the
+# block, between the markers and the content.
 stack_env_block_append() {
   local svc="$1" f="$STACK_DIR/.env" body
-  body="$(cat)"
+  body="$(awk '
+    { lines[NR] = $0; total = NR }
+    END {
+      first = 1; last = total
+      while (first <= total && lines[first] ~ /^[[:space:]]*$/) first++
+      while (last >= first && lines[last] ~ /^[[:space:]]*$/) last--
+      for (i = first; i <= last; i++) print lines[i]
+    }
+  ')"
   {
     echo ""
     echo "#>--- $svc ---"
@@ -529,7 +559,7 @@ _enable_one() {
   runner="$(env_get  "$svc_env" SERVICE_RUNNER)";       runner="${runner:-docker}"
   profile="$(env_get "$svc_env" SERVICE_PROFILE)";      profile="${profile:-$svc}"
   virtkey="$(env_get "$svc_env" SERVICE_LITELLM_KEY)"
-  stack_env="$(env_get "$svc_env" SERVICE_STACK_ENV)"
+  stack_env="$(_svc_stack_env "$svc")"
 
   case "$runner" in
     docker) csv_add "$STACK_DIR/.env" COMPOSE_PROFILES "$profile" ;;

@@ -41,8 +41,8 @@ services:
       BLOCK_MEDIA: "true"
       # static value (upstream derives this from CRAWL_CONCURRENT_REQUESTS).
       MAX_CONCURRENT_PAGES: "10"
-    cpus: ${FIRECRAWL_PLAYWRIGHT_CPU:-2}
-    mem_limit: ${FIRECRAWL_PLAYWRIGHT_MEM:-2g}
+    cpus: ${FIRECRAWL_PLAYWRIGHT_CPU}
+    mem_limit: ${FIRECRAWL_PLAYWRIGHT_MEM}
     tmpfs:
       - /tmp/.cache:noexec,nosuid,size=1g
     logging:
@@ -81,7 +81,7 @@ services:
       OPENAI_API_KEY: ${FIRECRAWL_VIRTUAL_KEY}
       OPENAI_BASE_URL: http://litellm:4000/v1
       MODEL_NAME: ${FIRECRAWL_MODEL}
-      # upstream supplies these via `<<: *common-env` with ${VAR:-<default>};
+      # upstream supplies these via `<<: *common-env` with ${VAR};
       # that default substitution happens in the UPSTREAM compose, NOT here,
       # so an omitted key is simply UNSET in our container. NUM_WORKERS_PER_QUEUE
       # drives harness worker spawning — unset risks a zero-worker API. Set
@@ -105,8 +105,8 @@ services:
       timeout: 6s
       retries: 30
       start_period: 90s
-    cpus: ${FIRECRAWL_API_CPU:-2}
-    mem_limit: ${FIRECRAWL_API_MEM:-4g}
+    cpus: ${FIRECRAWL_API_CPU}
+    mem_limit: ${FIRECRAWL_API_MEM}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

@@ -18,7 +18,7 @@
 
 services:
   cliproxyapi:
-    image: eceasy/cli-proxy-api:${CLIPROXY_VERSION:-v7.1.11}
+    image: eceasy/cli-proxy-api:${CLIPROXY_VERSION}
     profiles: [cliproxyapi]
     restart: unless-stopped
     # No host ports — orb-DNS only (stack convention). The OAuth callback

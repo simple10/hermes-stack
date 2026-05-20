@@ -317,17 +317,36 @@ checkout/`.stack/`** (or just a different `.stack/.env`) with a distinct
 `COMPOSE_PROJECT_NAME` **and** a distinct `STACK_MACHINES` name:
 
 ```
-# stack A: COMPOSE_PROJECT_NAME=aitools   STACK_MACHINES=hermes
-#          -> litellm.aitools.orb.local,  VM `hermes`
-# stack B: COMPOSE_PROJECT_NAME=lab       STACK_MACHINES=lab-hermes
-#          -> litellm.lab.orb.local,      VM `lab-hermes`
+# stack A: COMPOSE_PROJECT_NAME=aitools  STACK_MACHINES=hermes
+#          -> litellm.aitools.orb.local,  VM `aitools_hermes`
+# stack B: COMPOSE_PROJECT_NAME=lab      STACK_MACHINES=hermes
+#          -> litellm.lab.orb.local,      VM `lab_hermes`
 ```
 
-Containers, volumes (`<project>_pg-data`, …) and the network
-(`<project>_default`) are all project-scoped, so the stacks are fully
-isolated and never collide. There is **no data migration / volume reattach**:
-recreating from scratch is the supported model — `just stop` then remove the
-`<project>_*` volumes for a clean slate.
+`STACK_MACHINES` stays as the service name (matches `services/<svc>/`); the
+actual orb VM name is always project-prefixed via `stack_vm_name`
+(`${COMPOSE_PROJECT_NAME}_${SVC}`) so multiple stacks can both list `hermes`
+without colliding in OrbStack's flat global machine namespace. Containers,
+volumes (`<project>_pg-data`, …) and the network (`<project>_default`) are
+all project-scoped, so the stacks are fully isolated and never collide.
+There is **no data migration / volume reattach**: recreating from scratch
+is the supported model — `just stop` then remove the `<project>_*` volumes
+for a clean slate.
+
+**Container reachability across projects is flat by design.** OrbStack's
+`<service>.<project>.orb.local` DNS resolves from any VM regardless of
+which project that VM "belongs to" (there is no such concept in OrbStack —
+just a flat machine namespace and a flat container-DNS namespace).
+Per-stack scoping is *configuration*, not enforcement: `services/hermes/
+build.sh` bakes `<svc>.${PROJ}.orb.local` URLs (where `PROJ` is the
+*building* stack's project) into `~/.hermes/{.env,config.yaml}`, so
+hermes-A only talks to stack A's services unless you point it elsewhere
+by hand. **`--isolate-network` blocks Mac IPs + sibling VMs but does NOT
+scope container DNS** — an isolated hermes-A *could* still resolve
+`litellm.lab.orb.local` if a compromised dep tried. This stack's threat
+model is single-user-multi-stack (you trust your own work); the isolation
+flags exist to defend against compromised deps reaching the Mac host, not
+against cross-stack container access.
 
 ### `justfile` targets
 

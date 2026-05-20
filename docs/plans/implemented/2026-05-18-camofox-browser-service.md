@@ -14,7 +14,6 @@
 
 - The live `aitools` stack + this checkout are **shared** with other agents. Commits must be **scoped + additive**; never `git reset/rebase/push`; never modify unrelated files.
 - **Never mutate the live `.stack/`** and never run `dc up/down/build` against project `aitools`. All bring-up/validation happens in an **isolated throwaway Compose project** built from an rsync'd copy (method below). Image builds are daemon-global and additive (a new image + layer cache) — that is acceptable and non-destructive; container/volume/network isolation is by project name.
-- Commit identity is explicit (no global git config): `git -c user.name="Joe Johnston" -c user.email="<redacted>" commit`.
 - `_source/` is created by `build.sh` at run time and is gitignored (`.gitignore:6 **/_source/`) — **never** `git add` it.
 
 ### Isolated validation venue (current, post-hermetic-stacklib method)
@@ -122,8 +121,6 @@ Expected: `YAML OK`
 ```bash
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
 git add services/camofox-browser/compose.yaml
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(camofox-browser): service compose (standalone, profile [camofox-browser], build from _source)"
 ```
 
 ---
@@ -207,8 +204,6 @@ Expected: each line prints its OK; `k1 == k2`; an image for the `cfxval` project
 ```bash
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
 git add services/camofox-browser/build.sh
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(camofox-browser): build.sh — gen-once CAMOFOX_ACCESS_KEY + pinned _source + eager build"
 ```
 
 ---
@@ -295,8 +290,6 @@ Expected: `OFF: absent OK`, `ON: present OK`, `HERMETIC OK …`.
 ```bash
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
 git add docker-compose.yaml .stack.env.example README.md
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(camofox-browser): wire into root compose + document profile/levers (README, .stack.env.example)"
 ```
 
 ---
@@ -359,8 +352,6 @@ Append a short "## As-built (validated 2026-05-18)" section to `docs/superpowers
 ```bash
 cd /Users/joe/Development/ai-tools/openclaw/hermes-stack
 git add docs/superpowers/specs/2026-05-18-camofox-browser-service-design.md
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "docs(spec): camofox-browser as-built (validated in isolated project)"
 ```
 
 ---

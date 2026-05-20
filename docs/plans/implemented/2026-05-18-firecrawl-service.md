@@ -123,8 +123,6 @@ Expected: rabbitmq reaches `healthy`; teardown clean; the `aitools` container co
 
 ```bash
 git add services/rabbitmq/compose.yaml docker-compose.yaml justfile
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(rabbitmq): shared always-on backend (rabbitmq:RMQ_TAG; nuq transport)"
 ```
 (substitute the real tag in the message)
 
@@ -230,8 +228,6 @@ Expected: all five lines present; `LITELLM_VIRTKEYS` ends with `,firecrawl`; `CO
 
 ```bash
 git add services/firecrawl/build.sh .stack.env.example
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(firecrawl): build.sh (own DB pw + BULL key) + env levers + LITELLM_VIRTKEYS"
 ```
 
 ---
@@ -279,8 +275,6 @@ ghcr.io/firecrawl/nuq-postgres@sha256:<resolved-3>
 
 ```bash
 git add services/firecrawl/.image-digest
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(firecrawl): pin upstream image digests (.image-digest)"
 ```
 
 ---
@@ -441,8 +435,6 @@ Expected: `compose config OK`; the 3 `firecrawl-*` services + 3 `ghcr.io/firecra
 
 ```bash
 git add services/firecrawl/compose.yaml docker-compose.yaml
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "feat(firecrawl): api/playwright/dedicated-postgres compose (profile [firecrawl])"
 ```
 
 ---
@@ -472,8 +464,6 @@ Run: `grep -n 'firecrawl' README.md | head`
 Expected: directory-tree + profiles + gotcha references present.
 ```bash
 git add README.md
-git -c user.name="Joe Johnston" -c user.email="<redacted>" \
-  commit -m "docs(readme): firecrawl service + dedicated-pg/rabbitmq gotcha"
 ```
 
 ---

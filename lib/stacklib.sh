@@ -371,21 +371,120 @@ orb_set_machine_isolation() {
 # of disabled state = start marker begins with "# #>---". Round-trips
 # preserve user edits inside the block (one-char-deep "# " prefix only).
 
+# _owning_service KEY — print the service name that declares KEY in its
+# SERVICE_STACK_ENV (i.e., this KEY belongs INSIDE that service's
+# #>--- svc --- block in .stack/.env), or empty if no service owns it.
+# Scans every services/*/service.env; cheap (~14 files).
+_owning_service() {
+  local key="$1" d svc stack_env
+  for d in "$STACK_ROOT"/services/*/; do
+    [ -d "$d" ] || continue
+    svc="$(basename "$d")"
+    [ -f "$STACK_ROOT/services/$svc/service.env" ] || continue
+    stack_env="$(_svc_stack_env "$svc")"
+    if printf '%s\n' "$stack_env" | grep -qE "^${key}="; then
+      printf '%s' "$svc"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# stack_get KEY — block-aware read. If KEY is owned by a service AND that
+# service's block is ENABLED in .stack/.env, read from the block (matches
+# bash source-order: last definition wins). Otherwise fall back to env_get
+# (returns whatever appears first; for top-level KEYs this is the right
+# behavior; for stale orphans of moved KEYs this might surface the orphan,
+# which is fine because stack_upsert reconciles on next write).
+stack_get() {
+  local key="$1" owner f="$STACK_DIR/.env" val
+  [ -f "$f" ] || return 0
+  owner="$(_owning_service "$key")"
+  if [ -n "$owner" ] && [ "$(stack_env_block_status "$owner")" = "enabled" ]; then
+    val="$(awk -v owner="$owner" -v key="$key" '
+      BEGIN { in_block = 0 }
+      $0 ~ "^#>--- " owner " ---" { in_block = 1; next }
+      $0 ~ "^#<--- " owner " ---" { in_block = 0; next }
+      in_block && index($0, key "=") == 1 { print substr($0, length(key)+2); exit }
+    ' "$f" 2>/dev/null)"
+    if [ -n "$val" ]; then
+      printf '%s' "$val"
+      return
+    fi
+  fi
+  env_get "$f" "$key"
+}
+
+# stack_upsert KEY VAL — block-aware write. Three cases:
+#   (a) No service owns KEY  -> env_upsert (top-level), as before.
+#   (b) Owner exists + block ENABLED -> update line in the block, OR
+#       insert before the end marker if missing; ALSO removes any same-KEY
+#       line OUTSIDE any block (top-level orphan cleanup → idempotent
+#       migration of pre-refactor `.stack/.env` files).
+#   (c) Owner exists + block DISABLED/MISSING -> die. Caller should
+#       `lib_enable_service $owner` first (setup.sh does this before
+#       prompting for any block-owned value).
+stack_upsert() {
+  local key="$1" val="$2" owner f="$STACK_DIR/.env" blk_state tmp
+  owner="$(_owning_service "$key")"
+  if [ -z "$owner" ]; then
+    env_upsert "$f" "$key" "$val"
+    return
+  fi
+  blk_state="$(stack_env_block_status "$owner")"
+  case "$blk_state" in
+    enabled)  : ;;
+    disabled) die "stack_upsert: '$key' is owned by '$owner' but its block is DISABLED — enable it first: just enable $owner" ;;
+    missing)  die "stack_upsert: '$key' is owned by '$owner' but its block is MISSING — enable it first: just enable $owner" ;;
+  esac
+  tmp="$(mktemp)"
+  awk -v owner="$owner" -v key="$key" -v val="$val" '
+    BEGIN { in_owner_block = 0; in_any_block = 0; written = 0 }
+    {
+      # Owner-block boundary
+      if ($0 ~ "^#>--- " owner " ---") { in_owner_block = 1; in_any_block = 1; print; next }
+      if (in_owner_block && $0 ~ "^#<--- " owner " ---") {
+        if (!written) print key "=" val
+        in_owner_block = 0; in_any_block = 0
+        print; next
+      }
+      # Other-block boundary (track in_any_block so we do not touch lines
+      # that belong to OTHER service blocks)
+      if ($0 ~ "^#>--- ") { in_any_block = 1; print; next }
+      if (in_any_block && $0 ~ "^#<--- ") { in_any_block = 0; print; next }
+      # Inside owner block: update matching key
+      if (in_owner_block && index($0, key "=") == 1) {
+        print key "=" val; written = 1; next
+      }
+      # Top-level orphan with same key → drop (auto-migration)
+      if (!in_any_block && index($0, key "=") == 1) { next }
+      print
+    }
+  ' "$f" > "$tmp"
+  mv "$tmp" "$f"
+  chmod 600 "$f"
+}
+
 # csv_add FILE KEY VAL — add VAL to CSV at KEY (idempotent; init if missing).
+# Block-aware via stack_upsert: if KEY is owned by a service (e.g.,
+# LITELLM_VIRTKEYS → litellm), the CSV lives in that service's block.
+# The FILE arg is kept for backward compat but ignored — stack helpers
+# always operate on .stack/.env.
 csv_add() {
-  local file="$1" key="$2" val="$3" cur
-  cur="$(env_get "$file" "$key")"
+  local key="$2" val="$3" cur
+  cur="$(stack_get "$key")"
   case ",$cur," in *",$val,"*) return 0 ;; esac
-  env_upsert "$file" "$key" "${cur:+$cur,}$val"
+  stack_upsert "$key" "${cur:+$cur,}$val"
 }
 
 # csv_remove FILE KEY VAL — remove VAL from CSV at KEY (idempotent).
+# Block-aware (see csv_add). FILE ignored.
 csv_remove() {
-  local file="$1" key="$2" val="$3" cur new
-  cur="$(env_get "$file" "$key")"
+  local key="$2" val="$3" cur new
+  cur="$(stack_get "$key")"
   [ -z "$cur" ] && return 0
   new="$(printf '%s\n' "$cur" | tr ',' '\n' | grep -vxF "$val" | paste -sd, - 2>/dev/null)"
-  env_upsert "$file" "$key" "$new"
+  stack_upsert "$key" "$new"
 }
 
 # _svc_env_field SVC FIELD — read FIELD from services/SVC/service.env (or "").

@@ -328,11 +328,13 @@ require_stack_env() {
 
 # stack_vm_name SVC — print the OrbStack VM name for a service. Always
 # project-prefixed (e.g. for COMPOSE_PROJECT_NAME=aitools, service 'hermes'
-# becomes 'aitools_hermes'). This centralizes the naming convention so:
+# becomes 'aitools-hermes'). This centralizes the naming convention so:
 #   - STACK_MACHINES stays as a list of SERVICE names (matches services/<svc>/
 #     and COMPOSE_PROFILES conventions).
 #   - The actual orb VM name is always project-prefixed, so multi-stack runs
 #     can't collide on the global `orb list` namespace.
+# Separator is DASH not underscore — OrbStack rejects underscores in
+# machine names (verified empirically; dashes are fine and match DNS).
 # Every site that calls `orb -m/stop/create/delete/list-grep/logs/config`
 # MUST go through this helper — never use the bare service name as the
 # machine name. User-renamed machines in OrbStack get orphaned from this
@@ -340,7 +342,7 @@ require_stack_env() {
 # later if/when needed.
 stack_vm_name() {
   local svc="$1"
-  printf '%s_%s' "$(stack_project)" "$svc"
+  printf '%s-%s' "$(stack_project)" "$svc"
 }
 
 # orb_get_machine_flag MACHINE FLAG — print the boolean value of

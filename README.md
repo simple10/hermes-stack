@@ -318,14 +318,15 @@ checkout/`.stack/`** (or just a different `.stack/.env`) with a distinct
 
 ```
 # stack A: COMPOSE_PROJECT_NAME=aitools  STACK_MACHINES=hermes
-#          -> litellm.aitools.orb.local,  VM `aitools_hermes`
+#          -> litellm.aitools.orb.local,  VM `aitools-hermes`
 # stack B: COMPOSE_PROJECT_NAME=lab      STACK_MACHINES=hermes
-#          -> litellm.lab.orb.local,      VM `lab_hermes`
+#          -> litellm.lab.orb.local,      VM `lab-hermes`
 ```
 
 `STACK_MACHINES` stays as the service name (matches `services/<svc>/`); the
 actual orb VM name is always project-prefixed via `stack_vm_name`
-(`${COMPOSE_PROJECT_NAME}_${SVC}`) so multiple stacks can both list `hermes`
+(`${COMPOSE_PROJECT_NAME}-${SVC}` — dash, not underscore: OrbStack rejects
+underscores in machine names) so multiple stacks can both list `hermes`
 without colliding in OrbStack's flat global machine namespace. Containers,
 volumes (`<project>_pg-data`, …) and the network (`<project>_default`) are
 all project-scoped, so the stacks are fully isolated and never collide.

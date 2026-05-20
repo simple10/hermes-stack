@@ -83,9 +83,93 @@ start-cleanup:
      if [ -n "$ids" ]; then docker rm $ids || true; fi; \
      echo "start-cleanup done"
 
-# Stop this stack's machines, then bring containers down (keep volumes).
-# Only machines listed in this stack's .stack/.env STACK_MACHINES are touched.
-stop:
+# Use this to manually log in / solve captcha in a real Chrome, then
+# `/browser connect <url>` from a hermes session to drive the already-
+# authenticated browser. LAN-safe by construction:
+#  - Chrome binds 127.0.0.1 only (LAN can't open the TCP socket).
+#  - socat forwarder ALSO binds 127.0.0.1 (same).
+#  - VM reaches via OrbStack's `host.docker.internal` — an OrbStack-internal
+#    DNS name unresolvable from LAN, routed to the Mac's loopback.
+#  - --remote-allow-origins=* on Chrome bypasses its DNS-rebinding Host check
+#    (Chrome 111+ rejects non-localhost Host headers even from loopback
+#    connections); without this the forwarded request gets a 500.
+# Defaults (override in .stack/.env):
+#   CHROME_CDP_PORT=19298         # Chrome's loopback CDP port
+#   CHROME_CDP_BRIDGE_PORT=19299  # socat's port — Hermes connects here via host.docker.internal
+# Non-default ports avoid colliding with any other unrelated CDP on this Mac.
+# Multi-stack: each stack's .stack/.env picks its own ports → independent CDPs;
+# or set the same ports across stacks to share one CDP.
+# Profile data lives at .stack/chrome-cdp/data (gitignored, per-stack).
+# Layer-2 pf restriction is intentionally NOT applied yet (Chrome+socat both
+# loopback-bound + OrbStack-only DNS already isolates LAN); add a pf anchor
+# later if needed.
+# Launch Mac-host Chrome with CDP enabled + a loopback-bound socat forwarder.
+chrome-cdp:
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     set -a; source "{{root}}/.stack/.env"; set +a; \
+     port="${CHROME_CDP_PORT:-19298}"; bport="${CHROME_CDP_BRIDGE_PORT:-19299}"; \
+     run_dir="{{root}}/.stack/chrome-cdp"; data_dir="$run_dir/data"; \
+     mkdir -p "$data_dir"; \
+     chrome_pid="$run_dir/chrome.pid"; socat_pid="$run_dir/socat.pid"; \
+     chrome_bin="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; \
+     [ -x "$chrome_bin" ] || die "Google Chrome not found at $chrome_bin"; \
+     command -v socat >/dev/null || die "socat not installed. Run: brew install socat"; \
+     if [ -f "$chrome_pid" ] && kill -0 "$(cat "$chrome_pid")" 2>/dev/null; then \
+       die "chrome-cdp already running (Chrome PID $(cat "$chrome_pid")). Use 'just chrome-cdp-stop' first."; \
+     fi; \
+     lsof -nP -iTCP:$port  -sTCP:LISTEN >/dev/null 2>&1 && die "port $port in use (CHROME_CDP_PORT)"; \
+     lsof -nP -iTCP:$bport -sTCP:LISTEN >/dev/null 2>&1 && die "port $bport in use (CHROME_CDP_BRIDGE_PORT)"; \
+     log "chrome-cdp: launching Chrome (port $port, data $data_dir)"; \
+     "$chrome_bin" --remote-debugging-port="$port" --user-data-dir="$data_dir" \
+                   --remote-allow-origins='*' \
+                   --no-first-run --no-default-browser-check >/dev/null 2>&1 & \
+     echo $! > "$chrome_pid"; \
+     for i in $(seq 1 30); do \
+       curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1 && break; sleep 0.5; \
+     done; \
+     curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1 \
+       || { kill "$(cat "$chrome_pid")" 2>/dev/null; rm -f "$chrome_pid"; die "CDP did not come up on $port"; }; \
+     log "chrome-cdp: socat forwarder 127.0.0.1:$bport -> 127.0.0.1:$port (loopback only; VM reaches via host.docker.internal)"; \
+     socat TCP-LISTEN:$bport,bind=127.0.0.1,reuseaddr,fork TCP:127.0.0.1:$port >/dev/null 2>&1 & \
+     echo $! > "$socat_pid"; \
+     sleep 0.3; \
+     kill -0 "$(cat "$socat_pid")" 2>/dev/null \
+       || { rm -f "$socat_pid"; die "socat failed to start (check port $bport)"; }; \
+     # Hermes URL MUST use the IP form (not host.docker.internal). Chrome 111+ \
+     # rejects any Host header that isn't 'localhost' or an IP — DNS-rebinding \
+     # defense, separate from --remote-allow-origins (which only fixes the \
+     # WebSocket Origin check). Dynamically resolve from the first stack machine; \
+     # fall back to OrbStack's documented default if no machine is up yet. \
+     first_mch="$(echo "${STACK_MACHINES:-hermes}" | tr ', ' ' ' | awk '{print $1}')"; \
+     hd_ip="$(orb -m "$first_mch" bash -lc 'getent hosts host.docker.internal 2>/dev/null | awk "{print \$1}"' 2>/dev/null || true)"; \
+     [ -n "$hd_ip" ] || hd_ip="0.250.250.254"; \
+     log "chrome-cdp: ready"; \
+     log "  Hermes URL:  http://$hd_ip:$bport   (IP form required — Chrome rejects hostname Host headers)"; \
+     log "  per-session: /browser connect http://$hd_ip:$bport"; \
+     log "  persistent:  orb -m $first_mch bash -lc 'hermes config set browser.cdp_url http://$hd_ip:$bport'"
+
+# Stop the Mac-host CDP Chrome + socat forwarder. Idempotent (no-op if not running).
+chrome-cdp-stop:
+    @set -a; source "{{lib}}"; set +a; \
+     run_dir="{{root}}/.stack/chrome-cdp"; \
+     for what in socat chrome; do \
+       pid_file="$run_dir/$what.pid"; \
+       [ -f "$pid_file" ] || continue; \
+       pid="$(cat "$pid_file" 2>/dev/null)"; \
+       if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then \
+         echo "== chrome-cdp: stopping $what (PID $pid) =="; \
+         kill "$pid" 2>/dev/null || true; \
+         for i in 1 2 3 4 5 6; do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done; \
+         kill -9 "$pid" 2>/dev/null || true; \
+       fi; \
+       rm -f "$pid_file"; \
+     done
+
+# chrome-cdp stops FIRST (depends_on) so a stale CDP can't be reattached
+# accidentally on next start. Only machines in STACK_MACHINES are touched.
+# Stop this stack's chrome-cdp + machines, then bring containers down (keep volumes).
+stop: chrome-cdp-stop
     @set -a; source "{{lib}}"; set +a; \
      mch="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ', ' ' ')"; \
      if [ -n "$(echo "$mch" | tr -d '[:space:]')" ]; then \
@@ -101,6 +185,15 @@ stop:
        done; \
      fi; \
      dc down --remove-orphans
+
+# --- (defense-in-depth, intentionally NOT enabled yet) ---
+# When the bind-to-bridge-IP alone feels insufficient, an extra Mac-host pf
+# anchor would further restrict inbound to CHROME_CDP_BRIDGE_PORT to
+# bridge100 only. Pseudo-config:
+#   block in proto tcp to any port {{CHROME_CDP_BRIDGE_PORT}}
+#   pass  in on bridge100 proto tcp to <bridge100-ip> port {{CHROME_CDP_BRIDGE_PORT}}
+# Loaded via `sudo pfctl -a com.hermes-stack-cdp -f /etc/pf.anchors/...`.
+# Add a `chrome-cdp-pf` recipe when ready.
 
 # This stack's container health + machine list.
 status:

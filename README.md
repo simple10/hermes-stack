@@ -30,8 +30,9 @@ hermes-stack/
     searxng/                   # privacy-respecting metasearch (Hermes' web_search backend)
     localhost-proxy/           # tiny multi-socat container; bridges isolated VMs to the Mac
     hermes/                    # SERVICE_RUNNER=vm — OrbStack Ubuntu; build.sh + start.sh + systemd/
-  docs/superpowers/specs/      # design docs
-  docs/superpowers/plans/      # implementation plans
+  docs/specs/                  # active design docs
+  docs/plans/                  # active implementation plans
+  docs/plans/implemented/      # plans + specs that have shipped (historical)
 ```
 
 ## Architecture

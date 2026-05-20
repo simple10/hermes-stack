@@ -158,6 +158,22 @@ else
   warn "camofox-browser not in COMPOSE_PROFILES — skipping Hermes camofox env"
 fi
 
+# SearXNG (profile [searxng]): privacy-respecting metasearch for Hermes'
+# web_search capability (Hermes docs:
+# https://hermes-agent.nousresearch.com/docs/user-guide/features/web-search).
+# Append SEARXNG_URL to ~/.hermes/.env AND flip web.search_backend to searxng.
+# If both [firecrawl] and [searxng] are active, searxng wins (this block runs
+# after firecrawl above + sets search_backend explicitly). Override by
+# manually setting web.search_backend in ~/.hermes/config.yaml after build.
+if echo "${COMPOSE_PROFILES:-}" | grep -qw searxng; then
+  printf 'SEARXNG_URL=http://searxng.%s.orb.local:8080\n' "$PROJ" \
+    | orb -m "$MACHINE" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+  m 'hermes config set web.search_backend searxng'
+  log "searxng: SEARXNG_URL=http://searxng.$PROJ.orb.local:8080 -> ~/.hermes/.env (web.search_backend=searxng)"
+else
+  warn "searxng not in COMPOSE_PROFILES — skipping Hermes searxng env"
+fi
+
 log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
 HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env
 MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" -e "s|__HERMES_MODEL__|$HM|g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"

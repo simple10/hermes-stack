@@ -1,0 +1,28 @@
+# searxng overlay — `use_default_settings: true` inherits the upstream image's
+# /etc/searxng/settings.yml, we only override what differs. Future searxng
+# updates pick up new defaults automatically; we don't re-template on every bump.
+use_default_settings: true
+general:
+  instance_name: "hermes-stack searxng"
+  donation_url: false
+  contact_url: false
+server:
+  # SearXNG REQUIRES a secret_key (used for the request signing / cookie HMAC).
+  # Generated once per stack by services/searxng/build.sh and rendered here —
+  # the templated value below is replaced verbatim. Never commit a real one.
+  secret_key: "__SEARXNG_SECRET_KEY__"
+  # Local-only; this whole service lives on the project network and is only
+  # reachable via orb DNS. Disable the limiter (would need redis + introduces
+  # 429s under Hermes' bursty traffic; we're not a public instance).
+  limiter: false
+  image_proxy: false
+search:
+  # Default settings.yml only emits html+csv; Hermes hits ?format=json and
+  # gets HTTP 403 without this. The whole reason we have an overlay.
+  formats:
+    - html
+    - json
+ui:
+  # Hermes is the only client; UI niceties don't matter, but keep the
+  # default theme available in case a human pokes at the orb URL.
+  static_use_hash: true

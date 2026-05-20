@@ -20,3 +20,4 @@ include:
   - services/camofox-browser/compose.yaml
   - services/browser-use/compose.yaml
   - services/localhost-proxy/compose.yaml
+  - services/searxng/compose.yaml

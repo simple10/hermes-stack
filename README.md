@@ -2,37 +2,36 @@
 
 A composable, **multi-stack** personal AI stack: shared **Dockerized
 backends** (Postgres + Redis), **AI services** (LiteLLM proxy + Honcho
-memory), and an optional **Hermes agent** in an OrbStack Ubuntu machine — all
-LLM/embedding traffic through LiteLLM for key rotation + observability. One
-root compose (`include:` per service), Orb VMs under `machines/`, every
-runtime secret in one gitignored `.stack/` dir. The Compose **project name**
-(`COMPOSE_PROJECT_NAME` in `.stack/.env`, default `aitools`) scopes
+memory), and an optional **Hermes agent** running as an OrbStack VM — all
+LLM/embedding traffic through LiteLLM for key rotation + observability.
+Every service (docker container OR VM) lives under `services/<svc>/`;
+every runtime secret in one gitignored `.stack/` dir. The Compose **project
+name** (`COMPOSE_PROJECT_NAME` in `.stack/.env`, default `aitools`) scopes
 containers/volumes/network, so several independent stacks run side by side;
 OrbStack exposes each at `<service>.<project>.orb.local`.
 
 ```
 hermes-stack/
   docker-compose.yaml          # NO name: (project = COMPOSE_PROJECT_NAME); include: services/*
-  justfile                     # setup | build | start | stop | status | logs | reconfigure
-  lib/                         # stacklib.sh (helpers incl. dc/stack_project), setup.sh
+  justfile                     # setup | enable | disable | enabled | build | start | stop | restart | status | logs
+  lib/                         # stacklib.sh (helpers incl. dc/stack_project, enable/disable), setup.sh
   .stack/                      # ALL stack state — gitignored (created by `just setup`)
-    .env                       # the only hand-edited file
+    .env                       # core + secrets at top; #>--- svc --- blocks managed by enable/disable
     <svc>/.generated.env       # per-service secrets; <svc>/config.runtime.*; <svc>/.config-hashes/
-  .stack.env.example           # documents .stack/.env
   services/
-    pg/  redis/  rabbitmq/     # substrate; profiles [pg]/[redis]/[rabbitmq], pulled via SERVICE_REQUIRES
-    <svc>/service.env          # SERVICE_REQUIRES=<profiles> / SERVICE_KIND=backend (dependency manifest)
-    litellm/                   # profile [litellm]; *.template -> .stack/litellm/config.runtime.* (bind)
-    honcho/                    # profile [honcho]; built from pinned _source/ (gitignored)
-    honcho-ui/                 # profile [honcho-ui]; OpenConcho SPA, pinned _source/ -> nginx
-    agentmemory/               # profile [agentmemory]; npm-pinned image + .env config; LiteLLM-wired
-    hindsight/                 # profile [hindsight] (opt-in); pinned image; pg-backed; LiteLLM-wired
-    firecrawl/                 # profile [firecrawl] (opt-in); nuq-backed web-scraper API; rabbitmq-wired; LiteLLM-wired
-    camofox-browser/           # profile [camofox-browser] (opt-in); standalone Camoufox/Firefox automation API; built from pinned _source
-    browser-use/               # profile [browser-use] (opt-in); LLM-driven browser agent (MCP); pinned _source -> upstream Dockerfile; SERVICE_REQUIRES=litellm
-  machines/
-    hermes/                    # build.sh + start.sh + systemd/ + bin/ + config/
-  docs/plans/                  # 06 is current; 00–05 superseded (kept for history)
+    <svc>/service.env          # SERVICE_RUNNER=docker|vm + SERVICE_REQUIRES + SERVICE_LITELLM_KEY + SERVICE_STACK_ENV
+    <svc>/README.md            # per-service config + design notes
+    pg/  redis/  rabbitmq/     # substrate; auto-pulled via consumers' SERVICE_REQUIRES
+    litellm/                   # *.template -> .stack/litellm/config.runtime.* (bind); ISSUES virtual keys
+    honcho/  honcho-ui/        # built from pinned _source/ (gitignored); honcho-ui has same-origin nginx proxy
+    agentmemory/  hindsight/   # alternative memory backends
+    firecrawl/                 # web-scrape API + dedicated pg + playwright + nuq queue
+    camofox-browser/  browser-use/  # browser automation (Camoufox vs LLM-driven)
+    searxng/                   # privacy-respecting metasearch (Hermes' web_search backend)
+    localhost-proxy/           # tiny multi-socat container; bridges isolated VMs to the Mac
+    hermes/                    # SERVICE_RUNNER=vm — OrbStack Ubuntu; build.sh + start.sh + systemd/
+  docs/superpowers/specs/      # design docs
+  docs/superpowers/plans/      # implementation plans
 ```
 
 ## Architecture
@@ -58,8 +57,8 @@ fixpoint: `stack_profiles` (= `COMPOSE_PROFILES` ∪ required, injected by
 `services/<svc>/service.env` (declares deps + image/source defaults) and
 gitignored `.stack/<svc>/.generated.env` (every build artifact — secrets,
 resolved digests, source SHAs, rebuild flag, all under uniquely-prefixed
-keys). Override any default via `<NAME>_VERSION` in `.stack/.env`
-(optional, per-stack). `just build` runs in two phases: Phase 1
+keys). Override any default by editing the `#>--- <svc> ---` block in
+`.stack/.env` (per-stack). `just build` runs in two phases: Phase 1
 (`stack_resolve_images`) walks every `services/*/service.env` for
 `<NAME>_IMAGE_REPO`/`_IMAGE_DEFAULT` pairs and writes the resolved
 `<NAME>_IMAGE` (tag→digest via `docker buildx imagetools inspect`, or
@@ -68,9 +67,13 @@ unconditionally because compose `include:` parses the whole tree on every
 `dc` call. Phase 2 iterates `stack_profiles | tr ',' ' '` (transitive) for
 per-service `build.sh` runs (source clone + checkout + rebuild-if-changed,
 via `stack_source`). Tag-class images (Docker Hub-style: `pg`/`redis`/
-`rabbitmq`/`cliproxyapi`) interpolate `image: repo:${VAR:-default}` in
-compose directly — no resolver. Bump: edit `.stack/.env`, `just build`,
-`just up` — auto-detected, rebuilt if needed, no code edits.
+`rabbitmq`/`cliproxyapi`/`searxng`) interpolate `image: repo:${VAR}` in
+compose directly (no `:-default` fallback — single source of truth lives
+in `SERVICE_STACK_ENV` and `just enable` writes it to `.stack/.env`; an
+unset var fails loudly at compose-time rather than drifting from the
+declared default). Bump: edit the block in `.stack/.env` (or the
+`SERVICE_STACK_ENV` declaration for a stack-wide change), `just build`,
+`just restart` — auto-detected, rebuilt if needed, no code edits.
 
 - **pg / redis** — `pgvector/pgvector:pg18` (service `pg`, dir `services/pg/`;
   DBs `honcho` + `litellm`, each a least-priv role) and `redis:8.6.3` (service
@@ -140,8 +143,9 @@ compose directly — no resolver. Bump: edit `.stack/.env`, `just build`,
   `HINDSIGHT_RERANK_MODEL`, default the `rerank-voyage` model →
   Voyage `rerank-2.5-lite`; **no Torch, ~300 MB saved**, observable in
   SpendLogs, small per-rerank API cost), or `rrf` (rank-fusion; no
-  model/API/RAM, weakest). `.stack.env.example` defaults `local`; the lever
-  switches with no git edits. API `:8888`, Control-Plane UI `:9999`. Seeds
+  model/API/RAM, weakest). `services/hindsight/service.env` defaults
+  `HINDSIGHT_RERANKER=local`; the lever switches with no git edits
+  (edit the value in `.stack/.env`'s `#>--- hindsight ---` block). API `:8888`, Control-Plane UI `:9999`. Seeds
   its own pg role/db (fresh `<project>_pg-data` volume only). Not yet wired
   into Hermes.
 - **firecrawl** — service `firecrawl` (optional), web-scraper API backed by the
@@ -202,14 +206,14 @@ compose directly — no resolver. Bump: edit `.stack/.env`, `just build`,
   `http://cliproxyapi:8317/v1`, `CLIPROXY_API_KEY`), streaming-correct and
   fully observable in LiteLLM SpendLogs — the replacement for the broken
   `chatgpt/*` responses bridge (kept for rollback).
-- **Hermes** — runs in an OrbStack Ubuntu machine (`machines/hermes/`), not a
+- **Hermes** — runs in an OrbStack Ubuntu machine (`services/hermes/`), not a
   container. Reaches the Dockerized services via
   `<service>.<project>.orb.local` (e.g. `litellm.aitools.orb.local`,
   `honcho-api.aitools.orb.local`). Its own agent brain AND Honcho's
   LLM/embedding calls route through LiteLLM. **Memory backend** is the
   single `HERMES_MEMORY` lever in `.stack/.env`
   (`default|honcho|hindsight|holographic|agentmemory`, default `honcho`):
-  `machines/hermes/build.sh` translates it to Hermes' official
+  `services/hermes/build.sh` translates it to Hermes' official
   `hermes config set memory.provider` + seeds that provider's config to point
   at the in-stack service (`honcho` → `honcho.json`; `hindsight` →
   `~/.hermes/hindsight/config.json` *local_external* →
@@ -240,23 +244,43 @@ any Compose auto-pull.
 ## Quickstart (from scratch)
 
 ```bash
-just setup     # interactive — writes .stack/.env (the only hand-edited secrets)
-just build     # render configs, fetch pinned sources, gen DB passwords, provision machines
-just start     # staged bring-up + (first run) ChatGPT device-pair, then everything up
+just setup            # interactive — writes core + secrets into .stack/.env
+just enable hermes    # cascades litellm + pg + redis (transitive SERVICE_REQUIRES)
+just enable honcho    # a memory backend for hermes
+just enable searxng   # privacy-respecting web search
+# ... just enable {firecrawl, agentmemory, hindsight, camofox-browser, ...}
+just enabled          # see what's active
+just build && just start
 ```
 
-- **`just setup`** prompts for the **Compose project name**
-  (`COMPOSE_PROJECT_NAME`, default `aitools`), the OpenRouter + Voyage keys, an
-  optional LiteLLM master key (blank → generated), Telegram (if `hermes` is
-  enabled), the Docker `COMPOSE_PROFILES`, and `STACK_MACHINES`. Everything else (DB
-  passwords, minted virtual keys) is machine-generated into
-  `.stack/<svc>/.generated.env`. To run only part of the stack, set
-  `COMPOSE_PROFILES` (e.g. `litellm` alone, or `honcho` — whose
-  `SERVICE_REQUIRES` pulls pg/redis/litellm). `.stack/.env` is intentionally
-  **not** auto-loaded by Compose; the sole chokepoint `dc()` passes it (+ the
-  globbed `.stack/*/.generated.env`) as absolute `--env-file` args under
-  `env -i`, so a bare `docker compose up` from the repo root fails fast by
-  design (guards against accidental parent-`.env` walking).
+- **`just setup`** prompts for `COMPOSE_PROJECT_NAME`, provider API keys
+  (OpenRouter, Voyage), optional Telegram (used when `hermes` is enabled),
+  and generates stable secrets (`LITELLM_MASTER_KEY`, `AGENTMEMORY_SECRET`,
+  `CLIPROXY_API_KEY`, `CLIPROXY_MANAGEMENT_KEY`) if missing. Core + secrets
+  live at the **top** of `.stack/.env`; everything else is in
+  `#>--- <svc> ---` blocks managed by `just enable`/`just disable` (see
+  below). `.stack/.env` is intentionally **not** auto-loaded by Compose;
+  the sole chokepoint `dc()` passes it (+ the globbed
+  `.stack/*/.generated.env`) as absolute `--env-file` args under `env -i`,
+  so a bare `docker compose up` from the repo root fails fast (guards
+  against accidental parent-`.env` walking).
+- **`just enable <svc>`** is the single configuration entry-point per
+  service. It (idempotently) adds `<svc>` to the right CSV
+  (`COMPOSE_PROFILES` for docker, `STACK_MACHINES` for `SERVICE_RUNNER=vm`),
+  mints a LiteLLM virtual key if `SERVICE_LITELLM_KEY=true`, writes a
+  `#>--- <svc> ---` block with the service's defaults from `SERVICE_STACK_ENV`,
+  and **cascades transitive `SERVICE_REQUIRES` leaf-first** (so `just
+  enable firecrawl` auto-enables `pg`, `redis`, `rabbitmq`, `litellm`).
+- **`just disable <svc>`** removes from CSV, **comments out** the
+  `#>--- <svc> ---` block (one `# ` prefix per line — preserves user edits
+  through re-enable round-trips), and **refuses** (exit 1) if any other
+  enabled service has `SERVICE_REQUIRES` containing this one. No force
+  flag; the user disables the dependants first. Print: *"refusing to
+  disable 'pg' — these enabled services depend on it: litellm. disable
+  them first: just disable litellm"*.
+- **`just enabled`** lists the current `COMPOSE_PROFILES` + `STACK_MACHINES`.
+- See each `services/<svc>/README.md` for per-service config notes
+  (levers, lifecycle, security caveats).
 - **`just build`** runs `services/pg/build.sh` (generate/reuse only
   `POSTGRES_SUPERPASS` into `.stack/pg/.generated.env`), each enabled
   service's `build.sh` (render `*.template` → `.stack/<svc>/config.runtime.*`;
@@ -275,9 +299,9 @@ just start     # staged bring-up + (first run) ChatGPT device-pair, then everyth
   role/db/extension/schema, ordered by `depends_on` — e.g. honcho:
   `pg → honcho-provision → honcho-schema → honcho-api`) → each
   `services/<p>/poststart.sh` (generic hook; currently unused) →
-  `machines/<m>/start.sh` → optional `just start-cleanup`.
+  `services/<svc>/start.sh` → optional `just start-cleanup`.
   `build.sh` does **not** require the minted `HERMES_VIRTUAL_KEY` (it doesn't
-  exist until `start` mints it); `machines/hermes/start.sh` applies it
+  exist until `start` mints it); `services/hermes/start.sh` applies it
   post-mint and restarts the gateway. `litellm/preflight.sh` self-heals: if a
   stored key isn't valid in this DB (fresh/rotated/recreated), it re-mints.
 
@@ -309,15 +333,19 @@ recreating from scratch is the supported model — `just stop` then remove the
 
 | Target | Action |
 |--------|--------|
-| `just setup` | interactive `.stack/.env` generator |
+| `just setup` | interactive — write core + secrets to `.stack/.env` |
+| `just enable <svc>` | add to `.stack/.env` (CSV + `#>--- svc ---` block); cascades `SERVICE_REQUIRES` |
+| `just disable <svc>` | remove from CSV + comment-out the block (refuses if dependants enabled) |
+| `just enabled` | list active `COMPOSE_PROFILES` + `STACK_MACHINES` |
 | `just build` | render configs, fetch pinned sources, gen DB pw, provision machines |
-| `just start` | generic pipeline: backends → `preflight.sh` (mint) → `prestart.sh` (validate) → `up -d` (provisioners) → `poststart.sh` → machines |
-| `just start-cleanup` | remove this project's exited provisioner containers (auto-run by `start` when `STACK_AUTO_REMOVE_PROVISIONERS=true`) |
-| `just stop` (alias `just down`) | stop this stack's `STACK_MACHINES` (`orb stop`) then `docker compose down --remove-orphans` (volumes kept) |
-| `just start` alias | `just up` |
+| `just start` (alias `up`) | enforce VM isolation → backends → preflight/prestart → `up -d` (provisioners) → poststart → machine `start.sh` |
+| `just stop` (alias `down`) | stop chrome-cdp → stop `STACK_MACHINES` (`orb stop`) → `docker compose down --remove-orphans` (volumes kept) |
+| `just restart` | `stop` + `start` (PRIMARY way to apply orb-machine config changes) |
+| `just start-cleanup` | remove this project's exited provisioner containers (auto-run when `STACK_AUTO_REMOVE_PROVISIONERS=true`) |
 | `just status` | this project's container health + `orb list` |
-| `just logs [machine]` | `orb logs <machine>` (OrbStack Logs tab = the console) |
+| `just logs [machine]` | `orb logs <machine>` (OrbStack Logs tab = console) |
 | `just reconfigure <svc>` | back up + re-render a service's runtime config from its template |
+| `just chrome-cdp` / `chrome-cdp-stop` | Mac-host Chrome with CDP + `localhost-proxy` bridge for the isolated hermes VM |
 
 ## Service lifecycle
 
@@ -332,7 +360,7 @@ backends-first set is derived from `stack_backends`):
 | `services/<svc>/prestart.sh` | `just start`, after preflight | host script; validate env/config, **fail loud** before the heavy `up` |
 | **provisioner**(s) in `compose.yaml` (`com.stack.role=provisioner`) | Compose `up` (`depends_on`) | one-shot; idempotent role/db/extension/schema. A service may chain >1 (honcho: `honcho-provision` role/db → `honcho-schema` migrate+`configure_embeddings`@1024) |
 | `services/<svc>/poststart.sh` | after main `up -d` | generic hook for steps needing something serving — **currently unused** (honcho's old dim-fix is now the pre-start `honcho-schema` one-shot) |
-| `machines/<m>/start.sh` | after stack up | bring up the VM/agent |
+| `services/<svc>/start.sh` (`SERVICE_RUNNER=vm`) | after stack up | bring up the VM/agent |
 
 **Container vs host-script principle:** if a step must be ordered *within*
 the main `up` relative to a service → it's a **provisioner container** (only
@@ -345,7 +373,7 @@ provisions, `poststart` finalizes.
 ## Gotchas (hard-won — keep encoded)
 
 1. **`xz-utils` required** — the Hermes installer extracts a Node `.tar.xz`;
-   minimal Ubuntu lacks it. `machines/hermes/build.sh` apt-installs it first.
+   minimal Ubuntu lacks it. `services/hermes/build.sh` apt-installs it first.
 2. **Honcho config = `config.toml` + env; precedence `env > .env >
    config.toml`.** Templates carry placeholders only; the DB URI + virtual
    key come from compose env. No secret in any committed/rendered config.
@@ -379,7 +407,7 @@ provisions, `poststart` finalizes.
    journald.** `hermes-logtail` (root) mirrors `~/.hermes/logs/{gateway,
    errors}.log` there; `agent.log` excluded (DEBUG-spam).
 7. **`hermes-agent` is the frozen original — never modified.**
-   `machines/hermes/{build,start}.sh` hard-refuse it. The clone `hermes` is
+   `services/hermes/{build,start}.sh` hard-refuse it. The clone `hermes` is
    the working machine.
 8. **`.stack/.env` is not auto-loaded by design.** Every compose call goes
    through `dc()`, which passes `.stack/.env` + the globbed
@@ -393,7 +421,7 @@ provisions, `poststart` finalizes.
     no `container_name:` and the project name is a deliberate, configured
     value (`COMPOSE_PROJECT_NAME`), so the project-qualified OrbStack name is
     stable and is what isolates stacks. The hermes config templates carry a
-    `__STACK_PROJECT__` placeholder that `machines/hermes/{build,start}.sh`
+    `__STACK_PROJECT__` placeholder that `services/hermes/{build,start}.sh`
     substitute with `COMPOSE_PROJECT_NAME` (e.g. `litellm.aitools.orb.local`).
     Within a stack, containers reach each other by plain service name on
     `<project>_default`.
@@ -472,7 +500,8 @@ provisions, `poststart` finalizes.
     `zsh dirname ""=. → ./..=PARENT` mis-resolution was the footgun). There is
     no `COMPOSE_ENV_FILES` export anywhere — env-file wiring lives only in
     `dc()`. Don't add `${HOST_VAR}` reads to scripts/compose; add the key to
-    `.stack.env.example` + `lib/setup.sh` instead.
+    the owning service's `SERVICE_STACK_ENV` (or `lib/setup.sh` for
+    truly stack-core secrets) instead.
 
 ## Secrets model
 
@@ -490,7 +519,7 @@ reference **only** the namespaced vars — never `STACK_*` — so any model chan
 is a one-line `.stack/.env` edit with **zero git-tracked file changes / no
 `git pull` conflicts**. honcho's per-module values are injected into the
 gitignored `config.runtime.toml` by `honcho/build.sh`; agentmemory/hindsight
-read theirs via Compose `environment:`; Hermes via `machines/hermes`.
+read theirs via Compose `environment:`; Hermes via `services/hermes`.
 
 | File | Contents | Owner |
 |------|----------|-------|

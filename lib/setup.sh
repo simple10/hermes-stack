@@ -1,80 +1,80 @@
 #!/usr/bin/env bash
-# setup.sh — interactively create/refresh .stack/.env. Non-destructive: keeps
-# existing values as defaults.
+# setup.sh — initialize .stack/.env (core + secrets). Non-destructive:
+# keeps existing values as defaults. Only the bits that don't belong to any
+# specific service live here — provider API keys, generated secrets, the
+# project name. Per-service config (versions, model levers, virtkeys, etc.)
+# is written by `just enable <svc>`, NOT here.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/stacklib.sh"
+
 ENVF="$STACK_DIR/.env"
 mkdir -p "$STACK_DIR"
-EX="$STACK_ROOT/.stack.env.example"
+touch "$ENVF"
 
-ask() { # ask VAR PROMPT [secret]
-  local var="$1" prompt="$2" secret="${3:-}" cur def
+ask_secret() {  # ask_secret VAR PROMPT  (silent input; blank = keep current)
+  local var="$1" prompt="$2" cur val
   cur="$(env_get "$ENVF" "$var")"
-  def="${cur:-$(env_get "$EX" "$var")}"
-  if [ "$secret" = secret ]; then
-    read -rsp "$prompt [${cur:+<keep current>}]: " val; echo
-  else
-    read -rp "$prompt [${def}]: " val
-  fi
+  read -rsp "$prompt [${cur:+<keep current>}]: " val; echo
+  val="${val:-$cur}"
+  env_upsert "$ENVF" "$var" "$val"
+}
+ask_plain() {   # ask_plain VAR PROMPT DEFAULT  (visible; blank = default)
+  local var="$1" prompt="$2" def="$3" cur val
+  cur="$(env_get "$ENVF" "$var")"
+  read -rp "$prompt [${cur:-$def}]: " val
   val="${val:-${cur:-$def}}"
   env_upsert "$ENVF" "$var" "$val"
+}
+gen_if_missing() {  # gen_if_missing VAR PREFIX BYTES
+  local var="$1" prefix="$2" bytes="$3" cur
+  cur="$(env_get "$ENVF" "$var")"
+  if [ -z "$cur" ]; then
+    env_upsert "$ENVF" "$var" "${prefix}$(openssl rand -hex "$bytes")"
+    log "generated $var"
+  fi
 }
 
 log "hermes-stack setup -> $ENVF"
 
-# Per-stack identity. Containers/volumes/network are project-scoped and
+# Per-stack identity. Project name scopes containers / volumes / network;
 # OrbStack exposes services at <service>.<project>.orb.local. Use a DISTINCT
-# project name (and a distinct STACK_MACHINES name) per stack to run several
-# side by side.
-curproj="$(env_get "$ENVF" COMPOSE_PROJECT_NAME)"
-read -rp "Compose project name [${curproj:-aitools}]: " proj
-env_upsert "$ENVF" COMPOSE_PROJECT_NAME "${proj:-${curproj:-aitools}}"
+# name per stack to run several side by side.
+ask_plain COMPOSE_PROJECT_NAME "Compose project name" aitools
 
-ask OPENROUTER_API_KEY "OpenRouter API key" secret
-ask VOYAGE_API_KEY     "Voyage API key" secret
-mk="$(env_get "$ENVF" LITELLM_MASTER_KEY)"
-[ -n "$mk" ] || { mk="sk-$(openssl rand -hex 24)"; log "generated LITELLM_MASTER_KEY"; }
-env_upsert "$ENVF" LITELLM_MASTER_KEY "$mk"
-ams="$(env_get "$ENVF" AGENTMEMORY_SECRET)"
-[ -n "$ams" ] || { ams="$(openssl rand -hex 32)"; log "generated AGENTMEMORY_SECRET"; }
-env_upsert "$ENVF" AGENTMEMORY_SECRET "$ams"
-cpk="$(env_get "$ENVF" CLIPROXY_API_KEY)"
-[ -n "$cpk" ] || { cpk="sk-$(openssl rand -hex 24)"; log "generated CLIPROXY_API_KEY"; }
-env_upsert "$ENVF" CLIPROXY_API_KEY "$cpk"
-cpm="$(env_get "$ENVF" CLIPROXY_MANAGEMENT_KEY)"
-[ -n "$cpm" ] || { cpm="$(openssl rand -hex 32)"; log "generated CLIPROXY_MANAGEMENT_KEY"; }
-env_upsert "$ENVF" CLIPROXY_MANAGEMENT_KEY "$cpm"
+# Provider API keys (consumed by LiteLLM at container runtime).
+ask_secret OPENROUTER_API_KEY "OpenRouter API key"
+ask_secret VOYAGE_API_KEY     "Voyage API key"
 
-read -rp "Enable Docker profiles (comma list) [litellm,honcho]: " prof
-env_upsert "$ENVF" COMPOSE_PROFILES "${prof:-litellm,honcho}"
+# Telegram (Hermes gateway; only used when 'hermes' is enabled — harmless
+# to leave blank for non-hermes stacks).
+ask_plain TELEGRAM_BOT_TOKEN     "Telegram bot token (blank ok)" ""
+ask_plain TELEGRAM_ALLOWED_USERS "Telegram allowed user IDs (csv, blank ok)" ""
+ask_plain TELEGRAM_HOME_CHANNEL  "Telegram home channel (blank ok)" ""
 
-read -rp "Orb machines to manage (comma list; '-' for none) [hermes]: " mch
-mch="${mch:-hermes}"; [ "$mch" = "-" ] && mch=""   # empty input -> default hermes
-env_upsert "$ENVF" STACK_MACHINES "$mch"
-if echo "$mch" | grep -qw hermes; then
-  ask TELEGRAM_BOT_TOKEN     "Telegram bot token (blank ok)"
-  ask TELEGRAM_ALLOWED_USERS "Telegram allowed user IDs (csv, blank ok)"
-  ask TELEGRAM_HOME_CHANNEL  "Telegram home channel (blank ok)"
-  curmem="$(env_get "$ENVF" HERMES_MEMORY)"
-  read -rp "Hermes memory [default|honcho|hindsight|agentmemory|holographic] [${curmem:-honcho}]: " hmem
-  env_upsert "$ENVF" HERMES_MEMORY "${hmem:-${curmem:-honcho}}"
-fi
+# Generated secrets (kept stable across re-runs — rotating them invalidates
+# DB credentials / active sessions / config-baked auth tokens).
+gen_if_missing LITELLM_MASTER_KEY       "sk-" 24
+gen_if_missing AGENTMEMORY_SECRET       ""    32
+gen_if_missing CLIPROXY_API_KEY         "sk-" 24
+gen_if_missing CLIPROXY_MANAGEMENT_KEY  ""    32
 
-# Seed model levers + virtual-key list from the example if absent. ORDER
-# MATTERS: presets must land in .stack/.env ABOVE the per-service ${...} refs
-# (the file is bash-sourced; refs expand against earlier definitions). The
-# literal "${STACK_LLM_MODEL}" value is copied verbatim — that indirection is
-# intentional and resolves on source.
-for k in \
-  STACK_LLM_MODEL STACK_LLM_MODEL_FAST STACK_LLM_EMBEDDING_MODEL \
-  HERMES_MODEL AGENTMEMORY_MODEL AGENTMEMORY_EMBEDDING_MODEL \
-  HINDSIGHT_MODEL HINDSIGHT_EMBEDDING_MODEL \
-  HINDSIGHT_RERANKER HINDSIGHT_RERANK_MODEL \
-  FIRECRAWL_MODEL \
-  HONCHO_DERIVER_MODEL HONCHO_SUMMARY_MODEL HONCHO_DREAM_MODEL \
-  HONCHO_DIALECTIC_MODEL HONCHO_EMBEDDING_MODEL \
-  HERMES_MEMORY LITELLM_VIRTKEYS; do
-  [ -n "$(env_get "$ENVF" "$k")" ] || env_upsert "$ENVF" "$k" "$(env_get "$EX" "$k")"
-done
+# Stack-core CSVs — initialize empty if not set. enable/disable manage these
+# from here on; user can also edit by hand if they want.
+[ -n "$(env_get "$ENVF" COMPOSE_PROFILES)" ] || env_upsert "$ENVF" COMPOSE_PROFILES ""
+[ -n "$(env_get "$ENVF" LITELLM_VIRTKEYS)" ] || env_upsert "$ENVF" LITELLM_VIRTKEYS ""
+[ -n "$(env_get "$ENVF" STACK_MACHINES)"   ] || env_upsert "$ENVF" STACK_MACHINES   ""
+
+# Stack-core flags — set defaults if not present (user can edit afterward).
+[ -n "$(env_get "$ENVF" STACK_AUTO_REMOVE_PROVISIONERS)" ] \
+  || env_upsert "$ENVF" STACK_AUTO_REMOVE_PROVISIONERS "false"
+
 chmod 600 "$ENVF"
-log "setup complete. Review $ENVF, then: just build && just start"
+
+log "setup complete. Next steps:"
+log "  1. Enable services:    just enable hermes   (cascades litellm + pg + redis)"
+log "                         just enable honcho   (a memory backend for hermes)"
+log "                         just enable searxng  (privacy-respecting web search)"
+log "                         just enable firecrawl, agentmemory, hindsight, ..."
+log "                         just enabled        # show current selection"
+log "  2. Build + start:      just build && just start"
+log "  3. Browse services:    services/<svc>/README.md for per-service config"

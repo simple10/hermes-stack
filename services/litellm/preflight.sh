@@ -47,7 +47,11 @@ PY
 aliases="$(env_get "$ENVF" LITELLM_VIRTKEYS)"
 [ -n "$aliases" ] || die "LITELLM_VIRTKEYS empty in .stack/.env (run: just setup)"
 echo "$aliases" | tr ',' '\n' | while IFS= read -r a; do
-  alias_lc="$(echo "$a" | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+  # Normalize: lowercase + hyphens->underscores so the env var name is
+  # POSIX-shell-valid and matches what compose.yaml interpolates. Users may
+  # write `browser-use` (matching the profile/service name) OR `browser_use`
+  # in LITELLM_VIRTKEYS — both produce the same canonical alias internally.
+  alias_lc="$(echo "$a" | tr 'A-Z-' 'a-z_' | tr -d '[:space:]')"
   [ -n "$alias_lc" ] || continue
   out_var="$(echo "$alias_lc" | tr 'a-z' 'A-Z')_VIRTUAL_KEY"
   existing="$(env_get "$GEN" "$out_var")"

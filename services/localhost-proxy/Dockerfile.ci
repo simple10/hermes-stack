@@ -1,0 +1,14 @@
+# localhost-proxy — tiny multi-socat container. Bridges isolated VMs to the
+# Mac host. The hermes VM is created with --isolated --isolate-network so it
+# CANNOT reach Mac IPs directly; it CAN still reach Docker containers via orb
+# DNS. This proxy is the only thing on the orb-network that's allowed to talk
+# back to the Mac, and ONLY on the ports listed in LOCALHOST_PROXY_PORTS.
+# Blast radius of a compromised VM-side service = exactly those ports, nothing
+# else. Add a port → edit one env var → re-run `just chrome-cdp` (or any other
+# host-bridge consumer recipe).
+# bash (not ash) because entrypoint.sh uses `wait -n`.
+FROM alpine:3.20
+RUN apk add --no-cache socat bash
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

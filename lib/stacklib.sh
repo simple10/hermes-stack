@@ -320,6 +320,37 @@ require_stack_env() {
   [ -f "$STACK_DIR/.env" ] || die ".stack/.env missing — run: just setup"
 }
 
+# orb_get_machine_flag MACHINE FLAG — print the boolean value of
+# machine.<MACHINE>.<FLAG> from `orb config show` (or empty if unset).
+# `orb config get` returns a non-zero status with no output when the key is
+# unset; we don't want callers to have to handle that.
+orb_get_machine_flag() {
+  local mch="$1" flag="$2"
+  orb config show 2>/dev/null \
+    | awk -v k="machine.$mch.$flag:" '$1==k {print $2; exit}'
+}
+
+# orb_set_machine_isolation MACHINE — idempotently flip BOTH isolation flags
+# (isolated + isolate_network) to true. Changes only take effect on next
+# machine start; caller is responsible for prompting/running `just restart`.
+# Returns 0 if already isolated (no change), 1 if it had to flip (restart
+# required), 2 on orb command failure.
+orb_set_machine_isolation() {
+  local mch="$1"
+  local iso net changed=0
+  iso="$(orb_get_machine_flag "$mch" isolated)"
+  net="$(orb_get_machine_flag "$mch" isolate_network)"
+  if [ "$iso" != "true" ]; then
+    orb config set "machine.$mch.isolated" true 2>/dev/null || return 2
+    changed=1
+  fi
+  if [ "$net" != "true" ]; then
+    orb config set "machine.$mch.isolate_network" true 2>/dev/null || return 2
+    changed=1
+  fi
+  return "$changed"   # 0 = already isolated, 1 = flipped (restart needed)
+}
+
 # (compose env-file wiring lives solely in dc() now — it passes absolute
 # --env-file args under a stripped env. No separate COMPOSE_ENV_FILES export
 # anywhere: that was relative-path + host-precedence prone. Single source.)

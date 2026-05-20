@@ -1,0 +1,34 @@
+# localhost-proxy — multi-socat bridge from isolated VMs to the Mac host.
+# Profile [localhost-proxy] (opt-in; brought up by recipes that need host
+# integration — currently `just chrome-cdp`). Port list is driven entirely by
+# LOCALHOST_PROXY_PORTS in .stack/.env (CSV of "listen:target"); empty → the
+# container sleeps doing nothing. Add a port → edit one env var → re-run the
+# consuming recipe (which `dc up -d`s this service).
+# extra_hosts pins host.docker.internal → host-gateway so the lookup works
+# regardless of the consuming VM's isolation (containers aren't subject to
+# --isolate-network). Project-scoped (no container_name / shared network);
+# siblings reach it as `localhost-proxy:<listen-port>`, recipes resolve the
+# container IP for use from the (isolated) VM since Chrome 111+ rejects
+# hostname Host headers — see services/localhost-proxy/README.md.
+services:
+  localhost-proxy:
+    build: { context: ., dockerfile: Dockerfile.ci }
+    profiles: [localhost-proxy]
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      LOCALHOST_PROXY_PORTS: ${LOCALHOST_PROXY_PORTS:-}
+    healthcheck:
+      # liveness only — if LOCALHOST_PROXY_PORTS is empty the container is
+      # sleeping (no socat process), which is a healthy idle state.
+      test: ["CMD-SHELL", "[ -z \"${LOCALHOST_PROXY_PORTS:-}\" ] || pgrep socat >/dev/null"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    cpus: 0.25
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }

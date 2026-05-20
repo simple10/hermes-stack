@@ -24,9 +24,31 @@ PROJ="$(stack_project)"   # wire this VM to <svc>.$PROJ.orb.local
 D="$(dirname "${BASH_SOURCE[0]}")"; REMOTE_USER="joe"
 m() { orb -m "$MACHINE" bash -lc "$1"; }
 
-log "1. orb create ubuntu $MACHINE (reuse if exists)"
-orb list 2>/dev/null | awk '{print $1}' | grep -qx "$MACHINE" \
-  && log "machine $MACHINE exists — reusing" || orb create ubuntu "$MACHINE"
+log "1. orb create ubuntu $MACHINE (--isolated --isolate-network; reuse if exists)"
+# Isolation: --isolated disables file sharing/Mac integration (no $HOME, no
+# Cmd-clipboard) AND --isolate-network blocks the VM from Mac IPs + sibling
+# VMs. Together: a compromised Hermes process can ONLY reach this stack's
+# docker network (via orb DNS); it cannot read Mac files or scan Mac
+# localhost. Host-bridge to the Mac is via the localhost-proxy service (opt-in
+# per-port). orb -m bash -lc exec STILL works under --isolated (verified).
+if orb list 2>/dev/null | awk '{print $1}' | grep -qx "$MACHINE"; then
+  log "machine $MACHINE exists — reusing"
+  # Idempotently ensure both isolation flags are true. Takes effect on next
+  # `orb start` of this machine — caller (build.sh standalone, or `just
+  # build`) doesn't restart; `just start` enforces + fails-fast if a restart
+  # is required so the user runs `just restart` deliberately.
+  set +e
+  orb_set_machine_isolation "$MACHINE"
+  rc=$?
+  set -e
+  case "$rc" in
+    0) ;;
+    1) warn "machine $MACHINE: isolation flags were FALSE — flipped to true. Run 'just restart' to apply." ;;
+    2) die  "machine $MACHINE: 'orb config set' failed (is OrbStack running?)" ;;
+  esac
+else
+  orb create --isolated --isolate-network ubuntu "$MACHINE"
+fi
 
 log "2. apt xz-utils (REQUIRED — Hermes installer extracts Node .tar.xz)"
 m 'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates'

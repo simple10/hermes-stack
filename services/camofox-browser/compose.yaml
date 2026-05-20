@@ -16,7 +16,7 @@ services:
       - "9377"
     environment:
       CAMOFOX_PORT: "9377"
-      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY}
+      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY:-}
       MAX_OLD_SPACE_SIZE: ${CAMOFOX_HEAP_MB:-128}
     volumes:
       - camofox-data:/root/.camofox

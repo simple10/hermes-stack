@@ -121,6 +121,21 @@ else
   warn "firecrawl not in COMPOSE_PROFILES — skipping Hermes firecrawl env (add 'firecrawl' to COMPOSE_PROFILES to e2e-test it)"
 fi
 
+# Camofox (profile [camofox-browser]): self-hosted Camoufox/Firefox automation
+# server for Hermes's first-class browser provider. Hermes reads CAMOFOX_URL
+# from ~/.hermes/.env and auto-uses camofox as the browser_provider. Hermes
+# does NOT send any auth header to Camofox (verified in
+# hermes-agent/tools/browser_camofox.py: bare requests.{get,post,delete}), so
+# the camofox-browser service must run without CAMOFOX_ACCESS_KEY — set
+# CAMOFOX_AUTH=disabled in .stack/.env. Only wired when the profile is active.
+if echo "${COMPOSE_PROFILES:-}" | grep -qw camofox-browser; then
+  printf 'CAMOFOX_URL=http://camofox-browser.%s.orb.local:9377\n' "$PROJ" \
+    | orb -m "$MACHINE" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+  log "camofox: CAMOFOX_URL=http://camofox-browser.$PROJ.orb.local:9377 -> ~/.hermes/.env"
+else
+  warn "camofox-browser not in COMPOSE_PROFILES — skipping Hermes camofox env"
+fi
+
 log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
 HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env
 MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" -e "s|__HERMES_MODEL__|$HM|g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"

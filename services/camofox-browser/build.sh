@@ -6,14 +6,23 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
 D="$STACK_ROOT/services/camofox-browser"
 
-# Own CAMOFOX_ACCESS_KEY (generated, hermetic). Read existing value first;
-# never blind-regen (rotating would orphan any Hermes config already wired).
+# CAMOFOX_AUTH lever (.stack/.env): default = generate + reuse a bearer key
+# (current behavior). "disabled" = write empty key; server runs without auth.
+# The orb-DNS-only exposure (no host port) is the trust boundary in that mode.
+# Required for clients that don't send Authorization: Bearer — notably Hermes,
+# which only reads CAMOFOX_URL (no auth env var supported).
 mkdir -p "$STACK_DIR/camofox-browser"
 GEN="$STACK_DIR/camofox-browser/.generated.env"
-key="$(env_get "$GEN" CAMOFOX_ACCESS_KEY)"
-[ -n "$key" ] || key="$(openssl rand -hex 32)"
-env_upsert "$GEN" CAMOFOX_ACCESS_KEY "$key"
-log "camofox-browser: CAMOFOX_ACCESS_KEY owned in camofox-browser.generated.env"
+auth_mode="$(env_get "$STACK_DIR/.env" CAMOFOX_AUTH)"
+if [ "$auth_mode" = "disabled" ]; then
+  env_upsert "$GEN" CAMOFOX_ACCESS_KEY ""
+  log "camofox-browser: CAMOFOX_AUTH=disabled — server runs without bearer auth (Hermes-compatible)"
+else
+  key="$(env_get "$GEN" CAMOFOX_ACCESS_KEY)"
+  [ -n "$key" ] || key="$(openssl rand -hex 32)"
+  env_upsert "$GEN" CAMOFOX_ACCESS_KEY "$key"
+  log "camofox-browser: CAMOFOX_ACCESS_KEY owned (set CAMOFOX_AUTH=disabled to drop bearer auth)"
+fi
 
 # Pin from services/camofox-browser/service.env. Bumpable via .stack/.env
 # CAMOFOX_BROWSER_VERSION (tag or commit SHA).

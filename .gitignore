@@ -11,6 +11,9 @@
 *.bak
 *.bak.*
 .bak/
+# Repo-root backup dir convention (e.g. _bak/.stack.<timestamp>/). NEVER
+# put .stack/ backups in /tmp — secrets leak; world-readable; forgotten.
+_bak/
 
 .claude/*.lock
 .claude/worktrees

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# machines/hermes/build.sh [machine-name=hermes]
+# services/hermes/build.sh [machine-name=hermes]
 # Provisions an OrbStack Ubuntu machine running Hermes wired to the Dockerized
 # Honcho+LiteLLM stack. Installs ONLY messaging/agent services (dashboard,
 # gateway, logtail) — NO native honcho/postgres (Honcho is Dockerized).
+# SERVICE_RUNNER=vm in service.env: discovered via services/* + STACK_MACHINES,
+# NOT via a docker compose profile (this service has no compose.yaml).
 # HARD SAFETY: refuses the frozen original `hermes-agent`.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"
@@ -16,7 +18,7 @@ GEN="$STACK_DIR/litellm/.generated.env"
 source "$ENVF"
 # Key may not exist yet on a from-scratch run (it's minted by litellm during
 # `just start`, AFTER build). build.sh just provisions + writes config with
-# whatever is available; machines/hermes/start.sh (post-mint) applies the
+# whatever is available; services/hermes/start.sh (post-mint) applies the
 # real key and restarts the gateway. So: do NOT hard-require it here.
 HERMES_VIRTUAL_KEY="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
 [ -n "$HERMES_VIRTUAL_KEY" ] || warn "HERMES_VIRTUAL_KEY not minted yet — start.sh will apply it post-mint"
@@ -203,4 +205,4 @@ orb -m "$MACHINE" bash -lc 'sudo tee /usr/local/bin/hermes-logtail.sh >/dev/null
 for unit in hermes-dashboard hermes-gateway hermes-logtail; do
   orb -m "$MACHINE" bash -lc "sudo tee /etc/systemd/system/$unit.service >/dev/null" < "$D/systemd/$unit.service"
 done
-log "machines/hermes/build.sh DONE for '$MACHINE' (start.sh enables units)"
+log "services/hermes/build.sh DONE for '$MACHINE' (start.sh enables units)"

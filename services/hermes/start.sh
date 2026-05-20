@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# machines/hermes/start.sh [machine=hermes] — enable + (re)start hermes units.
+# services/hermes/start.sh [machine=hermes] — enable + (re)start hermes units.
 # Re-applies the virtual key in case it was re-minted (idempotent).
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../../lib/stacklib.sh"

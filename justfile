@@ -35,8 +35,8 @@ build:
        [ -x "{{root}}/services/$p/build.sh" ] && bash "{{root}}/services/$p/build.sh" || true; \
      done; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
-       [ -n "$mch" ] && [ -x "{{root}}/machines/$mch/build.sh" ] && \
-         bash "{{root}}/machines/$mch/build.sh" "$mch" || true; \
+       [ -n "$mch" ] && [ -x "{{root}}/services/$mch/build.sh" ] && \
+         bash "{{root}}/services/$mch/build.sh" "$mch" || true; \
      done; \
      echo "build complete"
 
@@ -83,8 +83,8 @@ start:
          { echo "== poststart: $p =="; bash "{{root}}/services/$p/poststart.sh"; }; \
      done; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
-       [ -n "$mch" ] && [ -x "{{root}}/machines/$mch/start.sh" ] && \
-         bash "{{root}}/machines/$mch/start.sh" "$mch"; \
+       [ -n "$mch" ] && [ -x "{{root}}/services/$mch/start.sh" ] && \
+         bash "{{root}}/services/$mch/start.sh" "$mch"; \
      done; \
      if [ "${STACK_AUTO_REMOVE_PROVISIONERS:-false}" = "true" ]; then just start-cleanup; fi; \
      echo "start complete"

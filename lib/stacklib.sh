@@ -30,14 +30,20 @@ log()  { printf '\n=== %s ===\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 die()  { printf 'FATAL: %s\n' "$*" >&2; exit 1; }
 
-# env_upsert FILE KEY VALUE — idempotent: replace `^KEY=` line or append. Never dupes.
+# env_upsert FILE KEY VALUE — idempotent: replace `^KEY=` line IN PLACE
+# (preserves the line's position in the file) or append at end if absent.
+# The earlier version did grep -v + append, which silently shuffled every
+# updated key to the bottom of the file — drove COMPOSE_PROFILES and
+# others into nonsense locations (e.g. between two block-marker pairs).
 env_upsert() {
   local f="$1" k="$2" v="$3"
   mkdir -p "$(dirname "$f")"; touch "$f"
   if grep -q "^${k}=" "$f" 2>/dev/null; then
     local tmp; tmp="$(mktemp)"
-    grep -v "^${k}=" "$f" > "$tmp" || true
-    printf '%s=%s\n' "$k" "$v" >> "$tmp"
+    awk -v k="$k" -v v="$v" '
+      !done && index($0, k "=") == 1 { print k "=" v; done = 1; next }
+      { print }
+    ' "$f" > "$tmp"
     mv "$tmp" "$f"
   else
     printf '%s=%s\n' "$k" "$v" >> "$f"

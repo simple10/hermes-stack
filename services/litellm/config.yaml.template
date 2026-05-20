@@ -114,6 +114,23 @@ model_list:
       model: openai/gpt-5.3-codex-spark
       api_base: http://cliproxyapi:8317/v1
       api_key: os.environ/CLIPROXY_API_KEY
+  - model_name: cliproxy/codex-auto-review # autonomous code-review codex variant
+    litellm_params:
+      model: openai/codex-auto-review
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
+  # Image generation via the same cliproxy/ChatGPT-subscription route.
+  # mode: image_generation tells LiteLLM to route this model to its
+  # /v1/images/generations endpoint (NOT /v1/chat/completions); cliproxy
+  # speaks the openai images API natively. Callers: openai-python
+  # client.images.generate(model="cliproxy/gpt-image-2", ...).
+  - model_name: cliproxy/gpt-image-2
+    model_info:
+      mode: image_generation
+    litellm_params:
+      model: openai/gpt-image-2
+      api_base: http://cliproxyapi:8317/v1
+      api_key: os.environ/CLIPROXY_API_KEY
 
 litellm_settings:
   drop_params: true # tolerate caller params a provider doesn't take
@@ -127,6 +144,9 @@ litellm_settings:
     - cliproxy/gpt-5.4-mini: [glm-4.7-flash]
     - cliproxy/gpt-5.3-codex: [glm-4.7-flash]
     - cliproxy/gpt-5.3-codex-spark: [glm-4.7-flash]
+    - cliproxy/codex-auto-review: [glm-4.7-flash]
+    # cliproxy/gpt-image-2: no fallback — different modality (image_generation,
+    # not chat). A chat fallback wouldn't produce a usable image.
 
 general_settings:
   store_model_in_db: true

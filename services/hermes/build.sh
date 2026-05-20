@@ -28,18 +28,25 @@ VM="$(stack_vm_name "$SVC")"
 # real key and restarts the gateway. So: do NOT hard-require it here.
 HERMES_VIRTUAL_KEY="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
 [ -n "$HERMES_VIRTUAL_KEY" ] || warn "HERMES_VIRTUAL_KEY not minted yet — start.sh will apply it post-mint"
-D="$(dirname "${BASH_SOURCE[0]}")"; REMOTE_USER="joe"
+D="$(dirname "${BASH_SOURCE[0]}")"
+# REMOTE_USER from the hermes block in .stack/.env (default 'hermes'; users
+# of pre-REMOTE_USER VMs can set to whatever orb defaulted to for them).
+# It's needed for the orb create --user flag AND for templating systemd
+# units + bin scripts that hardcode /home/$REMOTE_USER/.hermes/...
+REMOTE_USER="${REMOTE_USER:-hermes}"
 m() { orb -m "$VM" bash -lc "$1"; }
 
-log "1. orb create ubuntu $VM (--isolated --isolate-network; reuse if exists)"
+log "1. orb create ubuntu $VM (--user $REMOTE_USER --isolated --isolate-network; reuse if exists)"
 # Isolation: --isolated disables file sharing/Mac integration (no $HOME, no
 # Cmd-clipboard) AND --isolate-network blocks the VM from Mac IPs + sibling
 # VMs. Together: a compromised Hermes process can ONLY reach this stack's
 # docker network (via orb DNS); it cannot read Mac files or scan Mac
 # localhost. Host-bridge to the Mac is via the localhost-proxy service (opt-in
 # per-port). orb -m bash -lc exec STILL works under --isolated (verified).
+# --user picks the in-VM unix account; default 'hermes' decouples the VM
+# from the Mac user (orb create's default mirrors $USER).
 if orb list 2>/dev/null | awk '{print $1}' | grep -qx "$VM"; then
-  log "machine $VM exists — reusing"
+  log "machine $VM exists — reusing (REMOTE_USER=$REMOTE_USER must match the unix user inside the VM)"
   # Idempotently ensure both isolation flags are true. Takes effect on next
   # `orb start` of this machine — caller (build.sh standalone, or `just
   # build`) doesn't restart; `just start` enforces + fails-fast if a restart
@@ -54,7 +61,7 @@ if orb list 2>/dev/null | awk '{print $1}' | grep -qx "$VM"; then
     2) die  "machine $VM: 'orb config set' failed (is OrbStack running?)" ;;
   esac
 else
-  orb create --isolated --isolate-network ubuntu "$VM"
+  orb create --user "$REMOTE_USER" --isolated --isolate-network ubuntu "$VM"
 fi
 
 log "2. apt xz-utils (REQUIRED — Hermes installer extracts Node .tar.xz)"
@@ -112,7 +119,7 @@ case "$MEM" in
     m 'hermes config set memory.provider agentmemory'
     orb -m "$VM" bash -lc '
       set -e; cfg=~/.hermes/config.yaml
-      py=/home/joe/.hermes/hermes-agent/venv/bin/python; [ -x "$py" ] || py=python3
+      py=~/.hermes/hermes-agent/venv/bin/python; [ -x "$py" ] || py=python3
       "$py" - "$cfg" <<PY
 import sys,os
 try:
@@ -205,9 +212,13 @@ if not rep: out.insert(0, nb.rstrip())
 open(p,"w").write("\n".join(out)+"\n"); print("model: block patched")
 PY'
 
-log "6. install units + logtail (NO native honcho/pg)"
-orb -m "$VM" bash -lc 'sudo tee /usr/local/bin/hermes-logtail.sh >/dev/null && sudo chmod +x /usr/local/bin/hermes-logtail.sh' < "$D/bin/hermes-logtail.sh"
+log "6. install units + logtail (NO native honcho/pg). Templates use
+   __REMOTE_USER__ which gets sed-substituted to '$REMOTE_USER' here so
+   /home/<user>/... paths inside the VM match the actual unix account."
+sed "s|__REMOTE_USER__|$REMOTE_USER|g" "$D/bin/hermes-logtail.sh" \
+  | orb -m "$VM" bash -lc 'sudo tee /usr/local/bin/hermes-logtail.sh >/dev/null && sudo chmod +x /usr/local/bin/hermes-logtail.sh'
 for unit in hermes-dashboard hermes-gateway hermes-logtail; do
-  orb -m "$VM" bash -lc "sudo tee /etc/systemd/system/$unit.service >/dev/null" < "$D/systemd/$unit.service"
+  sed "s|__REMOTE_USER__|$REMOTE_USER|g" "$D/systemd/$unit.service" \
+    | orb -m "$VM" bash -lc "sudo tee /etc/systemd/system/$unit.service >/dev/null"
 done
 log "services/hermes/build.sh DONE for '$VM' (start.sh enables units)"

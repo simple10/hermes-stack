@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=joe
-Group=joe
-WorkingDirectory=/home/joe
-ExecStart=/home/joe/.local/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure
+User=__REMOTE_USER__
+Group=__REMOTE_USER__
+WorkingDirectory=/home/__REMOTE_USER__
+ExecStart=/home/__REMOTE_USER__/.local/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --insecure
 Restart=on-failure
 RestartSec=3
 

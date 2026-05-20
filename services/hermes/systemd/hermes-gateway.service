@@ -6,16 +6,16 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=joe
-Group=joe
-ExecStart=/home/joe/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace
-WorkingDirectory=/home/joe/.hermes/hermes-agent
-Environment="HOME=/home/joe"
-Environment="USER=joe"
-Environment="LOGNAME=joe"
-Environment="PATH=/home/joe/.hermes/hermes-agent/venv/bin:/home/joe/.hermes/hermes-agent/node_modules/.bin:/home/joe/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="VIRTUAL_ENV=/home/joe/.hermes/hermes-agent/venv"
-Environment="HERMES_HOME=/home/joe/.hermes"
+User=__REMOTE_USER__
+Group=__REMOTE_USER__
+ExecStart=/home/__REMOTE_USER__/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run --replace
+WorkingDirectory=/home/__REMOTE_USER__/.hermes/hermes-agent
+Environment="HOME=/home/__REMOTE_USER__"
+Environment="USER=__REMOTE_USER__"
+Environment="LOGNAME=__REMOTE_USER__"
+Environment="PATH=/home/__REMOTE_USER__/.hermes/hermes-agent/venv/bin:/home/__REMOTE_USER__/.hermes/hermes-agent/node_modules/.bin:/home/__REMOTE_USER__/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV=/home/__REMOTE_USER__/.hermes/hermes-agent/venv"
+Environment="HERMES_HOME=/home/__REMOTE_USER__/.hermes"
 Restart=always
 RestartSec=5
 RestartMaxDelaySec=300

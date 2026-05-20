@@ -12,9 +12,19 @@ are opt-in and Hermes auto-detects each via `~/.hermes/.env` wire-ups in
 ## Levers (in the `#>--- hermes ---` block of `.stack/.env`)
 
 ```
+REMOTE_USER=hermes                 # unix user inside the VM (orb create --user)
 HERMES_MODEL=${STACK_LLM_MODEL}    # default: cliproxy/gpt-5.5
 HERMES_MEMORY=honcho               # memory backend (one at a time)
 ```
+
+`REMOTE_USER` decouples the VM's unix account from the Mac user.
+OrbStack's default for `orb create` is to mirror `$USER`; we override
+with `--user $REMOTE_USER` to give Hermes a stable identity inside the
+VM. systemd units + bin scripts under `services/hermes/` use
+`__REMOTE_USER__` placeholders that `build.sh` substitutes at install
+time. For existing VMs created before this lever (with the orb default
+user), set `REMOTE_USER=<that-username>` in `.stack/.env` to keep the
+VM working without recreating.
 
 `HERMES_MEMORY` options (each requires the backing service enabled):
 

@@ -1,0 +1,67 @@
+# hermes-workspace — Hermes Workspace web UI. profile [hermes-workspace].
+# Project-scoped (no container_name / no shared network — Compose default
+# per-project net; siblings reach each other by service name). Image is
+# digest-pinned (gotcha #6) via HERMES_WORKSPACE_IMAGE resolved at build time
+# from services/hermes-workspace/service.env -> HERMES_WORKSPACE_IMAGE_DEFAULT;
+# bump via HERMES_WORKSPACE_VERSION in .stack/.env.
+#
+# Connects to the Hermes Agent gateway over OrbStack DNS at
+# HERMES_GATEWAY_URL (auto-written to .stack/hermes/.generated.env by
+# services/hermes/build.sh when the gate is open). When the gate is closed,
+# HERMES_GATEWAY_URL is absent and services/hermes-workspace/build.sh
+# refuses to build (clear opt-in instruction), so we never reach a state
+# where the workspace container starts pointing at a dead endpoint.
+#
+# Exposure: :3000 inside the container; OrbStack fronts it with auto-HTTPS,
+# canonical URL is https-no-port:
+#   https://hermes-workspace.<project>.orb.local
+# The container binds 0.0.0.0:3000 internally (upstream default), so we
+# enable session-password auth (HERMES_PASSWORD) and mark cookies Secure
+# (the orb proxy terminates HTTPS).
+
+services:
+  hermes-workspace:
+    image: "${HERMES_WORKSPACE_IMAGE:?run 'just build' to resolve HERMES_WORKSPACE_VERSION}"
+    profiles: [hermes-workspace]
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      HERMES_HOME: /home/workspace/.hermes
+      HERMES_WORKSPACE_DIR: /workspace
+      # Internal docker → orb-DNS URL of the hermes VM gateway. Sourced
+      # from .stack/hermes/.generated.env (dc() loads it as --env-file).
+      # Plain interpolation (no `:?`) — every dc() call would otherwise fail
+      # parsing whenever the gate is closed but workspace is still enabled
+      # (e.g. `just stop` after `just disable hermes-workspace`). Primary
+      # protection is services/hermes-workspace/build.sh's gate refuse;
+      # if those URLs end up empty here, the workspace container fails
+      # fast at startup with its own clear "no gateway" error.
+      HERMES_API_URL: ${HERMES_GATEWAY_URL:-}
+      HERMES_API_TOKEN: ${HERMES_GATEWAY_API_KEY:-}
+      # Session password for the workspace web UI (auto-minted by setup.sh).
+      HERMES_PASSWORD: ${HERMES_WORKSPACE_PASSWORD}
+      COOKIE_SECURE: ${HERMES_WORKSPACE_COOKIE_SECURE:-true}
+      TRUST_PROXY: ${HERMES_WORKSPACE_TRUST_PROXY:-true}
+      # Provider key passthrough — workspace forwards whichever the user
+      # has configured. Honored only when the upstream image consults it
+      # directly (no harm if unused).
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    volumes:
+      - hermes-workspace-config:/home/workspace/.hermes
+      - hermes-workspace-files:/workspace
+    healthcheck:
+      # TCP-probe :3000 (the upstream image has no guaranteed HTTP health
+      # path; node's net module is always present in a node-based image).
+      test: ["CMD-SHELL", "node -e 'require(\"net\").connect(3000,\"127.0.0.1\").on(\"connect\",()=>process.exit(0)).on(\"error\",()=>process.exit(1))'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  hermes-workspace-config:
+  hermes-workspace-files:

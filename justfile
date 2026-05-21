@@ -160,6 +160,12 @@ start-cleanup:
 # Multi-stack: each stack's .stack/.env picks its own ports → independent CDPs;
 # or set the same ports across stacks to share one CDP.
 # Profile data lives at .stack/chrome-cdp/data (gitignored, per-stack).
+# localhost-proxy is a TRANSIENT sidecar (lives only while chrome-cdp is
+# active), never in COMPOSE_PROFILES. Since stack_render_compose only
+# include:s services that ARE in COMPOSE_PROFILES, we surface localhost-proxy
+# to compose with an explicit second -f file each time we touch it (chrome-cdp
+# + chrome-cdp-stop). Docker compose merges multiple -f files; the
+# `--profile localhost-proxy` flag activates the now-visible service.
 # Launch Mac-host Chrome + bring up localhost-proxy + offer to wire Hermes.
 chrome-cdp:
     @set -a; source "{{lib}}"; set +a; \
@@ -192,7 +198,7 @@ chrome-cdp:
      case ",$user_ports," in *",$chrome_map,"*) merged="$user_ports" ;; *) merged="${user_ports:+$user_ports,}$chrome_map" ;; esac; \
      mkdir -p "$STACK_DIR/localhost-proxy"; \
      env_upsert "$STACK_DIR/localhost-proxy/.generated.env" LOCALHOST_PROXY_PORTS "$merged"; \
-     dc --profile localhost-proxy up -d --force-recreate localhost-proxy >/dev/null; \
+     dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy up -d --force-recreate localhost-proxy >/dev/null; \
      first_svc="$(echo "${STACK_MACHINES:-hermes}" | tr ', ' ' ' | awk '{print $1}')"; \
      first_vm="$(stack_vm_name "$first_svc")"; \
      mch_running="$(orb list 2>/dev/null | awk -v m="$first_vm" '$1==m && $2=="running"{print "1"}')"; \
@@ -243,8 +249,8 @@ chrome-cdp-stop:
      fi; \
      if [ -f "$STACK_DIR/.env" ]; then \
        echo "== chrome-cdp: stopping localhost-proxy =="; \
-       dc --profile localhost-proxy stop localhost-proxy >/dev/null 2>&1 || true; \
-       dc --profile localhost-proxy rm -f localhost-proxy >/dev/null 2>&1 || true; \
+       dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy stop localhost-proxy >/dev/null 2>&1 || true; \
+       dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy rm -f localhost-proxy >/dev/null 2>&1 || true; \
        rm -f "$STACK_DIR/localhost-proxy/.generated.env"; \
      fi; \
      first_svc="$(env_get "$STACK_DIR/.env" STACK_MACHINES 2>/dev/null | tr ', ' ' ' | awk '{print $1}')"; \

@@ -297,6 +297,69 @@ EOF
   echo "ok: stack_resolve_images reads service.env (incl. multi-image; skips service.env without image keys)"
 }
 
+# --- stack_render_compose --------------------------------------------------
+# Fixture: services/{a,b,c}/compose.yaml + a .stack/.env with COMPOSE_PROFILES.
+# Caller passes the CSV. No service.env files -> SERVICE_REQUIRES closure
+# is a no-op, so stack_profiles returns exactly the seed.
+_render_setup() {
+  local d="$1" csv="$2"
+  mkdir -p "$d/.stack" "$d/services/a" "$d/services/b" "$d/services/c"
+  touch "$d/services/a/compose.yaml" \
+        "$d/services/b/compose.yaml" \
+        "$d/services/c/compose.yaml"
+  printf 'COMPOSE_PROFILES=%s\n' "$csv" > "$d/.stack/.env"
+  printf '# example header\n' > "$d/docker-compose.example.yaml"
+}
+
+test_stack_render_compose_emits_only_enabled() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _render_setup "$d" "a,b"
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_render_compose
+  local out="$d/docker-compose.yaml"
+  [ -f "$out" ] || { echo "FAIL: $out not created"; return 1; }
+  grep -qFx '  - services/a/compose.yaml' "$out" \
+    || { echo "FAIL: services/a missing"; return 1; }
+  grep -qFx '  - services/b/compose.yaml' "$out" \
+    || { echo "FAIL: services/b missing"; return 1; }
+  if grep -qFx '  - services/c/compose.yaml' "$out"; then
+    echo "FAIL: disabled service 'c' leaked into include list"; return 1
+  fi
+  echo "ok: stack_render_compose emits only enabled services"
+}
+
+test_stack_render_compose_idempotent() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _render_setup "$d" "a"
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_render_compose
+  local h1; h1="$(shasum -a 256 "$d/docker-compose.yaml" | cut -d' ' -f1)"
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_render_compose
+  local h2; h2="$(shasum -a 256 "$d/docker-compose.yaml" | cut -d' ' -f1)"
+  [ "$h1" = "$h2" ] || { echo "FAIL: not idempotent ($h1 != $h2)"; return 1; }
+  echo "ok: stack_render_compose is idempotent"
+}
+
+test_stack_render_compose_skips_dirs_without_compose() {
+  # services/c/ exists and is "enabled" but lacks compose.yaml (e.g. a VM-only
+  # service dir like services/hermes/). Must NOT be emitted as an include.
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _render_setup "$d" "a,b,c"
+  rm "$d/services/c/compose.yaml"
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_render_compose
+  if grep -qF 'services/c/compose.yaml' "$d/docker-compose.yaml"; then
+    echo "FAIL: services/c included despite missing compose.yaml"; return 1
+  fi
+  echo "ok: stack_render_compose skips dirs without compose.yaml"
+}
+
+test_stack_render_compose_atomic_no_tmp_leftover() {
+  local d; d="$(mktemp -d)"; trap 'rm -rf "${d:-}"' RETURN
+  _render_setup "$d" "a"
+  STACK_ROOT="$d" STACK_DIR="$d/.stack" stack_render_compose
+  [ ! -f "$d/docker-compose.yaml.tmp" ] \
+    || { echo "FAIL: .tmp left behind after atomic write"; return 1; }
+  echo "ok: stack_render_compose atomic write (no .tmp leftover)"
+}
+
 run_helpers_tests() {
   # Isolation: clear any user-set version overrides so default-pin path is
   # actually exercised in tests.
@@ -318,6 +381,10 @@ run_helpers_tests() {
   test_stack_resolve_images_reads_service_env || return 1
   test_stack_source_reads_service_env_when_args_missing || return 1
   test_stack_source_service_env_strips_inline_comments || return 1
+  test_stack_render_compose_emits_only_enabled || return 1
+  test_stack_render_compose_idempotent || return 1
+  test_stack_render_compose_skips_dirs_without_compose || return 1
+  test_stack_render_compose_atomic_no_tmp_leftover || return 1
 }
 
 run_helpers_tests || fail=1

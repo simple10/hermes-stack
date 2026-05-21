@@ -1,0 +1,26 @@
+# docker-compose.example.yaml — header/rationale for the GENERATED top-level
+# docker-compose.yaml.
+#
+# This file is TRACKED. docker-compose.yaml is GENERATED (gitignored) by
+# stack_render_compose (lib/stacklib.sh), called from `just enable`,
+# `just disable`, `just build`, and `just start` (and by dc() as a safety
+# net if the file is missing). The generator concatenates this header with
+# an `include:` block listing services/<svc>/compose.yaml for every <svc>
+# in COMPOSE_PROFILES (closed under SERVICE_REQUIRES).
+#
+# Why generated, not a static include list: Compose parses + interpolates
+# every `include:`-d file regardless of profile, so a disabled service's
+# empty ${VAR} references trigger warning spam on string fields and HARD
+# parse errors on typed fields (cpus:, mem_limit:). Filtering the include
+# list to only enabled services keeps Compose's view consistent with
+# COMPOSE_PROFILES.
+#
+# Do NOT run `docker compose` against this example file directly — it has
+# no `include:` block. Run via `just` (which uses the generated file).
+#
+# NO top-level `name:` — COMPOSE_PROJECT_NAME in .stack/.env scopes the
+# project (default `aitools`), so multiple independent stacks can run side
+# by side. Each stack's services/volumes/network are project-scoped;
+# OrbStack exposes services at <service>.<project>.orb.local
+# (e.g. litellm.aitools.orb.local). Containers use Compose's default
+# per-project network — no shared external network.

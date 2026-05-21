@@ -4,6 +4,10 @@
 # Templates stay tracked in service dirs (*.template).
 .stack/
 **/*.generated.env
+# Top-level compose is GENERATED from docker-compose.example.yaml + the
+# enabled COMPOSE_PROFILES by stack_render_compose. Path anchored to repo
+# root so per-service `services/*/compose.yaml` files stay tracked.
+/docker-compose.yaml
 # Build-from-source clones (pinned commit, re-cloned by build scripts).
 **/_source/
 

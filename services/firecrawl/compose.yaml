@@ -41,8 +41,8 @@ services:
       BLOCK_MEDIA: "true"
       # static value (upstream derives this from CRAWL_CONCURRENT_REQUESTS).
       MAX_CONCURRENT_PAGES: "10"
-    cpus: ${FIRECRAWL_PLAYWRIGHT_CPU}
-    mem_limit: ${FIRECRAWL_PLAYWRIGHT_MEM}
+    cpus: ${FIRECRAWL_PLAYWRIGHT_CPU:-2}
+    mem_limit: ${FIRECRAWL_PLAYWRIGHT_MEM:-2g}
     tmpfs:
       - /tmp/.cache:noexec,nosuid,size=1g
     logging:
@@ -105,8 +105,8 @@ services:
       timeout: 6s
       retries: 30
       start_period: 90s
-    cpus: ${FIRECRAWL_API_CPU}
-    mem_limit: ${FIRECRAWL_API_MEM}
+    cpus: ${FIRECRAWL_API_CPU:-2}
+    mem_limit: ${FIRECRAWL_API_MEM:-4g}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

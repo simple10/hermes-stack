@@ -30,6 +30,7 @@ enable svc:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      lib_enable_service "{{svc}}"; \
+     stack_render_compose; \
      echo ""; \
      echo "next: just build && just start    (or 'just restart' if the stack is already up)"
 
@@ -42,6 +43,7 @@ disable svc:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      lib_disable_service "{{svc}}"; \
+     stack_render_compose; \
      echo ""; \
      echo "next: just stop && just start    (to remove the service's containers; volumes stay)"
 
@@ -56,6 +58,7 @@ build:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
+     stack_render_compose; \
      echo "== Phase 1: resolve digest-class images =="; \
      stack_resolve_images; \
      echo "== Phase 1 done — image refs in .stack/<svc>/.generated.env =="; \
@@ -86,6 +89,7 @@ start:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
+     stack_render_compose; \
      set +e; \
      for svc in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
        [ -n "$svc" ] || continue; \

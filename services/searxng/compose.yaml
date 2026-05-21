@@ -35,8 +35,8 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
-    cpus: ${SEARXNG_CPU}
-    mem_limit: ${SEARXNG_MEM}
+    cpus: ${SEARXNG_CPU:-1}
+    mem_limit: ${SEARXNG_MEM:-512m}
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

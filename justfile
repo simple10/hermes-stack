@@ -214,7 +214,7 @@ chrome-cdp:
      log "  port list:   LOCALHOST_PROXY_PORTS=$merged"; \
      if [ ! -t 0 ]; then \
        log "  non-interactive — wire Hermes manually:"; \
-       log "    orb -m $first_vm bash -lc 'sed -i \"/^BROWSER_CDP_URL=/d\" ~/.hermes/.env; echo BROWSER_CDP_URL=$cdp_url >> ~/.hermes/.env; sudo systemctl restart hermes-gateway'"; \
+       log "    orb -m $first_vm bash -lc 'sed -i \"/^BROWSER_CDP_URL=/d\" ~/.hermes/.env; echo BROWSER_CDP_URL=$cdp_url >> ~/.hermes/.env; sudo hermes gateway restart --system'"; \
        exit 0; \
      fi; \
      printf "\nWire BROWSER_CDP_URL=%s into machine '%s' and restart hermes-gateway? [y/N] " "$cdp_url" "$first_vm"; \
@@ -224,7 +224,7 @@ chrome-cdp:
          orb -m "$first_vm" bash -lc "set -e; umask 077; \
            sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; \
            echo 'BROWSER_CDP_URL=$cdp_url' >> ~/.hermes/.env; \
-           sudo systemctl restart hermes-gateway"; \
+           sudo hermes gateway restart --system"; \
          log "  Hermes: BROWSER_CDP_URL=$cdp_url applied, hermes-gateway restarted" ;; \
        *) log "  skipped — apply later with: orb -m $first_vm bash -lc 'hermes config set browser.cdp_url $cdp_url'" ;; \
      esac
@@ -260,7 +260,7 @@ chrome-cdp-stop:
      orb -m "$first_vm" bash -lc 'test -f ~/.hermes/.env && grep -q "^BROWSER_CDP_URL=" ~/.hermes/.env' 2>/dev/null \
        || exit 0; \
      echo "== chrome-cdp: clearing stale BROWSER_CDP_URL on '$first_vm' =="; \
-     orb -m "$first_vm" bash -lc "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; sudo systemctl restart hermes-gateway 2>/dev/null || true"
+     orb -m "$first_vm" bash -lc "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; sudo hermes gateway restart --system 2>/dev/null || true"
 
 # chrome-cdp stops FIRST (depends_on) so a stale CDP can't be reattached
 # accidentally on next start. Only machines in STACK_MACHINES are touched.

@@ -39,6 +39,14 @@ services:
       # fast at startup with its own clear "no gateway" error.
       HERMES_API_URL: ${HERMES_GATEWAY_URL:-}
       HERMES_API_TOKEN: ${HERMES_GATEWAY_API_KEY:-}
+      # Dashboard URL — separate from the gateway. Serves the "extended APIs"
+      # the workspace's Skills / Memory / Cron / etc. panels consume.
+      # Without this set, the workspace shows "Skills requires a Hermes
+      # gateway that exposes the extended APIs". Written by
+      # services/hermes/build.sh into .stack/hermes/.generated.env when the
+      # gate is open (the dashboard's systemd unit already binds 0.0.0.0:9119
+      # unconditionally; we just need to surface the URL).
+      HERMES_DASHBOARD_URL: ${HERMES_DASHBOARD_URL:-}
       # Session password for the workspace web UI (auto-minted by setup.sh).
       HERMES_PASSWORD: ${HERMES_WORKSPACE_PASSWORD}
       COOKIE_SECURE: ${HERMES_WORKSPACE_COOKIE_SECURE:-true}

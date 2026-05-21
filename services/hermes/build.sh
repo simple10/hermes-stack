@@ -264,14 +264,30 @@ if [ "$ALLOW" = "true" ]; then
   m "sudo mkdir -p $DROP_IN_DIR"
   printf '[Service]\nEnvironment="API_SERVER_ENABLED=true"\nEnvironment="API_SERVER_HOST=0.0.0.0"\nEnvironment="API_SERVER_PORT=8642"\nEnvironment="API_SERVER_KEY=%s"\n' "$HERMES_GATEWAY_API_KEY" \
     | orb -m "$VM" bash -lc "sudo tee $DROP_IN >/dev/null && sudo chmod 600 $DROP_IN"
-  env_upsert "$GEN_HERMES" HERMES_GATEWAY_URL "http://$VM.orb.local:8642"
-  log "gateway: gate OPEN — drop-in installed; HERMES_GATEWAY_URL=http://$VM.orb.local:8642"
+  env_upsert "$GEN_HERMES" HERMES_GATEWAY_URL   "http://$VM.orb.local:8642"
+  # Dashboard URL — also published when the gate is open. The dashboard
+  # serves the "extended APIs" the workspace's Skills/Memory/Cron/etc.
+  # panels query. Its unit already binds 0.0.0.0:9119 unconditionally
+  # (see systemd/hermes-dashboard.service), so no extra drop-in needed;
+  # we just need to surface the URL so consumers can reach it.
+  env_upsert "$GEN_HERMES" HERMES_DASHBOARD_URL "http://$VM.orb.local:9119"
+  log "gateway: gate OPEN — drop-in installed; HERMES_GATEWAY_URL=http://$VM.orb.local:8642; HERMES_DASHBOARD_URL=http://$VM.orb.local:9119"
 else
   # Remove any prior drop-in so the gateway falls back to default (loopback).
   m "sudo rm -f $DROP_IN"
-  if [ -f "$GEN_HERMES" ] && grep -q '^HERMES_GATEWAY_URL=' "$GEN_HERMES"; then
-    sed -i.bak '/^HERMES_GATEWAY_URL=/d' "$GEN_HERMES" && rm -f "$GEN_HERMES.bak"
-    log "gateway: gate CLOSED — removed drop-in + stale HERMES_GATEWAY_URL"
+  removed_any=0
+  if [ -f "$GEN_HERMES" ]; then
+    if grep -q '^HERMES_GATEWAY_URL='   "$GEN_HERMES"; then
+      sed -i.bak '/^HERMES_GATEWAY_URL=/d'   "$GEN_HERMES" && rm -f "$GEN_HERMES.bak"
+      removed_any=1
+    fi
+    if grep -q '^HERMES_DASHBOARD_URL=' "$GEN_HERMES"; then
+      sed -i.bak '/^HERMES_DASHBOARD_URL=/d' "$GEN_HERMES" && rm -f "$GEN_HERMES.bak"
+      removed_any=1
+    fi
+  fi
+  if [ "$removed_any" = "1" ]; then
+    log "gateway: gate CLOSED — removed drop-in + stale HERMES_{GATEWAY,DASHBOARD}_URL"
   else
     log "gateway: gate CLOSED — loopback-only (default; no drop-in)"
   fi

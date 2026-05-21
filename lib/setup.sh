@@ -76,6 +76,33 @@ else
   done < "$DEFAULTS"
 fi
 
+# ---- step 1.5: migrate pre-HERMES-prefix keys ------------------------------
+# One-off rename: the hermes block historically held REMOTE_USER and
+# TELEGRAM_* without a service prefix, which could collide with future
+# services (every other block uses a SERVICE-name prefix). Migration is
+# in-place (sed rename in the same block) so values + block placement
+# survive. Safe to re-run (no-op once migrated). Drop this block once
+# all users have run setup at least once on or after 2026-05-21.
+for pair in REMOTE_USER:HERMES_REMOTE_USER \
+            TELEGRAM_BOT_TOKEN:HERMES_TELEGRAM_BOT_TOKEN \
+            TELEGRAM_ALLOWED_USERS:HERMES_TELEGRAM_ALLOWED_USERS \
+            TELEGRAM_HOME_CHANNEL:HERMES_TELEGRAM_HOME_CHANNEL; do
+  legacy="${pair%:*}"
+  new="${pair#*:}"
+  if grep -q "^${legacy}=" "$ENVF" 2>/dev/null; then
+    if grep -q "^${new}=" "$ENVF" 2>/dev/null; then
+      # new already present (partial migration / earlier setup run) — the
+      # legacy line is just dead weight; drop it.
+      sed -i.bak "/^${legacy}=/d" "$ENVF" && rm -f "$ENVF.bak"
+      log "migration: dropped legacy ${legacy} (${new} already present)"
+    else
+      # In-place rename preserves the value AND the block placement.
+      sed -i.bak "s/^${legacy}=/${new}=/" "$ENVF" && rm -f "$ENVF.bak"
+      log "migration: renamed ${legacy} → ${new}"
+    fi
+  fi
+done
+
 # ---- step 2: service selection ---------------------------------------------
 
 log "Available services"
@@ -158,9 +185,9 @@ fi
 
 if _enabled hermes; then
   log "hermes (Telegram gateway — blank ok)"
-  ask_plain TELEGRAM_BOT_TOKEN     "Telegram bot token"          ""
-  ask_plain TELEGRAM_ALLOWED_USERS "Telegram allowed user IDs"   ""
-  ask_plain TELEGRAM_HOME_CHANNEL  "Telegram home channel"       ""
+  ask_plain HERMES_TELEGRAM_BOT_TOKEN     "Telegram bot token"          ""
+  ask_plain HERMES_TELEGRAM_ALLOWED_USERS "Telegram allowed user IDs"   ""
+  ask_plain HERMES_TELEGRAM_HOME_CHANNEL  "Telegram home channel"       ""
   # Gateway access key — minted ONLY when the user opened the gate. Closed
   # gate means the gateway binds VM-loopback and the key is unused; keeping
   # it empty in that mode avoids surfacing a phantom secret.

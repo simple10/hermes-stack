@@ -29,11 +29,13 @@ VM="$(stack_vm_name "$SVC")"
 HERMES_VIRTUAL_KEY="$(env_get "$GEN" HERMES_VIRTUAL_KEY)"
 [ -n "$HERMES_VIRTUAL_KEY" ] || warn "HERMES_VIRTUAL_KEY not minted yet — start.sh will apply it post-mint"
 D="$(dirname "${BASH_SOURCE[0]}")"
-# REMOTE_USER from the hermes block in .stack/.env (default 'hermes'; users
-# of pre-REMOTE_USER VMs can set to whatever orb defaulted to for them).
-# It's needed for the orb create --user flag AND for templating systemd
-# units + bin scripts that hardcode /home/$REMOTE_USER/.hermes/...
-REMOTE_USER="${REMOTE_USER:-hermes}"
+# HERMES_REMOTE_USER from the hermes block in .stack/.env (default 'hermes';
+# users of pre-HERMES_REMOTE_USER VMs can set to whatever orb defaulted to
+# for them). Needed for the orb create --user flag AND for templating
+# systemd units + bin scripts that hardcode /home/$REMOTE_USER/.hermes/...
+# The shell-local var name stays REMOTE_USER (it's just a local; the
+# stack-facing name is what gets the prefix).
+REMOTE_USER="${HERMES_REMOTE_USER:-hermes}"
 m() { orb -m "$VM" bash -lc "$1"; }
 
 log "1. orb create ubuntu $VM (--user $REMOTE_USER --isolated --isolate-network; reuse if exists)"
@@ -69,11 +71,14 @@ m 'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y
 
 log "3. install Hermes + seed ~/.hermes/.env"
 m 'command -v hermes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
+# Map stack-side HERMES_TELEGRAM_* → upstream's un-prefixed TELEGRAM_* names
+# inside the VM (~/.hermes/.env is consumed by hermes-agent, which reads
+# the upstream names).
 ENV_PAYLOAD="$(cat <<EOF
 OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-}
-TELEGRAM_HOME_CHANNEL=${TELEGRAM_HOME_CHANNEL:-}
+TELEGRAM_BOT_TOKEN=${HERMES_TELEGRAM_BOT_TOKEN:-}
+TELEGRAM_ALLOWED_USERS=${HERMES_TELEGRAM_ALLOWED_USERS:-}
+TELEGRAM_HOME_CHANNEL=${HERMES_TELEGRAM_HOME_CHANNEL:-}
 EOF
 )"
 printf '%s' "$ENV_PAYLOAD" | orb -m "$VM" bash -lc \

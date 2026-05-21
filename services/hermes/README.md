@@ -12,19 +12,31 @@ are opt-in and Hermes auto-detects each via `~/.hermes/.env` wire-ups in
 ## Levers (in the `#>--- hermes ---` block of `.stack/.env`)
 
 ```
-REMOTE_USER=hermes                 # unix user inside the VM (orb create --user)
+HERMES_REMOTE_USER=hermes          # unix user inside the VM (orb create --user)
 HERMES_MODEL=${STACK_LLM_MODEL}    # default: cliproxy/gpt-5.5
 HERMES_MEMORY=honcho               # memory backend (one at a time)
+HERMES_TELEGRAM_BOT_TOKEN=         # gateway Telegram integration (optional)
+HERMES_TELEGRAM_ALLOWED_USERS=
+HERMES_TELEGRAM_HOME_CHANNEL=
+HERMES_GATEWAY_ALLOW_ACCESS=false  # bind gateway 0.0.0.0:8642 for docker consumers
+HERMES_GATEWAY_API_KEY=             # minted by setup when ALLOW_ACCESS=true
 ```
 
-`REMOTE_USER` decouples the VM's unix account from the Mac user.
+All keys carry the `HERMES_` prefix to avoid collisions with other
+services. `build.sh` reads the prefixed names from `.stack/.env` and
+maps them into `~/.hermes/.env` inside the VM under the **upstream's**
+un-prefixed names (e.g. `HERMES_TELEGRAM_BOT_TOKEN` →
+`TELEGRAM_BOT_TOKEN`), which is what `hermes-agent` reads.
+
+`HERMES_REMOTE_USER` decouples the VM's unix account from the Mac user.
 OrbStack's default for `orb create` is to mirror `$USER`; we override
-with `--user $REMOTE_USER` to give Hermes a stable identity inside the
-VM. systemd units + bin scripts under `services/hermes/` use
+with `--user $HERMES_REMOTE_USER` to give Hermes a stable identity inside
+the VM. systemd units + bin scripts under `services/hermes/` use
 `__REMOTE_USER__` placeholders that `build.sh` substitutes at install
 time. For existing VMs created before this lever (with the orb default
-user), set `REMOTE_USER=<that-username>` in `.stack/.env` to keep the
-VM working without recreating.
+user), set `HERMES_REMOTE_USER=<that-username>` in `.stack/.env` to keep
+the VM working without recreating. (`just setup` auto-migrates the
+legacy un-prefixed `REMOTE_USER` / `TELEGRAM_*` keys on first run.)
 
 `HERMES_MEMORY` options (each requires the backing service enabled):
 

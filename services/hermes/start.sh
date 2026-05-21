@@ -48,11 +48,10 @@ orb -m "$VM" bash -lc '
   # with the freshly daemon-reloaded unit. Falls back to a harder restart
   # path internally if drain times out. See hermes_cli/gateway.py systemd_restart.
   #
-  # We invoke via absolute path because sudo strips PATH, and the hermes CLI
-  # lives in the unix user'"'"'s ~/.local/bin (not on root'"'"'s secure_path).
-  # $HOME is expanded by the outer (non-sudo) bash to the REMOTE_USER'"'"'s
-  # home, so sudo receives a literal absolute path.
-  sudo "$HOME/.local/bin/hermes" gateway restart --system
+  # `sudo hermes` resolves via /usr/local/bin/hermes (symlink installed by
+  # build.sh step 3) — keeps sudo'"'"'s secure_path clean and makes
+  # `sudo hermes ...` work from any shell in the VM.
+  sudo hermes gateway restart --system
 '
 echo -n "services: "; orb -m "$VM" bash -lc 'systemctl is-active hermes-dashboard hermes-gateway hermes-logtail | tr "\n" " "; echo'
 echo -n "honcho reachable: "; orb -m "$VM" bash -lc "curl -sS -m6 http://honcho-api.$PROJ.orb.local:8000/health || true"; echo

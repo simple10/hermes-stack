@@ -71,6 +71,11 @@ m 'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y
 
 log "3. install Hermes + seed ~/.hermes/.env"
 m 'command -v hermes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
+# Symlink hermes into /usr/local/bin so `sudo hermes ...` works without the
+# absolute /home/$USER/.local/bin/hermes path. /usr/local/bin is in root's
+# secure_path; the installer keeps the user-local binary path stable.
+# Idempotent (ln -sf overwrites). Templated REMOTE_USER, like systemd units.
+m "sudo ln -sf /home/$REMOTE_USER/.local/bin/hermes /usr/local/bin/hermes"
 # Map stack-side HERMES_TELEGRAM_* → upstream's un-prefixed TELEGRAM_* names
 # inside the VM (~/.hermes/.env is consumed by hermes-agent, which reads
 # the upstream names).

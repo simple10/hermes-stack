@@ -69,6 +69,14 @@ fi
 log "2. apt xz-utils (REQUIRED — Hermes installer extracts Node .tar.xz)"
 m 'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates'
 
+log "2b. VM hardening — remove unwanted snaps. OrbStack's ubuntu base ships
+   cups (the printing service) which binds 0.0.0.0:631 and serves a web
+   admin UI. We don't print from an isolated agent VM, and even with
+   --isolate-network blocking the Mac, exposing :631 on the orb docker
+   network is needless surface. \`snap remove cups\` cleans both cupsd +
+   cups-browsed in one shot. Idempotent (grep guard: skip if already gone)."
+m 'snap list cups >/dev/null 2>&1 && { echo "removing cups snap"; sudo snap remove cups; } || echo "cups snap not installed — skipping"'
+
 log "3. install Hermes + seed ~/.hermes/.env"
 m 'command -v hermes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
 # Symlink hermes into /usr/local/bin so `sudo hermes ...` works without the

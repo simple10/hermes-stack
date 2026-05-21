@@ -16,6 +16,12 @@ Environment="LOGNAME=__REMOTE_USER__"
 Environment="PATH=/home/__REMOTE_USER__/.hermes/hermes-agent/venv/bin:/home/__REMOTE_USER__/.hermes/hermes-agent/node_modules/.bin:/home/__REMOTE_USER__/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="VIRTUAL_ENV=/home/__REMOTE_USER__/.hermes/hermes-agent/venv"
 Environment="HERMES_HOME=/home/__REMOTE_USER__/.hermes"
+# API_SERVER_* env vars (HOST/PORT/KEY/ENABLED) — when HERMES_GATEWAY_ALLOW_ACCESS=true
+# in .stack/.env, services/hermes/build.sh installs them via a drop-in at
+# /etc/systemd/system/hermes-gateway.service.d/stack-api-server.conf. Drop-ins
+# survive `hermes gateway restart --system` (which rewrites THIS unit file
+# from hermes-cli's own template). Without the gate open, the gateway binds
+# its default (VM loopback only).
 Restart=always
 RestartSec=5
 RestartMaxDelaySec=300

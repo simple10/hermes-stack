@@ -221,4 +221,41 @@ for unit in hermes-dashboard hermes-gateway hermes-logtail; do
   sed "s|__REMOTE_USER__|$REMOTE_USER|g" "$D/systemd/$unit.service" \
     | orb -m "$VM" bash -lc "sudo tee /etc/systemd/system/$unit.service >/dev/null"
 done
-log "services/hermes/build.sh DONE for '$VM' (start.sh enables units)"
+
+log "7. apply HERMES_GATEWAY_ALLOW_ACCESS gate via a systemd DROP-IN. The
+   gate binds the gateway to 0.0.0.0:8642 on the orb docker network so
+   docker-side consumers (e.g. hermes-workspace) can reach it. Default
+   closed (loopback-only inside VM). See services/hermes/service.env for
+   the security trade-off.
+
+   WHY DROP-IN, not main-unit edit: 'hermes gateway restart --system'
+   rewrites the main unit file from hermes-cli's own template on every
+   restart (verified empirically — it logs '↻ Updated gateway system
+   service definition'). Drop-ins at /etc/systemd/system/<unit>.d/ are
+   the canonical systemd way to layer extra config on top of a CLI-managed
+   unit, and they survive that rewrite."
+ALLOW="${HERMES_GATEWAY_ALLOW_ACCESS:-false}"
+GEN_HERMES="$STACK_DIR/hermes/.generated.env"
+DROP_IN_DIR="/etc/systemd/system/hermes-gateway.service.d"
+DROP_IN="$DROP_IN_DIR/stack-api-server.conf"
+mkdir -p "$STACK_DIR/hermes"
+if [ "$ALLOW" = "true" ]; then
+  [ -n "${HERMES_GATEWAY_API_KEY:-}" ] \
+    || die "HERMES_GATEWAY_ALLOW_ACCESS=true but HERMES_GATEWAY_API_KEY is empty.
+       Run 'just setup' to mint it (it only mints when the gate is open)."
+  m "sudo mkdir -p $DROP_IN_DIR"
+  printf '[Service]\nEnvironment="API_SERVER_ENABLED=true"\nEnvironment="API_SERVER_HOST=0.0.0.0"\nEnvironment="API_SERVER_PORT=8642"\nEnvironment="API_SERVER_KEY=%s"\n' "$HERMES_GATEWAY_API_KEY" \
+    | orb -m "$VM" bash -lc "sudo tee $DROP_IN >/dev/null && sudo chmod 600 $DROP_IN"
+  env_upsert "$GEN_HERMES" HERMES_GATEWAY_URL "http://$VM.orb.local:8642"
+  log "gateway: gate OPEN — drop-in installed; HERMES_GATEWAY_URL=http://$VM.orb.local:8642"
+else
+  # Remove any prior drop-in so the gateway falls back to default (loopback).
+  m "sudo rm -f $DROP_IN"
+  if [ -f "$GEN_HERMES" ] && grep -q '^HERMES_GATEWAY_URL=' "$GEN_HERMES"; then
+    sed -i.bak '/^HERMES_GATEWAY_URL=/d' "$GEN_HERMES" && rm -f "$GEN_HERMES.bak"
+    log "gateway: gate CLOSED — removed drop-in + stale HERMES_GATEWAY_URL"
+  else
+    log "gateway: gate CLOSED — loopback-only (default; no drop-in)"
+  fi
+fi
+log "services/hermes/build.sh DONE for '$VM' (start.sh enables units + applies drop-in via daemon-reload)"

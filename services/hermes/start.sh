@@ -35,6 +35,24 @@ if not rep: out.insert(0, nb.rstrip())
 open(p,"w").write("\n".join(out)+"\n")
 PY'
 fi
-orb -m "$VM" bash -lc 'sudo systemctl daemon-reload && sudo systemctl enable --now hermes-dashboard hermes-gateway hermes-logtail && sudo systemctl restart hermes-gateway hermes-logtail'
+orb -m "$VM" bash -lc '
+  set -e
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now hermes-dashboard hermes-gateway hermes-logtail
+  # logtail is not task-bearing; a plain restart is fine and picks up any
+  # tail-script changes installed by build.sh.
+  sudo systemctl restart hermes-logtail
+  # Drain-aware gateway restart: hermes-cli internally sends SIGUSR1, waits
+  # for in-flight agent runs to finish (bounded by agent.restart_drain_timeout),
+  # then exits with code 75 — systemd auto-relaunches via RestartForceExitStatus=75
+  # with the freshly daemon-reloaded unit. Falls back to a harder restart
+  # path internally if drain times out. See hermes_cli/gateway.py systemd_restart.
+  #
+  # We invoke via absolute path because sudo strips PATH, and the hermes CLI
+  # lives in the unix user'"'"'s ~/.local/bin (not on root'"'"'s secure_path).
+  # $HOME is expanded by the outer (non-sudo) bash to the REMOTE_USER'"'"'s
+  # home, so sudo receives a literal absolute path.
+  sudo "$HOME/.local/bin/hermes" gateway restart --system
+'
 echo -n "services: "; orb -m "$VM" bash -lc 'systemctl is-active hermes-dashboard hermes-gateway hermes-logtail | tr "\n" " "; echo'
 echo -n "honcho reachable: "; orb -m "$VM" bash -lc "curl -sS -m6 http://honcho-api.$PROJ.orb.local:8000/health || true"; echo

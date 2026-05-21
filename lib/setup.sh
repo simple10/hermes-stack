@@ -161,6 +161,18 @@ if _enabled hermes; then
   ask_plain TELEGRAM_BOT_TOKEN     "Telegram bot token"          ""
   ask_plain TELEGRAM_ALLOWED_USERS "Telegram allowed user IDs"   ""
   ask_plain TELEGRAM_HOME_CHANNEL  "Telegram home channel"       ""
+  # Gateway access key — minted ONLY when the user opened the gate. Closed
+  # gate means the gateway binds VM-loopback and the key is unused; keeping
+  # it empty in that mode avoids surfacing a phantom secret.
+  if [ "$(env_get "$ENVF" HERMES_GATEWAY_ALLOW_ACCESS)" = "true" ]; then
+    log "hermes gateway access key (gate=open)"
+    gen_if_missing HERMES_GATEWAY_API_KEY "" 32
+  fi
+fi
+
+if _enabled hermes-workspace; then
+  log "hermes-workspace session password"
+  gen_if_missing HERMES_WORKSPACE_PASSWORD "" 32
 fi
 
 chmod 600 "$ENVF"

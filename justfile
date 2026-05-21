@@ -64,12 +64,18 @@ build:
      echo "== Phase 1 done — image refs in .stack/<svc>/.generated.env =="; \
      bash "{{root}}/services/pg/build.sh"; \
      for p in $(stack_profiles | tr ',' ' '); do \
-       [ "$p" = "pg" ] && continue; \
-       [ -x "{{root}}/services/$p/build.sh" ] && bash "{{root}}/services/$p/build.sh" || true; \
+       if [ "$p" = "pg" ]; then continue; fi; \
+       if [ -x "{{root}}/services/$p/build.sh" ]; then \
+         bash "{{root}}/services/$p/build.sh" \
+           || { echo "FATAL: services/$p/build.sh failed (exit $?)" >&2; exit 1; }; \
+       fi; \
      done; \
      for mch in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
-       [ -n "$mch" ] && [ -x "{{root}}/services/$mch/build.sh" ] && \
-         bash "{{root}}/services/$mch/build.sh" "$mch" || true; \
+       if [ -z "$mch" ]; then continue; fi; \
+       if [ -x "{{root}}/services/$mch/build.sh" ]; then \
+         bash "{{root}}/services/$mch/build.sh" "$mch" \
+           || { echo "FATAL: services/$mch/build.sh failed (exit $?)" >&2; exit 1; }; \
+       fi; \
      done; \
      echo "build complete"
 

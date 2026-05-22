@@ -20,6 +20,8 @@ HERMES_TELEGRAM_ALLOWED_USERS=
 HERMES_TELEGRAM_HOME_CHANNEL=
 HERMES_GATEWAY_ALLOW_ACCESS=false  # bind gateway 0.0.0.0:8642 for docker consumers
 HERMES_GATEWAY_API_KEY=             # minted by setup when ALLOW_ACCESS=true
+HERMES_MOUNT_ENABLED=true          # bind-mount ~/.hermes/ from Mac path below
+HERMES_MOUNT_DIR=.stack/hermes/.hermes  # Mac-side source for the mount
 ```
 
 All keys carry the `HERMES_` prefix to avoid collisions with other
@@ -37,6 +39,29 @@ time. For existing VMs created before this lever (with the orb default
 user), set `HERMES_REMOTE_USER=<that-username>` in `.stack/.env` to keep
 the VM working without recreating. (`just setup` auto-migrates the
 legacy un-prefixed `REMOTE_USER` / `TELEGRAM_*` keys on first run.)
+
+`HERMES_MOUNT_ENABLED` + `HERMES_MOUNT_DIR` together drive a virtio-fs
+bind-mount from `<repo-root>/.stack/hermes/.hermes/` (Mac) into
+`/home/$HERMES_REMOTE_USER/.hermes/` (VM). When enabled (default):
+
+- `build.sh` writes config edits Mac-side directly (no `orb -m` dance);
+  the running gateway/dashboard see them immediately via the mount.
+- A `tar` of `.stack/` captures the full Hermes state for backup.
+- The hermes-workspace container can bind the same Mac path at
+  `/home/workspace/.hermes/`, so its Settings UI edits the agent's
+  actual `config.yaml` (no docker-volume divergence).
+
+The heavy hermes-agent venv + source live at `/opt/hermes-agent/`
+(VM-native, NOT on the share) via the installer's `HERMES_INSTALL_DIR`
+env var — so the mount carries only user config + runtime state
+(~250 MB), not the 1.4 GB Python venv.
+
+When disabled, `build.sh` skips every step that would edit `~/.hermes/*`
+and prints the equivalent `orb -m bash -lc` command for manual apply.
+Other build steps (orb create, apt installs, systemd unit install, the
+gateway-access drop-in) still run normally. Config changes through
+`just build` are mount-enabled-only by design — keeps the dispatch
+logic simple.
 
 `HERMES_MEMORY` options (each requires the backing service enabled):
 

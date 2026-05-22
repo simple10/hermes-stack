@@ -38,6 +38,89 @@ D="$(dirname "${BASH_SOURCE[0]}")"
 REMOTE_USER="${HERMES_REMOTE_USER:-hermes}"
 m() { orb -m "$VM" bash -lc "$1"; }
 
+# --- mount-aware ~/.hermes writers ----------------------------------------
+# When HERMES_MOUNT_ENABLED=true, the VM's /home/$REMOTE_USER/.hermes is a
+# bind-mount of the Mac path $MAC_HERMES (= $HERMES_MOUNT_DIR resolved
+# absolute). So writes to ~/.hermes/ on the VM should happen Mac-side
+# directly — faster, no orb-exec, and `just build`'s edits are immediately
+# visible to the live VM via the mount. When disabled, we warn-and-skip
+# (config edits through `just build` are mount-enabled-only per design).
+
+HERMES_MOUNT_ENABLED="$(env_get "$ENVF" HERMES_MOUNT_ENABLED)"
+HERMES_MOUNT_ENABLED="${HERMES_MOUNT_ENABLED:-true}"
+HERMES_MOUNT_DIR="$(env_get "$ENVF" HERMES_MOUNT_DIR)"
+HERMES_MOUNT_DIR="${HERMES_MOUNT_DIR:-.stack/hermes/.hermes}"
+case "$HERMES_MOUNT_DIR" in
+  /*) MAC_HERMES="$HERMES_MOUNT_DIR" ;;
+  *)  MAC_HERMES="$STACK_ROOT/$HERMES_MOUNT_DIR" ;;
+esac
+VM_HERMES="/home/$REMOTE_USER/.hermes"
+ORB_MOUNT_SPEC="$MAC_HERMES:$VM_HERMES"
+
+# hermes_write RELPATH [CONTENT]  — write a file under ~/.hermes.
+#   mount enabled: write to $MAC_HERMES/RELPATH (Mac-side).
+#   mount disabled: warn + skip + print the manual `orb -m` equivalent.
+hermes_write() {
+  local rel="$1"
+  if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+    mkdir -p "$(dirname "$MAC_HERMES/$rel")"
+    if [ $# -ge 2 ]; then
+      printf '%s' "$2" > "$MAC_HERMES/$rel"
+    else
+      cat > "$MAC_HERMES/$rel"
+    fi
+  else
+    warn "skip ~/.hermes/$rel (HERMES_MOUNT_ENABLED=false)"
+    printf '       apply manually: orb -m %s bash -lc %q\n' "$VM" \
+      "umask 077 && mkdir -p ~/.hermes/$(dirname "$rel" 2>/dev/null || echo .) && cat > ~/.hermes/$rel" >&2
+    [ $# -ge 2 ] || cat >/dev/null   # drain stdin so producers don't block
+  fi
+}
+
+# hermes_append RELPATH  — append stdin to ~/.hermes/RELPATH.
+hermes_append() {
+  local rel="$1"
+  if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+    mkdir -p "$(dirname "$MAC_HERMES/$rel")"
+    cat >> "$MAC_HERMES/$rel"
+  else
+    warn "skip append to ~/.hermes/$rel (HERMES_MOUNT_ENABLED=false)"
+    printf '       apply manually: orb -m %s bash -lc %q\n' "$VM" \
+      "umask 077 && cat >> ~/.hermes/$rel" >&2
+    cat >/dev/null
+  fi
+}
+
+log "0. resolve hermes mount config
+   HERMES_MOUNT_ENABLED=$HERMES_MOUNT_ENABLED
+   HERMES_MOUNT_DIR=$HERMES_MOUNT_DIR
+   resolves to: $ORB_MOUNT_SPEC"
+
+if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+  # Refuse-to-shadow guard: if Mac dir is empty but VM has live ~/.hermes
+  # data, mounting would shadow it and break the gateway. Tell the user to
+  # snapshot first (procedure in docs/plans/implemented/2026-05-21-hermes-mount.md).
+  vm_has_data=0
+  if orb list 2>/dev/null | awk '{print $1}' | grep -qx "$VM"; then
+    orb -m "$VM" bash -lc 'test -s ~/.hermes/config.yaml' 2>/dev/null && vm_has_data=1
+  fi
+  mac_has_config=0
+  [ -s "$MAC_HERMES/config.yaml" ] && mac_has_config=1
+  if [ "$vm_has_data" = "1" ] && [ "$mac_has_config" = "0" ]; then
+    die "HERMES_MOUNT_ENABLED=true but $HERMES_MOUNT_DIR is empty (no config.yaml)
+       AND the VM has an existing ~/.hermes/. Refusing to add the mount — it
+       would shadow live VM data.
+
+       Migrate first:
+         1. just stop                                       # quiesce the VM
+         2. mkdir -p $HERMES_MOUNT_DIR
+         3. cp -a ~/OrbStack/$VM/$VM_HERMES/. $HERMES_MOUNT_DIR/
+         4. rm -rf $HERMES_MOUNT_DIR/hermes-agent           # regenerable
+         5. just build && just restart"
+  fi
+  mkdir -p "$MAC_HERMES"
+fi
+
 log "1. orb create ubuntu $VM (--user $REMOTE_USER --isolated --isolate-network; reuse if exists)"
 # Isolation: --isolated disables file sharing/Mac integration (no $HOME, no
 # Cmd-clipboard) AND --isolate-network blocks the VM from Mac IPs + sibling
@@ -62,8 +145,23 @@ if orb list 2>/dev/null | awk '{print $1}' | grep -qx "$VM"; then
     1) warn "machine $VM: isolation flags were FALSE — flipped to true. Run 'just restart' to apply." ;;
     2) die  "machine $VM: 'orb config set' failed (is OrbStack running?)" ;;
   esac
+  # Ensure the bind mount is on this existing VM. orb config add is
+  # idempotent (no-op if entry already present); a configured-but-not-yet-
+  # applied mount is the same fail-fast pattern as the isolation flags.
+  if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+    orb config add "machine.$VM.mounts" "$ORB_MOUNT_SPEC" 2>/dev/null || true
+    is_mounted="$(orb -m "$VM" mount 2>/dev/null | grep -c " on $VM_HERMES type" || true)"
+    if [ "$is_mounted" = "0" ]; then
+      die "mount '$ORB_MOUNT_SPEC' configured but not yet applied — run 'just restart' to cycle the VM"
+    fi
+  fi
 else
-  orb create --user "$REMOTE_USER" --isolated --isolate-network ubuntu "$VM"
+  if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+    orb create --user "$REMOTE_USER" --isolated --isolate-network \
+               --mount "$ORB_MOUNT_SPEC" ubuntu "$VM"
+  else
+    orb create --user "$REMOTE_USER" --isolated --isolate-network ubuntu "$VM"
+  fi
 fi
 
 log "2. apt xz-utils (REQUIRED — Hermes installer extracts Node .tar.xz)"
@@ -78,7 +176,15 @@ log "2b. VM hardening — remove unwanted snaps. OrbStack's ubuntu base ships
 m 'snap list cups >/dev/null 2>&1 && { echo "removing cups snap"; sudo snap remove cups; } || echo "cups snap not installed — skipping"'
 
 log "3. install Hermes + seed ~/.hermes/.env"
-m 'command -v hermes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
+# Install to /opt/hermes-agent (NOT ~/.hermes/hermes-agent) so the 1.4 GB
+# venv + source + node_modules stay VM-native and don't traverse the mount.
+# The installer's HERMES_INSTALL_DIR env var is the official override; it
+# also creates a tiny wrapper at ~/.local/bin/hermes that exec's
+# $INSTALL_DIR/venv/bin/hermes, so /usr/local/bin/hermes → ~/.local/bin/hermes
+# (installed below) still resolves cleanly for `sudo hermes …`.
+m 'command -v hermes >/dev/null 2>&1 \
+   || curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh \
+      | HERMES_INSTALL_DIR=/opt/hermes-agent bash'
 # Symlink hermes into /usr/local/bin so `sudo hermes ...` works without the
 # absolute /home/$USER/.local/bin/hermes path. /usr/local/bin is in root's
 # secure_path; the installer keeps the user-local binary path stable.
@@ -86,7 +192,8 @@ m 'command -v hermes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent
 m "sudo ln -sf /home/$REMOTE_USER/.local/bin/hermes /usr/local/bin/hermes"
 # Map stack-side HERMES_TELEGRAM_* → upstream's un-prefixed TELEGRAM_* names
 # inside the VM (~/.hermes/.env is consumed by hermes-agent, which reads
-# the upstream names).
+# the upstream names). Mount-aware: hermes_write writes Mac-side under the
+# mount when enabled, warn-skips when disabled.
 ENV_PAYLOAD="$(cat <<EOF
 OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
 TELEGRAM_BOT_TOKEN=${HERMES_TELEGRAM_BOT_TOKEN:-}
@@ -94,8 +201,11 @@ TELEGRAM_ALLOWED_USERS=${HERMES_TELEGRAM_ALLOWED_USERS:-}
 TELEGRAM_HOME_CHANNEL=${HERMES_TELEGRAM_HOME_CHANNEL:-}
 EOF
 )"
-printf '%s' "$ENV_PAYLOAD" | orb -m "$VM" bash -lc \
-  'mkdir -p ~/.hermes && umask 077 && cat > ~/.hermes/.env && chmod 600 ~/.hermes/.env && echo "~/.hermes/.env seeded"'
+printf '%s' "$ENV_PAYLOAD" | hermes_write .env
+if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+  chmod 600 "$MAC_HERMES/.env"
+  log "~/.hermes/.env seeded (Mac-side via mount)"
+fi
 
 MEM="${HERMES_MEMORY:-honcho}"
 log "4. configure Hermes memory provider: $MEM"
@@ -111,13 +221,13 @@ case "$MEM" in
     ;;
   honcho)
     sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/honcho.json.tmpl" \
-      | orb -m "$VM" bash -lc 'mkdir -p ~/.hermes && cat > ~/.hermes/honcho.json'
+      | hermes_write honcho.json
     m 'hermes config set memory.provider honcho'
     log "memory: honcho -> honcho-api.$PROJ.orb.local:8000"
     ;;
   hindsight)
     sed "s/__STACK_PROJECT__/$PROJ/g" "$D/config/hindsight.config.json.tmpl" \
-      | orb -m "$VM" bash -lc 'mkdir -p ~/.hermes/hindsight && cat > ~/.hermes/hindsight/config.json'
+      | hermes_write hindsight/config.json
     m 'hermes config set memory.provider hindsight'
     log "memory: hindsight (local_external) -> hindsight.$PROJ.orb.local:8888 (plugin auto-installs hindsight-client on first session)"
     ;;
@@ -133,12 +243,30 @@ case "$MEM" in
     # idempotent across builds). npx/node must be on the VM PATH.
     printf 'AGENTMEMORY_URL=http://agentmemory.%s.orb.local:3111\nAGENTMEMORY_SECRET=%s\n' \
       "$PROJ" "${AGENTMEMORY_SECRET:-}" \
-      | orb -m "$VM" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+      | hermes_append .env
     m 'hermes config set memory.provider agentmemory'
-    orb -m "$VM" bash -lc '
-      set -e; cfg=~/.hermes/config.yaml
-      py=~/.hermes/hermes-agent/venv/bin/python; [ -x "$py" ] || py=python3
-      "$py" - "$cfg" <<PY
+    if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+      # Mount-side: run python locally on Mac against the shared config.yaml.
+      python3 - "$MAC_HERMES/config.yaml" <<'PY'
+import sys,os
+try:
+    import yaml
+except Exception:
+    raise SystemExit("pyyaml unavailable; pip install pyyaml on the Mac, or set HERMES_MOUNT_ENABLED=false to fall back to in-VM editing")
+p=sys.argv[1]
+d=(yaml.safe_load(open(p)) if os.path.exists(p) else {}) or {}
+ms=d.get("mcp_servers") or {}
+ms["agentmemory"]={"command":"npx","args":["-y","@agentmemory/mcp"]}
+d["mcp_servers"]=ms
+mem=d.get("memory") or {}; mem["provider"]="agentmemory"; d["memory"]=mem
+yaml.safe_dump(d,open(p,"w"),sort_keys=False,default_flow_style=False)
+print("config.yaml: mcp_servers.agentmemory + memory.provider merged (Mac-side)")
+PY
+    else
+      orb -m "$VM" bash -lc '
+        set -e; cfg=~/.hermes/config.yaml
+        py=/opt/hermes-agent/venv/bin/python; [ -x "$py" ] || py=python3
+        "$py" - "$cfg" <<PY
 import sys,os
 try:
     import yaml
@@ -151,8 +279,9 @@ ms["agentmemory"]={"command":"npx","args":["-y","@agentmemory/mcp"]}
 d["mcp_servers"]=ms
 mem=d.get("memory") or {}; mem["provider"]="agentmemory"; d["memory"]=mem
 yaml.safe_dump(d,open(p,"w"),sort_keys=False,default_flow_style=False)
-print("config.yaml: mcp_servers.agentmemory + memory.provider merged")
+print("config.yaml: mcp_servers.agentmemory + memory.provider merged (in-VM)")
 PY'
+    fi
     log "memory: agentmemory (MCP shim -> agentmemory.$PROJ.orb.local:3111). Deeper 6-hook provider is manual: copy integrations/hermes -> ~/.hermes/plugins/agentmemory."
     ;;
   *)
@@ -169,7 +298,7 @@ esac
 if echo "${COMPOSE_PROFILES:-}" | grep -qw firecrawl; then
   printf 'FIRECRAWL_API_URL=http://firecrawl-api.%s.orb.local:3002\nFIRECRAWL_API_KEY=%s\n' \
     "$PROJ" "fc-selfhost-noauth" \
-    | orb -m "$VM" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+    | hermes_append .env
   log "firecrawl: FIRECRAWL_API_URL=http://firecrawl-api.$PROJ.orb.local:3002 + placeholder key -> ~/.hermes/.env"
 else
   warn "firecrawl not in COMPOSE_PROFILES — skipping Hermes firecrawl env (add 'firecrawl' to COMPOSE_PROFILES to e2e-test it)"
@@ -184,7 +313,7 @@ fi
 # CAMOFOX_AUTH=disabled in .stack/.env. Only wired when the profile is active.
 if echo "${COMPOSE_PROFILES:-}" | grep -qw camofox-browser; then
   printf 'CAMOFOX_URL=http://camofox-browser.%s.orb.local:9377\n' "$PROJ" \
-    | orb -m "$VM" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+    | hermes_append .env
   log "camofox: CAMOFOX_URL=http://camofox-browser.$PROJ.orb.local:9377 -> ~/.hermes/.env"
 else
   warn "camofox-browser not in COMPOSE_PROFILES — skipping Hermes camofox env"
@@ -199,24 +328,27 @@ fi
 # manually setting web.search_backend in ~/.hermes/config.yaml after build.
 if echo "${COMPOSE_PROFILES:-}" | grep -qw searxng; then
   printf 'SEARXNG_URL=http://searxng.%s.orb.local:8080\n' "$PROJ" \
-    | orb -m "$VM" bash -lc 'umask 077; cat >> ~/.hermes/.env'
+    | hermes_append .env
   m 'hermes config set web.search_backend searxng'
   log "searxng: SEARXNG_URL=http://searxng.$PROJ.orb.local:8080 -> ~/.hermes/.env (web.search_backend=searxng)"
 else
   warn "searxng not in COMPOSE_PROFILES — skipping Hermes searxng env"
 fi
 
-log "5. patch ~/.hermes/config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
+log "5. patch config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
 HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env
 MODEL_BLOCK="$(sed -e "s|\${HERMES_VIRTUAL_KEY}|$HERMES_VIRTUAL_KEY|" -e "s/__STACK_PROJECT__/$PROJ/g" -e "s|__HERMES_MODEL__|$HM|g" "$D/config/config.yaml.model.tmpl" | grep -v '^#')"
-printf '%s\n' "$MODEL_BLOCK" | orb -m "$VM" bash -lc '
-  set -e; umask 077; cfg=~/.hermes/config.yaml
-  [ -f "$cfg" ] || hermes config init >/dev/null 2>&1 || touch "$cfg"
+
+if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
+  # Mount-side: rewrite the Mac config.yaml directly with local python3.
+  # hermes config init not needed — we know we have config.yaml from the
+  # installer's first-run (or from snapshot during migration).
+  cfg="$MAC_HERMES/config.yaml"
+  [ -f "$cfg" ] || touch "$cfg"
   cp "$cfg" "$cfg.bak.prebuild" 2>/dev/null || true
-  nb="$(cat)"
-  python3 - "$cfg" <<PY
+  printf '%s\n' "$MODEL_BLOCK" | python3 - "$cfg" <<'PY'
 import sys,os
-p=sys.argv[1]; nb="""$nb"""
+p=sys.argv[1]; nb=sys.stdin.read()
 lines=open(p).read().splitlines() if os.path.exists(p) else []
 out=[]; i=0; n=len(lines); rep=False
 while i<n:
@@ -227,8 +359,13 @@ while i<n:
         out.append(nb.rstrip()); rep=True; continue
     out.append(ln); i+=1
 if not rep: out.insert(0, nb.rstrip())
-open(p,"w").write("\n".join(out)+"\n"); print("model: block patched")
-PY'
+open(p,"w").write("\n".join(out)+"\n"); print("model: block patched (Mac-side)")
+PY
+else
+  warn "skip config.yaml model: block patch (HERMES_MOUNT_ENABLED=false)"
+  printf '       apply manually: orb -m %s bash -lc %q\n' "$VM" \
+    "hermes config edit  # then paste model: block from $D/config/config.yaml.model.tmpl" >&2
+fi
 
 log "6. install units + logtail (NO native honcho/pg). Templates use
    __REMOTE_USER__ which gets sed-substituted to '$REMOTE_USER' here so

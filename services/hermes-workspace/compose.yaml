@@ -56,7 +56,14 @@ services:
       # directly (no harm if unused).
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
     volumes:
-      - hermes-workspace-config:/home/workspace/.hermes
+      # Bind the same Mac path that the hermes VM also mounts at ~/.hermes/.
+      # This puts workspace's Settings UI on the SAME config the agent reads —
+      # edits in the UI propagate to the agent without an orb-exec dance.
+      # Path is relative to THIS compose file's dir (services/hermes-workspace/),
+      # so ../../.stack/hermes/.hermes resolves to <repo-root>/.stack/hermes/.hermes
+      # (matches HERMES_MOUNT_DIR's default). Once the mount-spec implementation
+      # lands, this will be driven by ${HERMES_MOUNT_DIR} from .stack/.env.
+      - ../../.stack/hermes/.hermes:/home/workspace/.hermes
       - hermes-workspace-files:/workspace
     healthcheck:
       # TCP-probe :3000 (the upstream image has no guaranteed HTTP health
@@ -71,5 +78,4 @@ services:
       options: { max-size: "10m", max-file: "3" }
 
 volumes:
-  hermes-workspace-config:
   hermes-workspace-files:

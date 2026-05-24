@@ -41,7 +41,7 @@ import { externalRefs, tasks, projects, agents, connectors, taskComments } from 
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
-import { emitEvent } from '../events/emit.ts';
+import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
 
@@ -235,12 +235,10 @@ externalRefsRouter.post(
         throw new HttpError(500, 'internal', 'External ref row disappeared after insert');
       }
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: resource_type,
         resourceId: resource_id,
         kind: 'external_ref.added',
-        actor: ctx.principal,
         payload: { ref: serializeTimestamps(row) },
       });
 
@@ -394,12 +392,10 @@ externalRefsRouter.delete(
         })
         .where(and(eq(externalRefs.id, id), eq(externalRefs.orgId, ctx.orgId)));
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
-        resourceType: existing.resourceType as 'task' | 'project' | 'agent' | 'connector' | 'comment',
+      await db.events(ctx).emit({
+        resourceType: existing.resourceType,
         resourceId: existing.resourceId,
         kind: 'external_ref.removed',
-        actor: ctx.principal,
         payload: { ref_id: id },
       });
 

@@ -37,7 +37,7 @@ import { agents, tasks } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
-import { emitEvent } from '../events/emit.ts';
+import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
 
@@ -149,12 +149,10 @@ agentsRouter.post('/', requireMember('owner', 'admin', 'member'), async (c) => {
     }
 
     // Step 4: Emit event.
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'agent',
       resourceId: agentId,
       kind: 'agent.created',
-      actor: ctx.principal,
     });
 
     return c.json({ agent: serializeTimestamps(row), key: rawKey }, 201);
@@ -314,12 +312,10 @@ agentsRouter.patch('/:id', requireMember('owner', 'admin', 'member'), async (c) 
       .limit(1);
     const updated = updatedRows[0];
 
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'agent',
       resourceId: id,
       kind: 'agent.updated',
-      actor: ctx.principal,
     });
 
     return c.json({ agent: serializeTimestamps(updated!) });
@@ -382,12 +378,10 @@ agentsRouter.delete('/:id', requireMember('owner', 'admin'), async (c) => {
       })
       .where(and(eq(agents.id, id), eq(agents.orgId, ctx.orgId)));
 
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'agent',
       resourceId: id,
       kind: 'agent.deleted',
-      actor: ctx.principal,
     });
 
     return c.json({}, 200);
@@ -459,12 +453,10 @@ agentsRouter.post('/:id/rotate-key', requireMember('owner', 'admin'), async (c) 
     }
 
     // Step 3: Emit event (no raw key in payload).
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'agent',
       resourceId: id,
       kind: 'agent.key_rotated',
-      actor: ctx.principal,
       payload: { rotated_at: new Date().toISOString() },
     });
 

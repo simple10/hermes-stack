@@ -25,7 +25,7 @@ import { projects } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
-import { emitEvent } from '../events/emit.ts';
+import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
 
@@ -114,12 +114,10 @@ projectsRouter.post(
         throw new HttpError(500, 'internal', 'Project row disappeared after insert');
       }
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: 'project',
         resourceId: projectId,
         kind: 'project.created',
-        actor: ctx.principal,
       });
 
       return c.json({ project: serializeTimestamps(row) }, 201);
@@ -309,12 +307,10 @@ projectsRouter.patch(
         .limit(1);
       const updated = patchUpdatedRows[0];
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: 'project',
         resourceId: id,
         kind: 'project.updated',
-        actor: ctx.principal,
       });
 
       return c.json({ project: serializeTimestamps(updated!) });
@@ -357,12 +353,10 @@ projectsRouter.delete(
         })
         .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)));
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: 'project',
         resourceId: id,
         kind: 'project.deleted',
-        actor: ctx.principal,
       });
 
       return c.json({}, 200);

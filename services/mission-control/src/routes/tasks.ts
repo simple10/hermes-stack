@@ -42,7 +42,7 @@ import { tasks, taskComments, events, agents, projects } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
-import { emitEvent } from '../events/emit.ts';
+import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import { validateTransition, TERMINAL } from '../state-machine/tasks.ts';
 import {
@@ -252,22 +252,18 @@ tasksRouter.post(
       // ---------------------------------------------------------------------------
       // Emit events.
       // ---------------------------------------------------------------------------
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: 'task',
         resourceId: taskId,
         kind: 'task.created',
-        actor: ctx.principal,
         payload: { task: serializeTimestamps(row) },
       });
 
       if (agent_id) {
-        await emitEvent(ctx.pool, {
-          orgId: ctx.orgId,
+        await db.events(ctx).emit({
           resourceType: 'task',
           resourceId: taskId,
           kind: 'task.assigned',
-          actor: ctx.principal,
           payload: { from: null, to: agent_id },
         });
       }
@@ -663,23 +659,19 @@ tasksRouter.patch(
               ? (existingMeta['failure_reason'] as string | undefined)
               : undefined;
 
-        await emitEvent(ctx.pool, {
-          orgId: ctx.orgId,
+        await db.events(ctx).emit({
           resourceType: 'task',
           resourceId: id,
           kind: 'task.status_changed',
-          actor: ctx.principal,
           payload: { from: statusFrom, to: statusTo, ...(reason ? { reason } : {}) },
         });
       }
 
       if (agentIdChanged) {
-        await emitEvent(ctx.pool, {
-          orgId: ctx.orgId,
+        await db.events(ctx).emit({
           resourceType: 'task',
           resourceId: id,
           kind: 'task.assigned',
-          actor: ctx.principal,
           payload: { from: oldAgentId, to: newAgentId },
         });
       }
@@ -689,12 +681,10 @@ tasksRouter.patch(
         Object.entries(changedFields).filter(([k]) => k !== 'agent_id'),
       );
       if (Object.keys(nonStatusNonAgentChanges).length > 0) {
-        await emitEvent(ctx.pool, {
-          orgId: ctx.orgId,
+        await db.events(ctx).emit({
           resourceType: 'task',
           resourceId: id,
           kind: 'task.updated',
-          actor: ctx.principal,
           payload: { changed: nonStatusNonAgentChanges },
         });
       }
@@ -739,12 +729,10 @@ tasksRouter.delete(
         })
         .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)));
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: 'task',
         resourceId: id,
         kind: 'task.deleted',
-        actor: ctx.principal,
         payload: {},
       });
 

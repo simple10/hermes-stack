@@ -22,7 +22,7 @@ import { tasks, taskComments } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { active, serializeTimestamps } from '../db/helpers.ts';
-import { emitEvent } from '../events/emit.ts';
+import { db } from '../db/repos/index.ts';
 import { clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
 
@@ -181,12 +181,10 @@ commentsRouter.post(
         throw new HttpError(500, 'internal', 'Comment row disappeared after insert');
       }
 
-      await emitEvent(ctx.pool, {
-        orgId: ctx.orgId,
+      await db.events(ctx).emit({
         resourceType: 'comment',
         resourceId: commentId,
         kind: 'comment.created',
-        actor: ctx.principal,
         payload: { comment: serializeTimestamps(row) },
       });
 

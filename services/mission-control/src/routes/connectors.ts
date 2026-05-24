@@ -26,7 +26,7 @@ import { connectors, externalRefs } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
-import { emitEvent } from '../events/emit.ts';
+import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
 
@@ -138,12 +138,10 @@ connectorsRouter.post('/', requireMember('owner', 'admin'), async (c) => {
     }
 
     // Step 4: Emit event.
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'connector',
       resourceId: connectorId,
       kind: 'connector.created',
-      actor: ctx.principal,
     });
 
     return c.json({ connector: serializeTimestamps(row), key: rawKey }, 201);
@@ -302,12 +300,10 @@ connectorsRouter.patch('/:id', requireMember('owner', 'admin'), async (c) => {
       .limit(1);
     const updated = updatedRows[0];
 
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'connector',
       resourceId: id,
       kind: 'connector.updated',
-      actor: ctx.principal,
     });
 
     return c.json({ connector: serializeTimestamps(updated!) });
@@ -368,12 +364,10 @@ connectorsRouter.delete('/:id', requireMember('owner', 'admin'), async (c) => {
       })
       .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId)));
 
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'connector',
       resourceId: id,
       kind: 'connector.deleted',
-      actor: ctx.principal,
     });
 
     return c.json({}, 200);
@@ -443,12 +437,10 @@ connectorsRouter.post('/:id/rotate-key', requireMember('owner', 'admin'), async 
     }
 
     // Step 3: Emit event (no raw key in payload).
-    await emitEvent(ctx.pool, {
-      orgId: ctx.orgId,
+    await db.events(ctx).emit({
       resourceType: 'connector',
       resourceId: id,
       kind: 'connector.key_rotated',
-      actor: ctx.principal,
       payload: { rotated_at: new Date().toISOString() },
     });
 

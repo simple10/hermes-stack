@@ -64,6 +64,13 @@ def _register_plugin_as_package() -> None:
     # Pre-register submodules whose names collide with _source/ top-level packages.
     _load_plugin_submodule("mission_control", "tools")
     _load_plugin_submodule("mission_control", "cli")
+    # pytest's Package.setup() imports mission-control/__init__.py via
+    # importlib.import_module("__init__") (the hyphenated dir name is not a
+    # valid Python identifier, so resolve_pkg_root_and_module_name falls back
+    # to module_name="__init__").  Pre-register under that key so pytest finds
+    # the already-loaded module instead of trying to exec it again without a
+    # parent package context (which breaks relative imports).
+    sys.modules.setdefault("__init__", mod)
 
 
 _register_plugin_as_package()

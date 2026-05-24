@@ -96,6 +96,17 @@ start:
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
      stack_render_compose; \
+     mount_enabled="${HERMES_MOUNT_ENABLED:-true}"; \
+     mount_dir="${HERMES_MOUNT_DIR:-.stack/hermes/.hermes}"; \
+     case "$mount_dir" in /*) mac_hermes="$mount_dir" ;; *) mac_hermes="{{root}}/$mount_dir" ;; esac; \
+     host_cdp_enabled="${HOST_CHROME_CDP_ENABLED:-false}"; \
+     if [ "$host_cdp_enabled" = "false" ] && [ "$mount_enabled" = "true" ] \
+        && [ -f "$mac_hermes/.env" ] && grep -q '^BROWSER_CDP_URL=' "$mac_hermes/.env"; then \
+       echo "== chrome-cdp: HOST_CHROME_CDP_ENABLED=false — stripping stale BROWSER_CDP_URL =="; \
+       sed -i.bak '/^BROWSER_CDP_URL=/d' "$mac_hermes/.env" && rm -f "$mac_hermes/.env.bak"; \
+     elif [ "$host_cdp_enabled" = "false" ] && [ "$mount_enabled" != "true" ]; then \
+       warn "HOST_CHROME_CDP_ENABLED=false but HERMES_MOUNT_ENABLED=false — can't auto-strip stale BROWSER_CDP_URL; if hermes hangs at start, remove BROWSER_CDP_URL from ~/.hermes/.env manually"; \
+     fi; \
      set +e; \
      for svc in $(echo "${STACK_MACHINES:-}" | tr ', ' ' '); do \
        [ -n "$svc" ] || continue; \
@@ -127,6 +138,10 @@ start:
        [ -n "$mch" ] && [ -x "{{root}}/services/$mch/start.sh" ] && \
          bash "{{root}}/services/$mch/start.sh" "$mch"; \
      done; \
+     if [ "$host_cdp_enabled" = "true" ]; then \
+       echo "== chrome-cdp: HOST_CHROME_CDP_ENABLED=true — auto-provisioning =="; \
+       just _chrome-cdp-up; \
+     fi; \
      if [ "${STACK_AUTO_REMOVE_PROVISIONERS:-false}" = "true" ]; then just start-cleanup; fi; \
      echo "start complete"
 
@@ -160,14 +175,46 @@ start-cleanup:
 # Multi-stack: each stack's .stack/.env picks its own ports → independent CDPs;
 # or set the same ports across stacks to share one CDP.
 # Profile data lives at .stack/chrome-cdp/data (gitignored, per-stack).
-# localhost-proxy is a TRANSIENT sidecar (lives only while chrome-cdp is
-# active), never in COMPOSE_PROFILES. Since stack_render_compose only
-# include:s services that ARE in COMPOSE_PROFILES, we surface localhost-proxy
-# to compose with an explicit second -f file each time we touch it (chrome-cdp
-# + chrome-cdp-stop). Docker compose merges multiple -f files; the
-# `--profile localhost-proxy` flag activates the now-visible service.
-# Launch Mac-host Chrome + bring up localhost-proxy + offer to wire Hermes.
-chrome-cdp:
+#
+# Persistence model (2026-05-21 redesign):
+#   HOST_CHROME_CDP_ENABLED=true|false in .stack/.env is the source of truth.
+#   - chrome-cdp-enable  : flip lever true  + provision (Chrome + proxy + URL)
+#   - chrome-cdp-disable : flip lever false + teardown  (kill Chrome, clear URL)
+#   - just start         : auto-provisions when lever is true; ALWAYS strips
+#                          stale BROWSER_CDP_URL when lever is false (fixes
+#                          the "hermes CLI hangs 1+min on dead CDP URL" bug)
+#   - just stop          : tears down Chrome + proxy regardless of lever
+#                          (lever stays set; next start re-provisions)
+# localhost-proxy is a TRANSIENT sidecar, never in COMPOSE_PROFILES. Since
+# stack_render_compose only include:s services that ARE in COMPOSE_PROFILES,
+# we surface it to compose with an explicit second -f file each time we
+# touch it. Docker compose merges multiple -f files; --profile localhost-proxy
+# activates the now-visible service.
+# Flip HOST_CHROME_CDP_ENABLED=true + provision Chrome+proxy+URL wiring.
+chrome-cdp-enable:
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     env_upsert "$STACK_DIR/.env" HOST_CHROME_CDP_ENABLED true; \
+     log "HOST_CHROME_CDP_ENABLED=true (persisted in .stack/.env)"; \
+     just _chrome-cdp-up
+
+# Flip HOST_CHROME_CDP_ENABLED=false + tear down Chrome+proxy+stale URL.
+chrome-cdp-disable:
+    @set -a; source "{{lib}}"; set +a; \
+     require_stack_env; \
+     env_upsert "$STACK_DIR/.env" HOST_CHROME_CDP_ENABLED false; \
+     log "HOST_CHROME_CDP_ENABLED=false (persisted in .stack/.env)"; \
+     just _chrome-cdp-down
+
+# Provision (idempotent): reuse Chrome if already running on the right port;
+# bring up localhost-proxy; resolve proxy IP via orb DNS from the VM and
+# write BROWSER_CDP_URL Mac-side (via the hermes mount) then drain-restart
+# the gateway. If HERMES_MOUNT_ENABLED=false, Chrome+proxy still come up
+# but the URL write is skipped — we print the manual orb command instead
+# (consistent with the "config edits through just build are mount-only"
+# policy). Called by chrome-cdp-enable AND by `just start` (post-machines)
+# when HOST_CHROME_CDP_ENABLED=true.
+_chrome-cdp-up:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
@@ -178,20 +225,23 @@ chrome-cdp:
      chrome_pid="$run_dir/chrome.pid"; \
      chrome_bin="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; \
      [ -x "$chrome_bin" ] || die "Google Chrome not found at $chrome_bin"; \
-     if [ -f "$chrome_pid" ] && kill -0 "$(cat "$chrome_pid")" 2>/dev/null; then \
-       die "chrome-cdp already running (Chrome PID $(cat "$chrome_pid")). Use 'just chrome-cdp-stop' first."; \
+     if [ -f "$chrome_pid" ] && kill -0 "$(cat "$chrome_pid")" 2>/dev/null \
+        && curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1; then \
+       log "chrome-cdp: Chrome already running (PID $(cat "$chrome_pid")) on :$port — reusing"; \
+     else \
+       rm -f "$chrome_pid"; \
+       lsof -nP -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1 && die "port $port in use (CHROME_CDP_PORT) by another process — kill it or pick a different port"; \
+       log "chrome-cdp: launching Chrome (loopback :$port, data $data_dir)"; \
+       "$chrome_bin" --remote-debugging-port="$port" --user-data-dir="$data_dir" \
+                     --remote-allow-origins='*' \
+                     --no-first-run --no-default-browser-check >/dev/null 2>&1 & \
+       echo $! > "$chrome_pid"; \
+       for i in $(seq 1 30); do \
+         curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1 && break; sleep 0.5; \
+       done; \
+       curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1 \
+         || { kill "$(cat "$chrome_pid")" 2>/dev/null; rm -f "$chrome_pid"; die "CDP did not come up on $port"; }; \
      fi; \
-     lsof -nP -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1 && die "port $port in use (CHROME_CDP_PORT)"; \
-     log "chrome-cdp: launching Chrome (loopback :$port, data $data_dir)"; \
-     "$chrome_bin" --remote-debugging-port="$port" --user-data-dir="$data_dir" \
-                   --remote-allow-origins='*' \
-                   --no-first-run --no-default-browser-check >/dev/null 2>&1 & \
-     echo $! > "$chrome_pid"; \
-     for i in $(seq 1 30); do \
-       curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1 && break; sleep 0.5; \
-     done; \
-     curl -sS -m1 "http://127.0.0.1:$port/json/version" >/dev/null 2>&1 \
-       || { kill "$(cat "$chrome_pid")" 2>/dev/null; rm -f "$chrome_pid"; die "CDP did not come up on $port"; }; \
      log "chrome-cdp: bringing up localhost-proxy with chrome mapping (+ any LOCALHOST_PROXY_PORTS extras)"; \
      user_ports="$(env_get "$STACK_DIR/.env" LOCALHOST_PROXY_PORTS)"; \
      chrome_map="$bport:$port"; \
@@ -212,28 +262,33 @@ chrome-cdp:
      log "chrome-cdp: ready"; \
      log "  Hermes URL:  $cdp_url   (IP literal, VM-resolved — Chrome 111+ rejects hostname Host headers)"; \
      log "  port list:   LOCALHOST_PROXY_PORTS=$merged"; \
-     if [ ! -t 0 ]; then \
-       log "  non-interactive — wire Hermes manually:"; \
-       log "    orb -m $first_vm bash -lc 'sed -i \"/^BROWSER_CDP_URL=/d\" ~/.hermes/.env; echo BROWSER_CDP_URL=$cdp_url >> ~/.hermes/.env; sudo hermes gateway restart --system'"; \
-       exit 0; \
-     fi; \
-     printf "\nWire BROWSER_CDP_URL=%s into machine '%s' and restart hermes-gateway? [y/N] " "$cdp_url" "$first_vm"; \
-     read -r ans; \
-     case "$ans" in \
-       y|Y|yes|YES) \
-         orb -m "$first_vm" bash -lc "set -e; umask 077; \
-           sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; \
-           echo 'BROWSER_CDP_URL=$cdp_url' >> ~/.hermes/.env; \
-           sudo hermes gateway restart --system"; \
-         log "  Hermes: BROWSER_CDP_URL=$cdp_url applied, hermes-gateway restarted" ;; \
-       *) log "  skipped — apply later with: orb -m $first_vm bash -lc 'hermes config set browser.cdp_url $cdp_url'" ;; \
-     esac
+     mount_enabled="$(env_get "$STACK_DIR/.env" HERMES_MOUNT_ENABLED)"; \
+     mount_enabled="${mount_enabled:-true}"; \
+     mount_dir="$(env_get "$STACK_DIR/.env" HERMES_MOUNT_DIR)"; \
+     mount_dir="${mount_dir:-.stack/hermes/.hermes}"; \
+     case "$mount_dir" in /*) mac_hermes="$mount_dir" ;; *) mac_hermes="{{root}}/$mount_dir" ;; esac; \
+     if [ "$mount_enabled" = "true" ]; then \
+       env_file="$mac_hermes/.env"; \
+       mkdir -p "$mac_hermes"; touch "$env_file"; \
+       sed -i.bak '/^BROWSER_CDP_URL=/d' "$env_file" && rm -f "$env_file.bak"; \
+       echo "BROWSER_CDP_URL=$cdp_url" >> "$env_file"; \
+       chmod 600 "$env_file"; \
+       log "chrome-cdp: BROWSER_CDP_URL=$cdp_url written to $env_file (Mac-side via mount)"; \
+       orb -m "$first_vm" bash -lc 'sudo hermes gateway restart --system' >/dev/null 2>&1 \
+         && log "chrome-cdp: hermes-gateway drain-restarted to pick up new BROWSER_CDP_URL" \
+         || warn "chrome-cdp: hermes-gateway restart failed; apply manually: orb -m $first_vm bash -lc 'sudo hermes gateway restart --system'"; \
+     else \
+       warn "chrome-cdp: HERMES_MOUNT_ENABLED=false — skipping BROWSER_CDP_URL auto-wire"; \
+       printf '       apply manually: orb -m %s bash -lc %q\n' "$first_vm" \
+         "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env; echo 'BROWSER_CDP_URL=$cdp_url' >> ~/.hermes/.env; sudo hermes gateway restart --system" >&2; \
+     fi
 
-# Tear down Mac-host Chrome + localhost-proxy + ALWAYS clear stale
-# BROWSER_CDP_URL from Hermes (the URL embeds the proxy's container IP, which
-# changes on next recreate — a leftover URL points Hermes at a dead address).
-# Stop Chrome + localhost-proxy + clear stale BROWSER_CDP_URL on hermes. Idempotent.
-chrome-cdp-stop:
+# Teardown (idempotent): kill Chrome, stop+remove localhost-proxy, strip
+# BROWSER_CDP_URL from hermes ~/.hermes/.env (Mac-side via mount when
+# enabled; in-VM via orb-exec otherwise) so the next gateway boot/restart
+# doesn't hang on a dead URL. Called by chrome-cdp-disable AND by `just
+# stop` (as a depends_on dep).
+_chrome-cdp-down:
     @set -a; source "{{lib}}"; set +a; \
      run_dir="{{root}}/.stack/chrome-cdp"; \
      pid_file="$run_dir/chrome.pid"; \
@@ -253,19 +308,33 @@ chrome-cdp-stop:
        dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy rm -f localhost-proxy >/dev/null 2>&1 || true; \
        rm -f "$STACK_DIR/localhost-proxy/.generated.env"; \
      fi; \
-     first_svc="$(env_get "$STACK_DIR/.env" STACK_MACHINES 2>/dev/null | tr ', ' ' ' | awk '{print $1}')"; \
-     [ -z "$first_svc" ] && exit 0; \
-     first_vm="$(stack_vm_name "$first_svc")"; \
-     orb list 2>/dev/null | awk '{print $1}' | grep -qx "$first_vm" || exit 0; \
-     orb -m "$first_vm" bash -lc 'test -f ~/.hermes/.env && grep -q "^BROWSER_CDP_URL=" ~/.hermes/.env' 2>/dev/null \
-       || exit 0; \
-     echo "== chrome-cdp: clearing stale BROWSER_CDP_URL on '$first_vm' =="; \
-     orb -m "$first_vm" bash -lc "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; sudo hermes gateway restart --system 2>/dev/null || true"
+     mount_enabled="$(env_get "$STACK_DIR/.env" HERMES_MOUNT_ENABLED 2>/dev/null)"; \
+     mount_enabled="${mount_enabled:-true}"; \
+     mount_dir="$(env_get "$STACK_DIR/.env" HERMES_MOUNT_DIR 2>/dev/null)"; \
+     mount_dir="${mount_dir:-.stack/hermes/.hermes}"; \
+     case "$mount_dir" in /*) mac_hermes="$mount_dir" ;; *) mac_hermes="{{root}}/$mount_dir" ;; esac; \
+     if [ "$mount_enabled" = "true" ] && [ -f "$mac_hermes/.env" ] && grep -q '^BROWSER_CDP_URL=' "$mac_hermes/.env" 2>/dev/null; then \
+       echo "== chrome-cdp: clearing stale BROWSER_CDP_URL (Mac-side via mount) =="; \
+       sed -i.bak '/^BROWSER_CDP_URL=/d' "$mac_hermes/.env" && rm -f "$mac_hermes/.env.bak"; \
+       first_svc="$(env_get "$STACK_DIR/.env" STACK_MACHINES 2>/dev/null | tr ', ' ' ' | awk '{print $1}')"; \
+       [ -n "$first_svc" ] && first_vm="$(stack_vm_name "$first_svc")" && \
+         orb list 2>/dev/null | awk '{print $1}' | grep -qx "$first_vm" && \
+         orb -m "$first_vm" bash -lc 'sudo hermes gateway restart --system' >/dev/null 2>&1 || true; \
+     elif [ "$mount_enabled" != "true" ]; then \
+       first_svc="$(env_get "$STACK_DIR/.env" STACK_MACHINES 2>/dev/null | tr ', ' ' ' | awk '{print $1}')"; \
+       [ -z "$first_svc" ] && exit 0; \
+       first_vm="$(stack_vm_name "$first_svc")"; \
+       orb list 2>/dev/null | awk '{print $1}' | grep -qx "$first_vm" || exit 0; \
+       orb -m "$first_vm" bash -lc 'test -f ~/.hermes/.env && grep -q "^BROWSER_CDP_URL=" ~/.hermes/.env' 2>/dev/null \
+         || exit 0; \
+       echo "== chrome-cdp: clearing stale BROWSER_CDP_URL on '$first_vm' (no mount, via orb-exec) =="; \
+       orb -m "$first_vm" bash -lc "sed -i '/^BROWSER_CDP_URL=/d' ~/.hermes/.env 2>/dev/null || true; sudo hermes gateway restart --system 2>/dev/null || true"; \
+     fi
 
 # chrome-cdp stops FIRST (depends_on) so a stale CDP can't be reattached
 # accidentally on next start. Only machines in STACK_MACHINES are touched.
 # Stop this stack's chrome-cdp + machines, then bring containers down (keep volumes).
-stop: chrome-cdp-stop
+stop: _chrome-cdp-down
     @set -a; source "{{lib}}"; set +a; \
      svcs="$(env_get "$STACK_DIR/.env" STACK_MACHINES | tr ', ' ' ')"; \
      if [ -n "$(echo "$svcs" | tr -d '[:space:]')" ]; then \

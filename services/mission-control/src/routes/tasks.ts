@@ -36,7 +36,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { tasks, taskComments, events } from '../db/pool.ts';
 import { HttpError, errorResponse, DuplicateError } from '../errors.ts';
@@ -197,18 +197,7 @@ tasksRouter.post(
       } catch (e) {
         if (e instanceof DuplicateError && idempotency_key) {
           // Layer-2 semantic dedup: find the conflicting active task.
-          const dedupeRows = await ctx.pool
-            .select()
-            .from(tasks)
-            .where(
-              and(
-                eq(tasks.orgId, ctx.orgId),
-                eq(tasks.idempotencyKey, idempotency_key),
-                isNull(tasks.deletedAt),
-              ),
-            )
-            .limit(1);
-          const existing = dedupeRows[0];
+          const existing = await db.tasks(ctx).findByIdempotencyKey(idempotency_key);
           throw new HttpError(
             409,
             'idempotency.conflict',
@@ -386,8 +375,10 @@ tasksRouter.get(
         throw new HttpError(403, 'task.forbidden', 'Agents can only access their own tasks');
       }
 
-      // Fetch recent 20 comments.
-      const comments = await ctx.pool
+      // Fetch recent 20 comments (DESC by createdAt for detail view).
+      // Note: commentsRepo.listByTask() sorts ASC for chronological pagination;
+      // here we want DESC (newest first) for the task detail view.
+      const comments = await ctx.pool // repo-escape: DESC sort for detail view not in commentsRepo.listByTask
         .select()
         .from(taskComments)
         .where(and(eq(taskComments.taskId, id), eq(taskComments.orgId, ctx.orgId), active(taskComments)))
@@ -395,7 +386,7 @@ tasksRouter.get(
         .limit(20);
 
       // Fetch recent 20 events.
-      const recentEvents = await ctx.pool
+      const recentEvents = await ctx.pool // repo-escape: events.list is deferred to v1.1
         .select()
         .from(events)
         .where(and(eq(events.orgId, ctx.orgId), eq(events.resourceType, 'task'), eq(events.resourceId, id)))

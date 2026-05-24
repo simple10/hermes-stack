@@ -61,6 +61,22 @@ export function tasksRepo(ctx: AuthContext) {
     },
 
     /**
+     * Look up a task by its idempotency_key within this org (active rows only).
+     * Used for Layer-2 semantic dedup: when insert fails with DuplicateError,
+     * the handler calls this to find the conflicting task for the error details.
+     */
+    async findByIdempotencyKey(key: string): Promise<TaskRow | null> {
+      const rows = await ctx.pool.select().from(tasks)
+        .where(and(
+          eq(tasks.orgId, ctx.orgId),
+          eq(tasks.idempotencyKey, key),
+          active(tasks),
+        ))
+        .limit(1);
+      return rows[0] ?? null;
+    },
+
+    /**
      * Look up a task by id using ONLY the org scope (ignoring the per-principal
      * filter).  Use this when you need to check a task's existence and then
      * enforce ownership manually (e.g., comments route resolving the parent task).

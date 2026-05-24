@@ -89,11 +89,11 @@ bootstrap.post('/', async (c) => {
 
     // Step 2: Insert organization + member directly via Drizzle.
     //
+    // See mintApiKey comment below for why we use masterClient directly here.
     // repo-escape: bootstrap bypasses better-auth's createOrganization adapter
-    // to avoid a double-insert bug: the adapter inserts member, then the endpoint
-    // calls createMember again, violating the UNIQUE(organization_id, user_id)
-    // constraint. Direct insert is the only reliable path here.
-    const master = masterClient(env);
+    // to avoid a double-insert bug (adapter inserts member, endpoint calls
+    // createMember again, violating UNIQUE(organization_id, user_id)).
+    const master = masterClient(env); // repo-escape: bootstrap runs before ctx exists
     const now = new Date();
     const orgId = makeId('org');
     const memberId = makeId('mbr');

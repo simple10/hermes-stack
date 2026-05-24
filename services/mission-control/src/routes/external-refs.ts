@@ -35,12 +35,9 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { and, eq, or, lt, desc, asc } from 'drizzle-orm';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
-import { externalRefs, tasks, projects, agents, connectors, taskComments } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
-import { makeId } from '../ids.ts';
-import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
+import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -88,51 +85,21 @@ async function validateResourceExists(
   let found = false;
 
   switch (resource_type) {
-    case 'task': {
-      const taskRows = await ctx.pool
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(and(eq(tasks.id, resource_id), eq(tasks.orgId, ctx.orgId), active(tasks)))
-        .limit(1);
-      found = taskRows.length > 0;
+    case 'task':
+      found = (await db.tasks(ctx).findByIdForOrg(resource_id)) !== null;
       break;
-    }
-    case 'project': {
-      const projectRows = await ctx.pool
-        .select({ id: projects.id })
-        .from(projects)
-        .where(and(eq(projects.id, resource_id), eq(projects.orgId, ctx.orgId), active(projects)))
-        .limit(1);
-      found = projectRows.length > 0;
+    case 'project':
+      found = (await db.projects(ctx).findById(resource_id)) !== null;
       break;
-    }
-    case 'agent': {
-      const agentRows = await ctx.pool
-        .select({ id: agents.id })
-        .from(agents)
-        .where(and(eq(agents.id, resource_id), eq(agents.orgId, ctx.orgId), active(agents)))
-        .limit(1);
-      found = agentRows.length > 0;
+    case 'agent':
+      found = (await db.agents(ctx).findById(resource_id)) !== null;
       break;
-    }
-    case 'connector': {
-      const connectorRows = await ctx.pool
-        .select({ id: connectors.id })
-        .from(connectors)
-        .where(and(eq(connectors.id, resource_id), eq(connectors.orgId, ctx.orgId), active(connectors)))
-        .limit(1);
-      found = connectorRows.length > 0;
+    case 'connector':
+      found = (await db.connectors(ctx).findById(resource_id)) !== null;
       break;
-    }
-    case 'comment': {
-      const commentRows = await ctx.pool
-        .select({ id: taskComments.id })
-        .from(taskComments)
-        .where(and(eq(taskComments.id, resource_id), eq(taskComments.orgId, ctx.orgId), active(taskComments)))
-        .limit(1);
-      found = commentRows.length > 0;
+    case 'comment':
+      found = (await db.comments(ctx).findById(resource_id)) !== null;
       break;
-    }
   }
 
   if (!found) {
@@ -171,69 +138,21 @@ externalRefsRouter.post(
 
       const { resource_type, resource_id, source_kind, source_id, external_id, external_url, metadata } = input.data;
 
-      // ---------------------------------------------------------------------------
-      // source_id enforcement for agent and connector roles.
-      // ---------------------------------------------------------------------------
-      if (ctx.role === 'agent' && source_id !== ctx.principal.id) {
-        throw new HttpError(
-          403,
-          'external_ref.source_id_mismatch',
-          `Agents may only create refs where source_id equals their own id ('${ctx.principal.id}')`,
-        );
-      }
-      if (ctx.role === 'connector' && source_id !== ctx.principal.id) {
-        throw new HttpError(
-          403,
-          'external_ref.source_id_mismatch',
-          `Connectors may only create refs where source_id equals their own id ('${ctx.principal.id}')`,
-        );
-      }
-
-      // ---------------------------------------------------------------------------
       // Validate the target resource exists and belongs to this org.
-      // ---------------------------------------------------------------------------
       await validateResourceExists(ctx, resource_type, resource_id);
 
-      // ---------------------------------------------------------------------------
-      // Insert the ref (catch UNIQUE violation → 409 duplicate).
-      // ---------------------------------------------------------------------------
-      const refId = makeId('externalRef');
-      const now = Date.now();
-
-      try {
-        await ctx.pool.insert(externalRefs).values({
-          id: refId,
-          orgId: ctx.orgId,
-          resourceType: resource_type,
-          resourceId: resource_id,
-          sourceKind: source_kind,
-          sourceId: source_id,
-          externalId: external_id,
-          externalUrl: external_url ?? null,
-          metadata: metadata ? JSON.stringify(metadata) : null,
-          createdAt: now,
-          updatedAt: now,
-        });
-      } catch (e) {
-        if (isUniqueViolation(e)) {
-          throw new HttpError(
-            409,
-            'external_ref.duplicate',
-            `An active external ref already exists for (${resource_type}, ${resource_id}, ${source_kind}, ${source_id})`,
-          );
-        }
-        throw e;
-      }
-
-      const rows = await ctx.pool
-        .select()
-        .from(externalRefs)
-        .where(and(eq(externalRefs.id, refId), eq(externalRefs.orgId, ctx.orgId)))
-        .limit(1);
-      const row = rows[0];
-      if (!row) {
-        throw new HttpError(500, 'internal', 'External ref row disappeared after insert');
-      }
+      // Insert the ref. The repo enforces source_id for agent/connector principals
+      // (throws ForbiddenError → 403) and catches UNIQUE violation (DuplicateError → 409).
+      // Both are mapped to HTTP by errorResponse automatically.
+      const row = await db.externalRefs(ctx).insert({
+        resourceType: resource_type,
+        resourceId: resource_id,
+        sourceKind: source_kind,
+        sourceId: source_id,
+        externalId: external_id,
+        externalUrl: external_url ?? null,
+        metadata: metadata ? JSON.stringify(metadata) : null,
+      });
 
       await db.events(ctx).emit({
         resourceType: resource_type,
@@ -280,53 +199,25 @@ externalRefsRouter.get(
       const limit = clampLimit(q.limit, 50, 100);
       const secret = env.BETTER_AUTH_SECRET ?? '';
 
-      // Cursor decode (uses the same updatedAt-based cursor format as other lists,
-      // but stored in createdAt/id since externalRefs is ordered DESC by createdAt,id).
-      let afterUpdatedAt: number | undefined;
-      let afterId: string | undefined;
+      let cursor: { createdAt: number; id: string } | undefined;
 
       if (q.cursor) {
         const decoded = await decodeCursor(q.cursor, secret);
         if (!decoded || decoded.orgId !== ctx.orgId) {
           throw new HttpError(400, 'external_ref.invalid_cursor', 'Invalid or expired pagination cursor');
         }
-        afterUpdatedAt = decoded.updatedAt;
-        afterId = decoded.id;
+        cursor = { createdAt: decoded.updatedAt, id: decoded.id };
       }
 
-      // Build WHERE conditions.
-      const conditions = [
-        eq(externalRefs.orgId, ctx.orgId),
-        active(externalRefs),
-      ];
-
-      if (q.resource_type) conditions.push(eq(externalRefs.resourceType, q.resource_type));
-      if (q.resource_id) conditions.push(eq(externalRefs.resourceId, q.resource_id));
-      if (q.source_kind) conditions.push(eq(externalRefs.sourceKind, q.source_kind));
-      if (q.source_id) conditions.push(eq(externalRefs.sourceId, q.source_id));
-      if (q.external_id) conditions.push(eq(externalRefs.externalId, q.external_id));
-
-      let rows: typeof externalRefs.$inferSelect[];
-
-      if (afterUpdatedAt !== undefined && afterId !== undefined) {
-        const cursorCondition = or(
-          lt(externalRefs.createdAt, afterUpdatedAt),
-          and(eq(externalRefs.createdAt, afterUpdatedAt), lt(externalRefs.id, afterId)),
-        );
-        rows = await ctx.pool
-          .select()
-          .from(externalRefs)
-          .where(and(...conditions, cursorCondition))
-          .orderBy(desc(externalRefs.createdAt), desc(externalRefs.id))
-          .limit(limit + 1);
-      } else {
-        rows = await ctx.pool
-          .select()
-          .from(externalRefs)
-          .where(and(...conditions))
-          .orderBy(desc(externalRefs.createdAt), desc(externalRefs.id))
-          .limit(limit + 1);
-      }
+      let rows = await db.externalRefs(ctx).list({
+        resourceType: q.resource_type,
+        resourceId: q.resource_id,
+        sourceKind: q.source_kind,
+        sourceId: q.source_id,
+        externalId: q.external_id,
+        limit: limit + 1,
+        cursor,
+      });
 
       const hasMore = rows.length > limit;
       if (hasMore) rows = rows.slice(0, limit);
@@ -362,12 +253,7 @@ externalRefsRouter.delete(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const existingRows = await ctx.pool
-        .select()
-        .from(externalRefs)
-        .where(and(eq(externalRefs.id, id), eq(externalRefs.orgId, ctx.orgId), active(externalRefs)))
-        .limit(1);
-      const existing = existingRows[0];
+      const existing = await db.externalRefs(ctx).findById(id);
       if (!existing) {
         throw new HttpError(404, 'external_ref.not_found', `External ref ${id} not found`);
       }
@@ -381,16 +267,7 @@ externalRefsRouter.delete(
         );
       }
 
-      const now = Date.now();
-      await ctx.pool
-        .update(externalRefs)
-        .set({
-          deletedAt: now,
-          deletedByType: ctx.principal.type,
-          deletedById: ctx.principal.id,
-          updatedAt: now,
-        })
-        .where(and(eq(externalRefs.id, id), eq(externalRefs.orgId, ctx.orgId)));
+      await db.externalRefs(ctx).softDelete(id);
 
       await db.events(ctx).emit({
         resourceType: existing.resourceType,

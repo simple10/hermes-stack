@@ -83,7 +83,7 @@ export function connectorsRepo(ctx: AuthContext) {
         return inserted[0]!;
       } catch (e) {
         if (isUniqueViolation(e)) {
-          throw new DuplicateError('connector', {});
+          throw new DuplicateError('connector', {}, 'connector.duplicate_name');
         }
         throw e;
       }

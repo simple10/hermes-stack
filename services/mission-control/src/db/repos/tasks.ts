@@ -60,6 +60,18 @@ export function tasksRepo(ctx: AuthContext) {
       return rows[0] ?? null;
     },
 
+    /**
+     * Look up a task by id using ONLY the org scope (ignoring the per-principal
+     * filter).  Use this when you need to check a task's existence and then
+     * enforce ownership manually (e.g., comments route resolving the parent task).
+     */
+    async findByIdForOrg(id: string): Promise<TaskRow | null> {
+      const orgScope = and(eq(tasks.orgId, ctx.orgId), active(tasks));
+      const rows = await ctx.pool.select().from(tasks)
+        .where(and(orgScope, eq(tasks.id, id))).limit(1);
+      return rows[0] ?? null;
+    },
+
     async list(filter: TaskListFilter = {}): Promise<TaskRow[]> {
       const conditions: SQL[] = [scope!];
       if (filter.projectId)  conditions.push(eq(tasks.projectId, filter.projectId));

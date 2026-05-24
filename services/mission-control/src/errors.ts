@@ -6,6 +6,10 @@
  *   return errorResponse(c, err);
  */
 
+import { DuplicateError, ForbiddenError } from './db/repos/_errors.ts';
+
+export { DuplicateError, ForbiddenError };
+
 export class HttpError extends Error {
   constructor(
     public readonly status: number,
@@ -27,13 +31,40 @@ type MinimalCtx = {
  * Converts any error into a JSON error response following the spec's envelope:
  *   { error: { code, message, details? } }
  *
- * HttpError instances are surfaced as-is.  Unknown errors become 500.
+ * HttpError instances are surfaced as-is.
+ * DuplicateError → 409 with code `${resource}.duplicate`.
+ * ForbiddenError → 403 with code from err.code.
+ * Unknown errors become 500.
  */
 export function errorResponse(c: MinimalCtx, err: unknown): Response {
   if (err instanceof HttpError) {
     return c.json(
       { error: { code: err.code, message: err.message, details: err.details } },
       err.status,
+    );
+  }
+  if (err instanceof DuplicateError) {
+    return c.json(
+      {
+        error: {
+          code: err.code ?? `${err.resource}.duplicate`,
+          message: err.message,
+          details: err.details,
+        },
+      },
+      409,
+    );
+  }
+  if (err instanceof ForbiddenError) {
+    return c.json(
+      {
+        error: {
+          code: err.code,
+          message: err.message,
+          details: err.details,
+        },
+      },
+      403,
     );
   }
   console.error('unhandled error:', err);

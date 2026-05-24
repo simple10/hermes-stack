@@ -11,7 +11,7 @@
  * Insert stamps: id, orgId, authorType, authorId (all from ctx), createdAt, updatedAt
  * softDelete writes: deletedAt, deletedByType, deletedById (from ctx.principal)
  */
-import { and, eq, desc, asc, type SQL } from 'drizzle-orm';
+import { and, eq, or, gt, desc, asc, type SQL } from 'drizzle-orm';
 import { taskComments } from '../pool.ts';
 import { active } from '../helpers.ts';
 import { makeId } from '../../ids.ts';
@@ -44,9 +44,19 @@ export function commentsRepo(ctx: AuthContext) {
 
     async listByTask(taskId: string, opts: CommentListOptions = {}): Promise<CommentRow[]> {
       const conditions: SQL[] = [scope!, eq(taskComments.taskId, taskId)];
-      // Cursor pagination: forward (asc by createdAt)
+      // Cursor pagination: forward (asc by createdAt, id)
       // cursor = {createdAt, id} meaning "rows after this point"
-      // Using simple: where createdAt > cursor.createdAt OR (createdAt == cursor.createdAt AND id > cursor.id)
+      if (opts.cursor) {
+        conditions.push(
+          or(
+            gt(taskComments.createdAt, opts.cursor.createdAt),
+            and(
+              eq(taskComments.createdAt, opts.cursor.createdAt),
+              gt(taskComments.id, opts.cursor.id),
+            ),
+          )!,
+        );
+      }
       return ctx.pool.select().from(taskComments)
         .where(and(...conditions))
         .orderBy(asc(taskComments.createdAt), asc(taskComments.id))

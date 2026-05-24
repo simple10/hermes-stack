@@ -16,12 +16,9 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { and, eq, or, gt, asc } from 'drizzle-orm';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
-import { tasks, taskComments } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
-import { makeId } from '../ids.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -111,13 +108,11 @@ async function decodeCommentCursor(
 async function resolveTask(
   ctx: AuthContext,
   taskId: string,
-): Promise<typeof tasks.$inferSelect> {
-  const taskRows = await ctx.pool
-    .select()
-    .from(tasks)
-    .where(and(eq(tasks.id, taskId), eq(tasks.orgId, ctx.orgId), active(tasks)))
-    .limit(1);
-  const row = taskRows[0];
+) {
+  // Use findByIdForOrg so the lookup is NOT filtered by principal.id —
+  // we need to find the task regardless of ownership, then enforce the
+  // agent-ownership rule manually to return 403 (not 404).
+  const row = await db.tasks(ctx).findByIdForOrg(taskId);
   if (!row) {
     throw new HttpError(404, 'task.not_found', `Task ${taskId} not found`);
   }
@@ -157,33 +152,11 @@ commentsRouter.post(
       // Resolve the task (validates org scope + agent ownership).
       await resolveTask(ctx, taskId);
 
-      const commentId = makeId('comment');
-      const now = Date.now();
-
-      await ctx.pool.insert(taskComments).values({
-        id: commentId,
-        orgId: ctx.orgId,
-        taskId,
-        authorType: ctx.principal.type,
-        authorId: ctx.principal.id,
-        body: input.data.body,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const rows = await ctx.pool
-        .select()
-        .from(taskComments)
-        .where(and(eq(taskComments.id, commentId), eq(taskComments.orgId, ctx.orgId)))
-        .limit(1);
-      const row = rows[0];
-      if (!row) {
-        throw new HttpError(500, 'internal', 'Comment row disappeared after insert');
-      }
+      const row = await db.comments(ctx).insert({ taskId, body: input.data.body });
 
       await db.events(ctx).emit({
         resourceType: 'comment',
-        resourceId: commentId,
+        resourceId: row.id,
         kind: 'comment.created',
         payload: { comment: serializeTimestamps(row) },
       });
@@ -230,38 +203,15 @@ commentsRouter.get(
         afterId = decoded.id;
       }
 
-      // Build base conditions.
-      const conditions = [
-        eq(taskComments.taskId, taskId),
-        eq(taskComments.orgId, ctx.orgId),
-        active(taskComments),
-      ];
+      const cursor =
+        afterCreatedAt !== undefined && afterId !== undefined
+          ? { createdAt: afterCreatedAt, id: afterId }
+          : undefined;
 
-      let rows: typeof taskComments.$inferSelect[];
-
-      if (afterCreatedAt !== undefined && afterId !== undefined) {
-        // Keyset: rows that come after (createdAt, id) in ASC order.
-        const cursorCondition = or(
-          gt(taskComments.createdAt, afterCreatedAt),
-          and(
-            eq(taskComments.createdAt, afterCreatedAt),
-            gt(taskComments.id, afterId),
-          ),
-        );
-        rows = await ctx.pool
-          .select()
-          .from(taskComments)
-          .where(and(...conditions, cursorCondition))
-          .orderBy(asc(taskComments.createdAt), asc(taskComments.id))
-          .limit(limit + 1);
-      } else {
-        rows = await ctx.pool
-          .select()
-          .from(taskComments)
-          .where(and(...conditions))
-          .orderBy(asc(taskComments.createdAt), asc(taskComments.id))
-          .limit(limit + 1);
-      }
+      let rows = await db.comments(ctx).listByTask(taskId, {
+        limit: limit + 1,
+        cursor,
+      });
 
       const hasMore = rows.length > limit;
       if (hasMore) rows = rows.slice(0, limit);

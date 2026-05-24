@@ -20,13 +20,19 @@
  */
 
 /**
- * Thrown when a UNIQUE constraint violation is caught by a repo insert.
+ * Thrown when a UNIQUE constraint violation is caught by a repo insert or update.
  * Handlers map this to HTTP 409.
+ *
+ * @param resource   Resource name (e.g. 'project', 'agent').
+ * @param details    Extra details to include in the error response (e.g. existing_project_id).
+ * @param code       Optional specific error code.  Defaults to `${resource}.duplicate`.
+ *                   Use when the resource has named variants (e.g. 'project.duplicate_slug').
  */
 export class DuplicateError extends Error {
   constructor(
     public readonly resource: string,
     public readonly details: Record<string, unknown> = {},
+    public readonly code?: string,
   ) {
     super(`${resource} already exists`);
     this.name = 'DuplicateError';

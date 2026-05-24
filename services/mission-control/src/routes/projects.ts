@@ -19,12 +19,9 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
-import { projects } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
-import { makeId } from '../ids.ts';
-import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
+import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -71,52 +68,18 @@ projectsRouter.post(
       }
       const { name, slug, description } = input.data;
 
-      const projectId = makeId('project');
-      const now = Date.now();
-
-      try {
-        await ctx.pool.insert(projects).values({
-          id: projectId,
-          orgId: ctx.orgId,
-          name,
-          slug,
-          description: description ?? null,
-          createdByUserId: ctx.viaUserId ?? null,
-          createdAt: now,
-          updatedAt: now,
-        });
-      } catch (e) {
-        if (isUniqueViolation(e)) {
-          // Find the conflicting project to return its id.
-          const conflictRows = await ctx.pool
-            .select()
-            .from(projects)
-            .where(and(eq(projects.orgId, ctx.orgId), eq(projects.slug, slug), active(projects)))
-            .limit(1);
-          const existing = conflictRows[0];
-          throw new HttpError(
-            409,
-            'project.duplicate_slug',
-            `A project with slug '${slug}' already exists in this org`,
-            { existing_project_id: existing?.id ?? null },
-          );
-        }
-        throw e;
-      }
-
-      const projectInsertRows = await ctx.pool
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, projectId), eq(projects.orgId, ctx.orgId)))
-        .limit(1);
-      const row = projectInsertRows[0];
-      if (!row) {
-        throw new HttpError(500, 'internal', 'Project row disappeared after insert');
-      }
+      // DuplicateError from the repo is caught by errorResponse → 409 project.duplicate
+      // The repo populates existing_project_id in the error details.
+      const row = await db.projects(ctx).insert({
+        name,
+        slug,
+        description: description ?? null,
+        createdByUserId: ctx.viaUserId ?? null,
+      });
 
       await db.events(ctx).emit({
         resourceType: 'project',
-        resourceId: projectId,
+        resourceId: row.id,
         kind: 'project.created',
       });
 
@@ -145,44 +108,17 @@ projectsRouter.get(
 
       const secret = (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET ?? '';
 
-      let afterUpdatedAt: number | undefined;
-      let afterId: string | undefined;
+      let cursor: { updatedAt: number; id: string } | undefined;
 
       if (cursorRaw) {
         const decoded = await decodeCursor(cursorRaw, secret);
         if (!decoded || decoded.orgId !== ctx.orgId) {
           throw new HttpError(400, 'project.invalid_cursor', 'Invalid or expired pagination cursor');
         }
-        afterUpdatedAt = decoded.updatedAt;
-        afterId = decoded.id;
+        cursor = { updatedAt: decoded.updatedAt, id: decoded.id };
       }
 
-      let rows: typeof projects.$inferSelect[];
-
-      if (afterUpdatedAt !== undefined && afterId !== undefined) {
-        rows = await ctx.pool
-          .select()
-          .from(projects)
-          .where(
-            and(
-              eq(projects.orgId, ctx.orgId),
-              active(projects),
-              or(
-                lt(projects.updatedAt, afterUpdatedAt),
-                and(eq(projects.updatedAt, afterUpdatedAt), lt(projects.id, afterId)),
-              ),
-            ),
-          )
-          .orderBy(desc(projects.updatedAt), desc(projects.id))
-          .limit(limit + 1);
-      } else {
-        rows = await ctx.pool
-          .select()
-          .from(projects)
-          .where(and(eq(projects.orgId, ctx.orgId), active(projects)))
-          .orderBy(desc(projects.updatedAt), desc(projects.id))
-          .limit(limit + 1);
-      }
+      let rows = await db.projects(ctx).list({ limit: limit + 1, cursor });
 
       const hasMore = rows.length > limit;
       if (hasMore) rows = rows.slice(0, limit);
@@ -218,12 +154,7 @@ projectsRouter.get(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const projectDetailRows = await ctx.pool
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)))
-        .limit(1);
-      const row = projectDetailRows[0];
+      const row = await db.projects(ctx).findById(id);
       if (!row) {
         throw new HttpError(404, 'project.not_found', `Project ${id} not found`);
       }
@@ -260,52 +191,18 @@ projectsRouter.patch(
         );
       }
 
-      const patchCheckRows = await ctx.pool
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)))
-        .limit(1);
-      const existing = patchCheckRows[0];
+      const existing = await db.projects(ctx).findById(id);
       if (!existing) {
         throw new HttpError(404, 'project.not_found', `Project ${id} not found`);
       }
 
-      const now = Date.now();
-      const patch: Partial<typeof projects.$inferInsert> = { updatedAt: now };
+      const patch: { name?: string; slug?: string; description?: string | null } = {};
       if (input.data.name !== undefined) patch.name = input.data.name;
       if (input.data.slug !== undefined) patch.slug = input.data.slug;
       if ('description' in input.data) patch.description = input.data.description ?? null;
 
-      try {
-        await ctx.pool
-          .update(projects)
-          .set(patch)
-          .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)));
-      } catch (e) {
-        if (isUniqueViolation(e)) {
-          const conflictSlug = input.data.slug ?? existing.slug;
-          const patchConflictRows = await ctx.pool
-            .select()
-            .from(projects)
-            .where(and(eq(projects.orgId, ctx.orgId), eq(projects.slug, conflictSlug), active(projects)))
-            .limit(1);
-          const conflicting = patchConflictRows[0];
-          throw new HttpError(
-            409,
-            'project.duplicate_slug',
-            `A project with slug '${conflictSlug}' already exists in this org`,
-            { existing_project_id: conflicting?.id ?? null },
-          );
-        }
-        throw e;
-      }
-
-      const patchUpdatedRows = await ctx.pool
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)))
-        .limit(1);
-      const updated = patchUpdatedRows[0];
+      // DuplicateError from the repo (slug conflict) → errorResponse → 409 project.duplicate
+      const updated = await db.projects(ctx).update(id, patch);
 
       await db.events(ctx).emit({
         resourceType: 'project',
@@ -332,26 +229,12 @@ projectsRouter.delete(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const deleteCheckRows = await ctx.pool
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)))
-        .limit(1);
-      const existing = deleteCheckRows[0];
+      const existing = await db.projects(ctx).findById(id);
       if (!existing) {
         throw new HttpError(404, 'project.not_found', `Project ${id} not found`);
       }
 
-      const now = Date.now();
-      await ctx.pool
-        .update(projects)
-        .set({
-          deletedAt: now,
-          deletedByType: ctx.principal.type,
-          deletedById: ctx.principal.id,
-          updatedAt: now,
-        })
-        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)));
+      await db.projects(ctx).softDelete(id);
 
       await db.events(ctx).emit({
         resourceType: 'project',

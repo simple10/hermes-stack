@@ -85,7 +85,7 @@ export function agentsRepo(ctx: AuthContext) {
         return inserted[0]!;
       } catch (e) {
         if (isUniqueViolation(e)) {
-          throw new DuplicateError('agent', {});
+          throw new DuplicateError('agent', {}, 'agent.duplicate_name');
         }
         throw e;
       }

@@ -82,8 +82,8 @@ export function externalRefsRepo(ctx: AuthContext) {
         values.sourceId !== ctx.principal.id
       ) {
         throw new ForbiddenError(
-          'external_ref.source_id_forbidden',
-          `${ctx.principal.type} principals may only create refs where source_id equals their own id ('${ctx.principal.id}')`,
+          'external_ref.source_id_mismatch',
+          `${ctx.principal.type === 'agent' ? 'Agents' : 'Connectors'} may only create refs where source_id equals their own id ('${ctx.principal.id}')`,
           { principal_id: ctx.principal.id, provided_source_id: values.sourceId },
         );
       }

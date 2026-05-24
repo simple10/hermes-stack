@@ -82,18 +82,33 @@ export function projectsRepo(ctx: AuthContext) {
             .from(projects)
             .where(and(eq(projects.orgId, ctx.orgId), eq(projects.slug, values.slug), active(projects)))
             .limit(1);
-          throw new DuplicateError('project', { existing_project_id: existing[0]?.id ?? null });
+          throw new DuplicateError('project', { existing_project_id: existing[0]?.id ?? null }, 'project.duplicate_slug');
         }
         throw e;
       }
     },
 
     async update(id: string, patch: ProjectUpdateInput): Promise<ProjectRow | null> {
-      const updated = await ctx.pool.update(projects)
-        .set({ ...patch, updatedAt: Date.now() })
-        .where(and(scope, eq(projects.id, id)))
-        .returning();
-      return updated[0] ?? null;
+      try {
+        const updated = await ctx.pool.update(projects)
+          .set({ ...patch, updatedAt: Date.now() })
+          .where(and(scope, eq(projects.id, id)))
+          .returning();
+        return updated[0] ?? null;
+      } catch (e) {
+        if (isUniqueViolation(e)) {
+          // Slug conflict on update — look up the conflicting project.
+          const conflictSlug = patch.slug;
+          const existing = conflictSlug
+            ? await ctx.pool.select({ id: projects.id })
+                .from(projects)
+                .where(and(eq(projects.orgId, ctx.orgId), eq(projects.slug, conflictSlug), active(projects)))
+                .limit(1)
+            : [];
+          throw new DuplicateError('project', { existing_project_id: existing[0]?.id ?? null }, 'project.duplicate_slug');
+        }
+        throw e;
+      }
     },
 
     async softDelete(id: string): Promise<ProjectRow | null> {

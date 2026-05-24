@@ -9,12 +9,16 @@ See [`docs/specs/2026-05-22-master-api-design.md`](docs/specs/2026-05-22-master-
 
 ## Quick start — contributor dev (Cloudflare Workers)
 
+This project uses **pnpm** (pinned via `packageManager` in `package.json`).
+If you don't have pnpm, run `corepack enable` once — Node ships with Corepack
+which will manage the right version automatically.
+
 ```sh
-npm install
+pnpm install
 cp .env.example .dev.vars   # then edit: set BETTER_AUTH_SECRET, MC_ADMIN_TOKEN
-npm run db:migrate:local     # apply migrations to local D1
-npm run dev                  # wrangler dev → http://localhost:8787
-npm test                     # run vitest suite (requires wrangler D1 + miniflare)
+pnpm db:migrate:local        # apply migrations to local D1
+pnpm dev                     # wrangler dev → http://localhost:8787
+pnpm test                    # run vitest suite (requires wrangler D1 + miniflare)
 ```
 
 ### Bootstrap first user (dev)
@@ -69,8 +73,8 @@ See [`docs/self-hosting.md`](docs/self-hosting.md) for the full guide, including
    ```
 4. Apply migrations and deploy:
    ```sh
-   npm run db:migrate:remote
-   npm run deploy
+   pnpm db:migrate:remote
+   pnpm deploy
    ```
 5. Bootstrap the first user via `POST /v1/bootstrap` with the `x-mc-admin-token` header.
 
@@ -123,8 +127,16 @@ Key routes:
 ## Testing
 
 ```sh
-npm test          # vitest run (requires local wrangler D1 / miniflare)
-npm run typecheck # tsc --noEmit
+pnpm test          # vitest run (requires local wrangler D1 / miniflare)
+pnpm typecheck     # tsc --noEmit
+```
+
+**Note:** running `pnpm test` against all 19 test files concurrently can trip
+Miniflare port exhaustion on Node 23. If you hit `EADDRNOTAVAIL`, run files
+individually:
+
+```sh
+for f in $(find test -name "*.test.ts" | sort); do pnpm vitest run "$f"; done
 ```
 
 Tests use `@cloudflare/vitest-pool-workers` to run inside a miniflare Workers environment with a real D1 binding. Each test file calls `applyD1Migrations` in a `beforeAll` hook to ensure a fresh, migrated DB for every isolation scope.

@@ -16,7 +16,7 @@ This guide covers running MissionControl on your own infrastructure using Docker
 **Node path (advanced)**
 
 - Node 22+ (for `--experimental-strip-types`)
-- `npm install` (includes `better-sqlite3` which requires a C++ toolchain)
+- `pnpm install` (includes `better-sqlite3` which requires a C++ toolchain). If you don't have pnpm, run `corepack enable` first — Node's Corepack will install the version pinned in `package.json`.
 - A writable path for the SQLite file
 
 ---

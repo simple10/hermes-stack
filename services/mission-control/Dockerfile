@@ -5,18 +5,17 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
-# Install native build deps before npm install so the layer is cached.
+# Install native build deps before pnpm install so the layer is cached.
 RUN apk add --no-cache python3 make g++
 
-# Copy manifests first for layer-cache efficiency.
-COPY package.json package-lock.json* ./
+# Enable pnpm via corepack (version pinned by package.json `packageManager`).
+RUN corepack enable
 
-# Allow either npm ci (lockfile present) or npm install (first build).
-RUN if [ -f package-lock.json ]; then \
-      npm ci --include=dev; \
-    else \
-      npm install; \
-    fi
+# Copy manifests first for layer-cache efficiency.
+COPY package.json pnpm-lock.yaml ./
+
+# Frozen install from the committed lockfile.
+RUN pnpm install --frozen-lockfile
 
 # Copy source — deliberately after node_modules to keep dep layer cached.
 COPY tsconfig.json ./
@@ -25,7 +24,7 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 
 # Type-check (no emit — Node uses --experimental-strip-types at runtime).
-RUN npx tsc --noEmit
+RUN pnpm exec tsc --noEmit
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 # Lean runtime image: only the files needed to serve requests.

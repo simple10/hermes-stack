@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
 import { health } from './routes/health.ts';
 import { bootstrap } from './routes/bootstrap.ts';
 import { me } from './routes/me.ts';
@@ -10,6 +11,9 @@ import { tasksRouter } from './routes/tasks.ts';
 import { commentsRouter } from './routes/comments.ts';
 import { externalRefsRouter } from './routes/external-refs.ts';
 import { createAuth } from './auth/config.ts';
+import { loggingMiddleware } from './logging.ts';
+import { rateLimitMiddleware } from './rate-limit.ts';
+import { handleScheduled } from './jobs/cron.ts';
 
 type Env = {
   DB?: D1Database;
@@ -24,7 +28,13 @@ type Env = {
 
 const app = new Hono<{ Bindings: Env }>();
 
-// CORS — applied to all /v1/* routes before any route handler runs.
+// Middleware order for /v1/*:
+//   1. secureHeaders — sets security response headers (HSTS, X-Content-Type-Options, …)
+//   2. cors          — handles preflight OPTIONS and CORS response headers
+//   3. rateLimitMiddleware — short-circuits on rate limit exceeded (v1: no-op stub)
+//   4. loggingMiddleware  — runs after next(); captures final status + auth context
+app.use('/v1/*', secureHeaders());
+
 app.use('/v1/*', cors({
   origin: (origin, c) => {
     const env = c.env as Env;
@@ -38,6 +48,9 @@ app.use('/v1/*', cors({
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['authorization', 'content-type', 'idempotency-key', 'x-mc-admin-token'],
 }));
+
+app.use('/v1/*', rateLimitMiddleware);
+app.use('/v1/*', loggingMiddleware);
 
 app.route('/v1/health', health);
 
@@ -56,4 +69,8 @@ app.route('/v1/tasks', tasksRouter);
 app.route('/v1/tasks', commentsRouter);
 app.route('/v1/external_refs', externalRefsRouter);
 
-export default app;
+// Workers Module Worker shape: fetch handler + scheduled (cron) handler.
+export default {
+  fetch: app.fetch,
+  scheduled: handleScheduled,
+};

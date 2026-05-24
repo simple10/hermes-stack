@@ -14,6 +14,7 @@ import { createAuth } from './auth/config.ts';
 import { loggingMiddleware } from './logging.ts';
 import { rateLimitMiddleware } from './rate-limit.ts';
 import { handleScheduled } from './jobs/cron.ts';
+import { requireJsonOnWrites } from './middleware/content-type-guard.ts';
 
 type Env = {
   DB?: D1Database;
@@ -29,10 +30,11 @@ type Env = {
 const app = new Hono<{ Bindings: Env }>();
 
 // Middleware order for /v1/*:
-//   1. secureHeaders — sets security response headers (HSTS, X-Content-Type-Options, …)
-//   2. cors          — handles preflight OPTIONS and CORS response headers
-//   3. rateLimitMiddleware — short-circuits on rate limit exceeded (v1: no-op stub)
-//   4. loggingMiddleware  — runs after next(); captures final status + auth context
+//   1. secureHeaders       — sets security response headers (HSTS, X-Content-Type-Options, …)
+//   2. cors                — handles preflight OPTIONS and CORS response headers
+//   3. requireJsonOnWrites — 415 if state-changing request uses form-urlencoded/multipart
+//   4. rateLimitMiddleware — short-circuits on rate limit exceeded (v1: no-op stub)
+//   5. loggingMiddleware   — runs after next(); captures final status + auth context
 app.use('/v1/*', secureHeaders());
 
 app.use('/v1/*', cors({
@@ -49,6 +51,7 @@ app.use('/v1/*', cors({
   allowHeaders: ['authorization', 'content-type', 'idempotency-key', 'x-mc-admin-token'],
 }));
 
+app.use('/v1/*', requireJsonOnWrites);
 app.use('/v1/*', rateLimitMiddleware);
 app.use('/v1/*', loggingMiddleware);
 

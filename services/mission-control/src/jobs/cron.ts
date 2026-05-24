@@ -7,10 +7,7 @@
  * v1 single-pool: runs against the one pool binding (POOL_DEFAULT in split mode,
  * DB in single mode).  Multi-pool iteration deferred to v1.1.
  */
-import { masterClient, poolClient } from '../db/client.ts';
-import { events, idempotencyKeys } from '../db/pool.ts';
-import { verification } from '../db/master.ts';
-import { lt } from 'drizzle-orm';
+import { system } from '../db/repos/system.ts';
 
 // ---------------------------------------------------------------------------
 // Env shape (mirrors src/index.ts Env + DB client Env)
@@ -60,8 +57,8 @@ export async function handleScheduled(
     }
     const retentionDays = Number(env.EVENTS_RETENTION_DAYS ?? 365);
     const cutoff = now - retentionDays * 86_400_000;
-    const pool = poolClient(poolBinding as D1Database);
-    await pool.delete(events).where(lt(events.createdAt, cutoff));
+    // system: scheduled retention purge (events grow unbounded otherwise)
+    await system.events.purgeOlderThan(poolBinding as D1Database, cutoff);
     console.log(`[cron] events purged older than ${retentionDays}d`);
 
   } else if (event.cron === '0 4 * * *') {
@@ -72,8 +69,8 @@ export async function handleScheduled(
       console.error('[cron] idempotency purge: pool DB binding not found');
       return;
     }
-    const pool = poolClient(poolBinding as D1Database);
-    await pool.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now));
+    // system: scheduled TTL purge for idempotency_keys (prevent unbounded growth)
+    await system.idempotencyKeys.purgeExpired(poolBinding as D1Database, now);
     console.log('[cron] idempotency keys purged');
 
   } else if (event.cron === '*/15 * * * *') {
@@ -81,8 +78,13 @@ export async function handleScheduled(
     // Verification rows purge: delete better-auth rows past expiresAt.
     // expiresAt is a timestamp_ms Date column in the master schema.
     // ------------------------------------------------------------
-    const master = masterClient(env as Parameters<typeof masterClient>[0]);
-    await master.delete(verification).where(lt(verification.expiresAt, new Date(now)));
+    const masterBinding = env.DB_MODE === 'split' ? env.MASTER_DB : env.DB;
+    if (!masterBinding) {
+      console.error('[cron] verification purge: master DB binding not found');
+      return;
+    }
+    // system: better-auth verification rows are time-limited; purge to prevent growth
+    await system.verification.purgeExpired(masterBinding as D1Database, now);
     console.log('[cron] verification rows purged');
 
   } else {

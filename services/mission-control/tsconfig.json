@@ -4,7 +4,7 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
-    // node = Node built-ins (Buffer, fs, process) for the self-host entry.
+    // node = Node built-ins required by vitest global-setup (path, url).
     // Cloudflare Workers types come from `worker-configuration.d.ts`, generated
     // by `pnpm cf:types` (wrangler types). Re-run that whenever wrangler.jsonc
     // bindings change.

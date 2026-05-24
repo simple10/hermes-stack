@@ -89,7 +89,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
       viaUserId = verified.key.userId;
       viaKeyId = keyId;
 
-      // Workaround: better-auth v1.2 verifyApiKey returns Omit<ApiKey, "key">
+      // Workaround: better-auth verifyApiKey returns Omit<ApiKey, "key">
       // which does NOT include our additionalFields (orgId, principalType).
       // We do a follow-up Drizzle query against the apiKey table to fetch them.
       const keyRow = await masterClient(env).query.apiKey.findFirst({

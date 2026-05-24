@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { organization, apiKey } from 'better-auth/plugins';
+import { organization } from 'better-auth/plugins';
+import { apiKey } from '@better-auth/api-key';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '../db/master.ts';
 import { masterClient } from '../db/client.ts';
@@ -14,8 +15,6 @@ export type AuthEnv = {
 };
 
 export function createAuth(env: AuthEnv) {
-  // Use masterClient() which transparently picks D1 or better-sqlite3 Drizzle
-  // adapter based on whether we're on Workers or Node self-host target.
   const db = masterClient(env as Parameters<typeof masterClient>[0]);
 
   // better-auth's Drizzle adapter looks up tables by their better-auth model

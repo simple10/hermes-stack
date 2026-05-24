@@ -47,26 +47,30 @@ One Hono codebase, two build targets. Driver selection lives in `db/client.ts`; 
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  MASTER (D1 #0)                                          │
-│  ───────────                                             │
-│  orgs            (id, name, slug, tenant_pool_id, plan)  │
-│  users           (id, org_id, email, role)               │
-│  api_keys        (hash, prefix, org_id, principal_*,     │
-│                   role, scopes, name)                    │
-│  tenant_pools    (id, binding_name)                      │
+│  MASTER (D1 #0)  — better-auth + small custom            │
+│  ───────────────                                         │
+│  user, session, account, verification     (better-auth)  │
+│  organization (+tenantPoolId, plan,                      │
+│                deletedAt additional fields) (better-auth)│
+│  member, invitation                       (better-auth)  │
+│  apiKey (+orgId, principalType additional               │
+│          fields; metadata for agent_id/                  │
+│          connector_id references)         (better-auth)  │
+│  tenant_pools  (id, binding_name)         (custom)       │
 └────────────────────────┬─────────────────────────────────┘
-                         │  orgs.tenant_pool_id
+                         │  organization.tenantPoolId
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  POOL_DEFAULT (D1 #1)   ← v1: every org lives here       │
 │  ──────────────────                                      │
 │  agents          (id, org_id, name, kind, last_seen_at)  │
+│  connectors      (id, org_id, name, kind, last_seen_at)  │
 │  projects        (id, org_id, name, slug, …)             │
 │  tasks           (id, org_id, project_id, agent_id, …)   │
 │  task_comments   (id, org_id, task_id, author_*, body)   │
 │  events          (id, org_id, resource_*, kind, payload) │
 │  external_refs   (id, org_id, resource_*, source_*, …)   │
-│  idempotency_keys(id, org_id, route, key, response)      │
+│  idempotency_keys(org_id, route, key, response)          │
 └──────────────────────────────────────────────────────────┘
 
 Future:
@@ -76,24 +80,26 @@ Future:
 
 **Why two tiers:** the api-key lookup must happen *before* we know which pool to query, so identity & routing have to live in a fixed-location master. Everything else is pool-scoped task data and can be sharded.
 
-**Why pre-declared bindings (not dynamic D1 HTTP API):** Workers can't create bindings at runtime, but a small registry mapping `tenant_pool_id → env.POOL_X` lets us pick the right binding per request at native-binding latency. Adding a new pool = `wrangler d1 create` + add to `wrangler.toml` + deploy. Ops event, not hot path.
+**Why pre-declared bindings (not dynamic D1 HTTP API):** Workers can't create bindings at runtime, but a small registry mapping `tenantPoolId → env.POOL_X` lets us pick the right binding per request at native-binding latency. Adding a new pool = `wrangler d1 create` + add to `wrangler.toml` + deploy. Ops event, not hot path.
 
-**Why org-level pool (not user-level):** orgs are the data-sharing boundary. Two users in one org must see each other's tasks, so they must be in the same pool. `tenant_pool_id` lives on `orgs`.
+**Why org-level pool (not user-level):** orgs are the data-sharing boundary. Two users in one org must see each other's tasks, so they must be in the same pool. `tenantPoolId` lives on `organization` (better-auth additional field).
 
 ### Single-DB mode (self-hosted / local dev)
 
-For OSS users and contributors: both master and pool schemas live in **one SQLite file**. Since no table names collide between the two schemas (no `tasks` in master, no `orgs` in pool), they coexist cleanly.
+For OSS self-hosters and local contributors, **DB_MODE is always `single`**. SaaS production is always `split`. We do not support a self-hoster running split-mode or a SaaS deployment running single-mode — that drift gets messy fast.
 
-**Migration application:**
+In `single` mode:
+- One D1 (or better-sqlite3) binding named `DB`.
+- Both `migrations/master/*` and `migrations/pool/*` apply to the same `DB`, in numeric order interleaved per source. Since table names don't collide (no `tasks` in master, no `organization` in pool), they coexist cleanly.
+- `POOL_BINDING_MAP['default']` resolves to `env.DB` — same binding the master client uses. Pool resolver returns the same Drizzle client. Zero branching in handlers.
+- `tenant_pools` registry table still exists; it's seeded with a single row `('default', 'DB')` and isn't user-extensible self-host. No-op for OSS but keeps schema parity with SaaS.
 
-```
-DB_MODE=single   → applies migrations/master/* AND migrations/pool/*
-                   to the same DB binding (env.DB)
-DB_MODE=split    → applies migrations/master/* to env.MASTER_DB
-                   applies migrations/pool/* to env.POOL_DEFAULT (and other pools)
-```
+In `split` mode:
+- Bindings: `MASTER_DB`, `POOL_DEFAULT`, and (later) `POOL_PREMIUM_*`, etc.
+- `migrations/master/*` applies to `MASTER_DB`. `migrations/pool/*` applies independently to each `POOL_*` binding.
+- The resolver maps `organization.tenantPoolId → env.POOL_X` per request.
 
-The `db/client.ts` resolver returns `{ master, pool }` Drizzle clients. In single mode both wrap the same underlying connection; in split mode they wrap different bindings.
+The `db/client.ts` resolver returns `{ master, pool }` Drizzle clients per request. Mode chosen at boot from `DB_MODE` env (default `single` for safety on first-run OSS).
 
 ---
 
@@ -126,14 +132,17 @@ All identity, sessions, OAuth, and bearer-token verification is handled by **[be
 
 ### Token format
 
-All bearer tokens come from better-auth's apiKey plugin. Better-auth's `prefix` config gives us a uniform leak-scanner-friendly prefix; whether we can vary it per-key (type tag inside the prefix) depends on plugin version. We treat the type tag as a **convention** that the mint endpoint applies if supported, and fall back to a single fixed prefix if not:
+All bearer tokens come from better-auth's apiKey plugin. Better-auth supports a per-key `prefix` parameter at creation, which we use to encode the type for human-scannable tokens:
 
 ```
-Preferred (per-key prefix):   mc_pat_<bytes> / mc_agent_<bytes> / mc_connector_<bytes>
-Fallback (uniform prefix):    mc_<bytes>      (type lives in metadata.type)
+mcpat_<bytes>      — personal access token (PAT) for a human user
+mcagt_<bytes>      — agent key (machine credential bound to an agents row)
+mccnn_<bytes>      — connector key (machine credential bound to a connectors row)
 ```
 
-Either way, the **source of truth is `apiKey.metadata.type`** — middleware never trusts the prefix for authorization decisions. Tokens are shown to the caller once at creation; only better-auth's hashed value + display prefix are stored.
+The prefix is **informational only**. The source of truth for authorization is `apiKey.permissions` and `apiKey.metadata.type` — middleware never trusts the prefix for routing decisions. Tokens are shown to the caller once at creation; only better-auth's hashed value + display prefix are stored.
+
+(Short concatenated prefixes like `mcpat_` instead of `mc_pat_` keep token length tighter and scan more cleanly in logs / leak detectors.)
 
 ### Principal model
 
@@ -247,29 +256,48 @@ In single-DB mode: `POOL_BINDING_MAP['default'] === 'DB'` — same binding maste
 
 For SaaS: better-auth's signup flow handles first-user creation; the first user creates their org via the organization plugin's API; better-auth assigns `member.role='owner'` automatically. From there they mint agent keys via `POST /v1/agents`.
 
-For self-host: `scripts/bootstrap.ts` shells the equivalent calls via better-auth's server-side API to create the first user + org + owner session, then prints credentials. Prevents the chicken-and-egg "no user can sign up because there's no UI yet."
+For self-host: an **in-process startup hook** runs on every Worker boot:
+1. Check if any `user` row exists in master. If yes → no-op, continue.
+2. If no users AND `MC_ADMIN_TOKEN` env var is set → expose a one-time `POST /v1/bootstrap` endpoint that takes `{email, password, org_name}` + the admin token in header, creates the first user + first org via better-auth's server-side API, returns the user's first PAT.
+3. The endpoint disables itself once any user exists (the same first-check shuts the gate).
+4. If no users AND no `MC_ADMIN_TOKEN` set → the Worker refuses to start, logs an instructive error pointing at the docs.
 
-For local dev: same bootstrap script + a seeded dev org with example agents, runnable as `pnpm seed:dev`.
+This avoids the chicken-and-egg "no user can sign up without a UI" without needing a separate CLI process that talks to a running Worker.
+
+For local dev: `pnpm seed:dev` calls the same `/v1/bootstrap` against `wrangler dev` + sets up a demo org with example agents/connectors/projects.
 
 ---
 
 ## Schema (v1)
 
-All tables include the standard columns:
+**Standard columns** (apply to all tables EXCEPT where noted in the exemptions below):
 - `id` (string, slug-prefixed: `org_…`, `usr_…`, `t_…`, `prj_…`, etc.)
 - `created_at` (integer, ms since epoch)
-- `updated_at` (integer, ms since epoch; bumped on every mutation via Drizzle `$onUpdate`)
+- `updated_at` (integer, ms since epoch; bumped on every mutation via Drizzle `$onUpdate` AND by a SQLite trigger so raw SQL paths bump too)
 
-User-mutable tables additionally include:
+**User-mutable tables additionally include** (soft-delete columns):
 - `deleted_at` (integer nullable; NULL = active)
 - `deleted_by_type` (`'user'|'agent'|'connector'|'system'`)
 - `deleted_by_id` (string)
 
-Tables exempt from soft-delete: `events` (append-only audit log), `idempotency_keys` (TTL-purged), `cursors` (if added v1.1; just overwrite), `api_keys` (`revoked_at` plays the role).
+**Exemptions from soft-delete (and standard-column variations):**
+- `events` — append-only audit log; no `updated_at`, no `deleted_at`. Retention purged on schedule (v1: 365d default, configurable).
+- `idempotency_keys` — composite PK `(org_id, route, key)` instead of `id`; no `updated_at`; TTL-purged via `expires_at` instead of soft-delete.
+- `apiKey`, `session`, `account`, `verification`, `invitation` — better-auth-managed; use their own lifecycle fields (see auth section).
 
 ### Master DB
 
-**Better-auth-managed tables** (schema generated by `@better-auth/cli generate`, committed under `migrations/master/`):
+**Better-auth-managed tables** (schema produced via the better-auth → drizzle-kit migration pipeline below, committed under `migrations/master/`):
+
+```
+1. @better-auth/cli generate         → produces src/db/master.ts (Drizzle TS schema, NOT SQL)
+2. drizzle-kit generate              → reads master.ts, writes migrations/master/NNNN_*.sql
+3. wrangler d1 migrations apply DB   → applies SQL to D1
+```
+
+Step 1 is run any time better-auth's schema changes (new plugin, upgraded version, our `additionalFields` change). Step 2 produces a diff migration. Step 3 ships it. Pin the better-auth version in package.json so step 1 is deterministic.
+
+The tables generated:
 
 - `user` — id, email, emailVerified, name, image, createdAt, updatedAt
 - `session` — id, userId, expiresAt, token, ipAddress, userAgent, activeOrganizationId, createdAt, updatedAt
@@ -280,28 +308,56 @@ Tables exempt from soft-delete: `events` (append-only audit log), `idempotency_k
 - `invitation` — id, organizationId, email, role, status, expiresAt, inviterId
 - `apiKey` — id, name, start, prefix, key (hashed), userId, refillInterval, refillAmount, lastRefillAt, enabled, rateLimitEnabled, rateLimitTimeWindow, rateLimitMax, requestCount, remaining, lastRequest, expiresAt, createdAt, updatedAt, permissions (JSON), metadata (JSON)
 
-Custom field added to `organization` via better-auth's schema extension mechanism:
+Custom fields added via better-auth's schema extension mechanism (both `organization` and `apiKey` get `additionalFields`):
 
 ```typescript
-organization: {
-  additionalFields: {
-    tenantPoolId: { type: 'string', required: true, defaultValue: 'default' },
-    plan: { type: 'string', required: true, defaultValue: 'free' },
-    deletedAt: { type: 'date', required: false },
-  }
-}
+plugins: [
+  organization({
+    schema: {
+      organization: {
+        additionalFields: {
+          tenantPoolId: { type: 'string', required: true, defaultValue: 'default' },
+          plan:         { type: 'string', required: true, defaultValue: 'free' },
+          deletedAt:    { type: 'date',   required: false },
+        }
+      }
+    }
+  }),
+  apiKey({
+    schema: {
+      apiKey: {
+        additionalFields: {
+          // Promoted from metadata to typed columns for indexed lookups + admin
+          // queries. agent_id / connector_id stay in metadata (low cardinality).
+          orgId:         { type: 'string', required: true },
+          principalType: { type: 'string', required: true }, // 'pat'|'agent'|'connector'
+        }
+      }
+    }
+  }),
+]
 ```
 
-`apiKey.metadata` (JSON) holds our principal-type discrimination:
+`apiKey.metadata` (JSON) holds the low-cardinality entity references:
 
 ```json
 {
-  "type": "pat" | "agent" | "connector",
-  "org_id": "org_xxx",
-  "agent_id": "agt_xxx",        // when type='agent'
-  "connector_id": "cnn_xxx"     // when type='connector'
+  "agent_id":     "agt_xxx",   // when principalType='agent'
+  "connector_id": "cnn_xxx"    // when principalType='connector'
 }
 ```
+
+Indexed lookups on `(apiKey.orgId, apiKey.principalType)` work via typed columns; `agent_id`/`connector_id` resolution is a single-row metadata read off the same apiKey row.
+
+### Pool-DB tenant isolation
+
+Every pool DB query MUST be scoped by `org_id`. We enforce this through three layered defenses, in order of strength:
+
+1. **Strong: a typed query helper** (`withOrg(ctx).from(tasks)…`) that auto-injects `WHERE org_id = ctx.orgId` on selects and rejects inserts missing `org_id`. Used for 100% of route-handler queries.
+2. **Medium: mandatory multi-tenant isolation tests.** Every route handler test inserts two orgs, performs the operation in one, asserts the other org sees nothing. Lifted to a Vitest matcher (`expect(handler).toBeIsolated()`) so it's enforced by the test runner, not by discipline.
+3. **Weak but real: a CI lint rule** that flags raw `db.run(sql\`…\`)` or `db.select().from(t).where(…)` calls that don't go through the helper. Allowlisted exceptions for migration scripts and admin tools.
+
+We do NOT promise compile-time guarantees that org leakage is impossible — Drizzle's query builder is dynamic enough that a determined developer can bypass the helper. The combination of helper + tests + lint catches the realistic mistake patterns.
 
 **Custom master tables (not managed by better-auth):**
 
@@ -315,7 +371,11 @@ CREATE TABLE tenant_pools (
 
 Tenant_pools is a simple registry — the routing table the Worker consults to map `organization.tenantPoolId` to a binding name. Seeded with `('default', 'POOL_DEFAULT')` at install.
 
-Note: organization soft-delete uses the `deletedAt` custom field above. Better-auth's session/account/verification/apiKey/invitation tables don't get soft-delete — they use their existing lifecycle fields (`enabled`, `revokedAt`, `expiresAt`).
+Note: organization soft-delete uses the `deletedAt` custom field above. Better-auth's session/account/verification/apiKey/invitation tables don't get soft-delete — they use their built-in lifecycle fields:
+- `apiKey.enabled` (boolean) + `apiKey.expiresAt` together cover revocation. To "revoke" a key, set `enabled=false`.
+- `session.expiresAt` covers session invalidation.
+- `verification.expiresAt` covers expiring email-verification / password-reset tokens.
+- `invitation.status` ('pending'|'accepted'|'expired'|'cancelled') covers invitation lifecycle.
 
 ### Pool DB
 
@@ -326,7 +386,7 @@ CREATE TABLE agents (
   name                TEXT NOT NULL,
   kind                TEXT NOT NULL,                     -- 'hermes'|'claude'|'openclaw'|...
   description         TEXT,
-  last_seen_at        INTEGER,
+  last_seen_at        INTEGER,                           -- NULL v1; populated by heartbeat in v1.1
   created_by_user_id  TEXT,                              -- master.user.id (audit only; not FK across DBs)
   created_at          INTEGER NOT NULL,
   updated_at          INTEGER NOT NULL,
@@ -338,6 +398,27 @@ CREATE UNIQUE INDEX agents_name_per_org_active
   ON agents(org_id, name) WHERE deleted_at IS NULL;
 CREATE INDEX agents_org_kind_active
   ON agents(org_id, kind) WHERE deleted_at IS NULL;
+
+-- Mirror of agents for bidirectional-sync external systems (Notion, Linear, …).
+-- Same lifecycle, separate table for clarity in queries and admin tooling.
+CREATE TABLE connectors (
+  id                  TEXT PRIMARY KEY,                  -- 'cnn_xxx'
+  org_id              TEXT NOT NULL,
+  name                TEXT NOT NULL,
+  kind                TEXT NOT NULL,                     -- 'notion'|'linear'|'github'|'custom'
+  description         TEXT,
+  last_seen_at        INTEGER,                           -- bumped by middleware when key used (v1)
+  created_by_user_id  TEXT,
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL,
+  deleted_at          INTEGER,
+  deleted_by_type     TEXT,
+  deleted_by_id       TEXT
+);
+CREATE UNIQUE INDEX connectors_name_per_org_active
+  ON connectors(org_id, name) WHERE deleted_at IS NULL;
+CREATE INDEX connectors_org_kind_active
+  ON connectors(org_id, kind) WHERE deleted_at IS NULL;
 
 CREATE TABLE projects (
   id                  TEXT PRIMARY KEY,              -- 'prj_xxx'
@@ -381,6 +462,11 @@ CREATE INDEX tasks_org_agent_status_active
   ON tasks(org_id, agent_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX tasks_org_updated_at
   ON tasks(org_id, updated_at) WHERE deleted_at IS NULL;
+
+-- Layer-2 semantic dedup. Callers MUST namespace their key by their full
+-- source identity (e.g. "notion:<workspace_id>:<page_id>" not just
+-- "notion:<page_id>") to prevent collisions between different connector
+-- instances of the same kind. Documented in the API reference.
 CREATE UNIQUE INDEX tasks_idempotency_active
   ON tasks(org_id, idempotency_key) WHERE deleted_at IS NULL AND idempotency_key IS NOT NULL;
 
@@ -400,15 +486,22 @@ CREATE TABLE task_comments (
 CREATE INDEX comments_task_active
   ON task_comments(org_id, task_id, created_at) WHERE deleted_at IS NULL;
 
+-- Append-only audit log. Never soft-deleted; purged on retention schedule.
+-- v1 retention: 365 days (configurable per org plan in v1.1). Nightly Cron
+-- Trigger does `DELETE FROM events WHERE created_at < now - 365d`.
+-- NOTE: events.id is monotonic per pool DB. v1 has one pool so a single
+-- cursor works. When sharded pools land (v1.1+), consumers reading events
+-- from multiple pools need either per-pool cursors or a composite cursor
+-- (pool_id, event_id). Document at the v1.1 events-API rollout.
 CREATE TABLE events (
   id              INTEGER PRIMARY KEY AUTOINCREMENT, -- monotonic per pool DB
   org_id          TEXT NOT NULL,
-  resource_type   TEXT NOT NULL,                     -- 'task'|'project'|'agent'|'comment'
+  resource_type   TEXT NOT NULL,                     -- 'task'|'project'|'agent'|'connector'|'comment'
   resource_id     TEXT NOT NULL,
-  kind            TEXT NOT NULL,                     -- 'created'|'updated'|'status_changed'|…
+  kind            TEXT NOT NULL,                     -- see kinds + payload schemas below
   actor_type      TEXT,                              -- 'user'|'agent'|'connector'|'system'
   actor_id        TEXT,
-  payload         TEXT,                              -- JSON, kind-specific
+  payload         TEXT,                              -- JSON, kind-specific (see schemas below)
   created_at      INTEGER NOT NULL
 );
 CREATE INDEX events_org_id ON events(org_id, id);
@@ -486,11 +579,7 @@ export const active = <T extends { deletedAt: Column }>(t: T) => isNull(t.delete
 db.select().from(tasks).where(and(eq(tasks.orgId, ctx.orgId), active(tasks)));
 ```
 
-Convention: every read of a soft-deletable table goes through `active()`. Linter rule (added in v1.1) enforces.
-
-### Auto-injected `org_id`
-
-The Drizzle `pool` client is wrapped by a small helper that auto-injects `WHERE org_id = ctx.orgId` on every query, and rejects inserts missing `org_id`. Mistakes get caught at compile time + runtime; tenant isolation isn't dependent on every developer remembering.
+Convention: every read of a soft-deletable table goes through `active()`. CI lint rule enforces (v1). See "Pool-DB tenant isolation" in the auth section for the layered enforcement of `WHERE org_id = ?`.
 
 ---
 
@@ -511,47 +600,83 @@ Key flows we lean on:
 
 ### Mission-control-managed (mounted at `/v1/*`)
 
-```
-GET    /v1/me                       — current resolved principal + org info
-                                       returns { org, principal_type, principal_id, role, pool_id }
+Permission notation: `(owner|admin|member)` lists the human roles allowed; `admin` is always allowed wherever `member` is allowed. `connector` / `agent` are listed explicitly when relevant.
 
-POST   /v1/agents                   — register an agent (member|admin|owner)
+```
+GET    /v1/health                   — liveness; returns 200 unconditionally
+GET    /v1/health/ready             — readiness; pings master + pool, returns 200 or 503
+
+GET    /v1/me                       — current resolved principal + org info
+                                       returns { org, principal_type, principal_id, role,
+                                                 pool_id, agent? | connector? }
+                                       (agent/connector blocks include name, kind, last_seen_at
+                                        when principal_type is 'agent' or 'connector')
+
+POST   /v1/agents                   — register an agent (owner|admin|member)
                                        body: { name, kind, description? }
-                                       response: { agent: {...}, key: 'mc_agent_...' }
-                                       (mints the agent's api key via better-auth;
+                                       response: { agent: {...}, key: 'mcagt_...' }
+                                       (saga: insert agent → mint better-auth apiKey;
                                         full key shown once, never stored)
 GET    /v1/agents                   — list
 GET    /v1/agents/:id
 PATCH  /v1/agents/:id
-DELETE /v1/agents/:id               — soft delete (owner|admin)
+DELETE /v1/agents/:id               — soft delete; 409 if active tasks (owner|admin)
 POST   /v1/agents/:id/rotate-key    — revoke old key, mint new (owner|admin)
+
+POST   /v1/connectors               — register a connector (owner|admin)
+                                       body: { name, kind, description? }
+                                       response: { connector: {...}, key: 'mccnn_...' }
+                                       (same saga pattern as agents)
+GET    /v1/connectors               — list
+GET    /v1/connectors/:id
+PATCH  /v1/connectors/:id
+DELETE /v1/connectors/:id           — soft delete; 409 if active tasks (owner|admin)
+POST   /v1/connectors/:id/rotate-key — revoke old key, mint new (owner|admin)
 ```
 
-Note: agent-key minting is wrapped by mission-control (not exposed directly via better-auth) because we need to atomically (a) create the agent row in pool DB, (b) mint the better-auth apiKey with the correct metadata pointing to that agent, and (c) record the linkage. One endpoint = one transaction = no orphaned half-states.
+Note: agent-key and connector-key minting are wrapped by mission-control (not exposed directly via better-auth) because the operation spans two databases (pool DB for the `agents`/`connectors` row, master DB for the better-auth `apiKey` row). D1 has no cross-database transactions, so the handler runs a **saga**:
+
+1. INSERT into `pool.agents` (or `pool.connectors`) → get the new id.
+2. Call `auth.api.createApiKey({ userId, prefix: 'mcagt_'|'mccnn_', orgId, principalType: 'agent'|'connector', metadata: { agent_id|connector_id }, permissions: ['agent', `agent:${id}`] })`.
+3. If step 2 fails, compensating action: soft-delete the just-inserted row with `deleted_by_type='system'` and surface the apiKey error to the caller. `409`/`500` depending on cause.
+4. Return `{ agent|connector, key }`. Token shown once.
+
+The window between step 1 and step 2 is observable (a half-created agent without a key) only via direct pool DB read; no API route exposes deleted agents, and the saga completes within one Worker request (sub-100ms typical). Compensating action prevents long-term drift.
+
+### Agent / connector soft-delete with live tasks
+
+A `DELETE /v1/agents/:id` (or `connectors/:id`) checks for assigned non-terminal tasks first:
+
+- If any `tasks` exist with `agent_id == :id` AND `status IN ('ready','in_progress','blocked')` AND `deleted_at IS NULL` → return `409 agent.has_active_tasks` with `details.task_ids` listed. Caller must reassign or cancel those tasks first.
+- Otherwise: soft-delete the agent, emit `agent.deleted` event.
+
+This prevents tasks pointing at a tombstone agent. Reassign (PATCH task.agent_id) is the explicit path; cancel (PATCH task.status='cancelled') is the alternative.
 
 ### Projects
 
 ```
-POST   /v1/projects                 — create (member|owner)
-GET    /v1/projects                 — list
+POST   /v1/projects                 — create (owner|admin|member|connector)
+GET    /v1/projects                 — list (any human role + connector)
 GET    /v1/projects/:id
-PATCH  /v1/projects/:id
-DELETE /v1/projects/:id             — soft delete
+PATCH  /v1/projects/:id             — (owner|admin|member|connector)
+DELETE /v1/projects/:id             — soft delete (owner|admin|connector)
 ```
 
 ### Tasks
 
 ```
-POST   /v1/tasks                    — create
+POST   /v1/tasks                    — create (owner|admin|member|connector)
                                        body: { project_id, title, body?, agent_id?,
                                                priority?, metadata?, idempotency_key? }
                                        header: Idempotency-Key (optional)
-                                       (member|owner|connector)
+                                       NOTE: idempotency_key MUST be namespaced by the
+                                       caller (e.g. "notion:<workspace_id>:<page_id>:v1");
+                                       cross-connector collisions are caller's responsibility
 
-GET    /v1/tasks                    — list with filters
+GET    /v1/tasks                    — list with filters (any role)
                                        query: project_id, agent_id, status, updated_since,
                                               cursor, limit (max 100)
-                                       agent role: forced agent_id=me
+                                       agent role: forced agent_id=principal_id
 
 GET    /v1/tasks/:id                — detail
                                        includes recent comments + recent events (latest 20 each)
@@ -559,13 +684,14 @@ GET    /v1/tasks/:id                — detail
 PATCH  /v1/tasks/:id                — update
                                        body: any of { title, body, agent_id, status,
                                                       priority, metadata }
-                                       agent role: only tasks where agent_id == principal_id;
-                                                   only status + metadata fields
+                                       (owner|admin|member|connector for all fields)
+                                       (agent role: only tasks where agent_id == principal_id;
+                                        only status + metadata fields)
 
-DELETE /v1/tasks/:id                — soft delete (member|owner|connector)
+DELETE /v1/tasks/:id                — soft delete (owner|admin|connector)
 
-POST   /v1/tasks/:id/comments       — append comment
-GET    /v1/tasks/:id/comments       — list with cursor pagination
+POST   /v1/tasks/:id/comments       — append comment (any role)
+GET    /v1/tasks/:id/comments       — list with cursor pagination (any role)
 ```
 
 ### External refs
@@ -576,12 +702,13 @@ POST   /v1/external_refs            — link a resource to an external id
                                                source_id, external_id, external_url?,
                                                metadata? }
                                        agent role: source_id must equal principal_id
+                                       connector role: source_id must equal principal_id
 
-GET    /v1/external_refs            — query with filters
+GET    /v1/external_refs            — query with filters (any role)
                                        query: resource_type, resource_id, source_kind,
                                               source_id, external_id, cursor, limit
 
-DELETE /v1/external_refs/:id        — soft delete
+DELETE /v1/external_refs/:id        — soft delete (owner|admin|connector or owning agent)
 ```
 
 ### Deferred (v1.1+)
@@ -598,32 +725,38 @@ POST   /v1/users                                   — direct user CRUD (UI work
 ## Task lifecycle
 
 ```
-              pending ──assign──► assigned
-                                      │
-                                      │ agent starts
-                                      ▼
-                                  in_progress ◄──┐
-                                      │          │
-                ┌─────────────────────┼──────────┘
-                │                     │
-            blocked                completed
-                │                     │
-           unblock                 (terminal)
-                │
-                ▼
-            in_progress
+              pending ───assign────► ready
+                  │                    │
+                  │                    │ agent claims
+                  │                    ▼
+                  │                in_progress ◄────┐
+                  │                    │            │
+                  │       ┌────────────┼────────────┘
+                  │       │            │
+                  │   blocked      completed (terminal)
+                  │       │
+                  │   unblock
+                  │       │
+                  │       ▼
+                  │   in_progress
+                  │
+                  └─────────────────► cancelled (terminal)
+                  
+              anywhere ─────────────► failed (terminal)
 ```
 
 Statuses:
-- `pending` — created, not yet assigned to an agent.
-- `ready` — has `agent_id` set and is waiting for the agent to pick it up. Agents poll `?status=ready`.
-- `in_progress` — agent has claimed it (PATCH status=in_progress sets `started_at`).
+- `pending` — created, not yet assigned to an agent (`agent_id IS NULL`).
+- `ready` — `agent_id` is set; waiting for the agent to claim. Agents poll `?status=ready`.
+- `in_progress` — agent has claimed it (PATCH `status=in_progress` sets `started_at`).
 - `blocked` — agent surfaced an ambiguity; needs human input. Optional `metadata.block_reason`.
 - `completed` — terminal. Sets `completed_at`.
 - `failed` — terminal. v1: only set explicitly by a human or by the agent itself. v1.1+: may be set by system after N consecutive `blocked` cycles. Optional `metadata.failure_reason`.
-- `cancelled` — terminal. Set by user/owner to abandon a task.
+- `cancelled` — terminal. Set by user/owner/admin to abandon a task.
 
-(Single-vocabulary: we use `ready` everywhere, agent-side and user-side. Matches hermes's local kanban vocabulary too.)
+**Invalid transitions return `409 task.invalid_transition`.** In particular, transitions FROM a terminal state (`completed`, `failed`, `cancelled`) are always rejected — undo is `DELETE` (soft-delete) + recreate, not "un-complete."
+
+(Single-vocabulary: we use `ready` everywhere, agent-side and user-side. Matches hermes's local kanban.)
 
 State machine enforced in PATCH handler. Invalid transitions return `409` with `code: 'task.invalid_transition'`.
 
@@ -649,10 +782,11 @@ JSON envelope per response:
 | 401 | Missing / unparseable / unrecognized token |
 | 403 | Token valid but role insufficient |
 | 404 | Resource doesn't exist (or is soft-deleted and caller can't see soft-deleted) |
-| 409 | Idempotency conflict OR state-machine violation OR duplicate slug/name |
+| 409 | Idempotency conflict OR state-machine violation OR duplicate slug/name OR active-tasks-blocking-delete |
 | 422 | Semantic validation (e.g. assigning to a `deleted_at` agent) |
-| 429 | Rate limit (v1.1+) |
+| 429 | Rate limit |
 | 500 | Server error — logged with request ID, returned without internals |
+| 503 | Pool binding missing (deployment skew between master DB + wrangler bindings); transient — retry-safe |
 
 Error codes are stable dot-namespaced strings: `task.not_found`, `task.invalid_transition`, `auth.role_insufficient`, `idempotency.conflict`, etc. The error code map is exported as part of the SDK (v1.1).
 
@@ -664,14 +798,16 @@ Two layers, each serving a distinct purpose:
 
 **Layer 1 — Generic API-level idempotency (Stripe-style):**
 - Caller sends `Idempotency-Key: <opaque-string>` header on `POST /v1/tasks` and `POST /v1/external_refs`.
-- Server stores `(org_id, route, key) → (status, body)` in `idempotency_keys` with 24h TTL.
+- Server stores `(org_id, route, key) → (status, body)` in `idempotency_keys` (D1 pool DB) with 24h TTL via `expires_at`.
 - Repeat request with same key + same body = returns cached response.
 - Repeat with same key + *different* body = `409 idempotency.conflict`.
 - Useful for retries on flaky networks.
+- **Cost note:** every `POST /v1/tasks` writes one extra D1 row. At v1 scale (~10k tasks/day org) this is ~$1/month/org — acceptable. KV would be cheaper, but KV's eventual consistency is wrong for dedup (you could return cached response based on a stale read). Sticking with D1.
 
 **Layer 2 — Semantic dedup via `tasks.idempotency_key`:**
-- Caller sets `idempotency_key: "notion:<page_id>:<version>"` in the request body.
-- Partial unique index `(org_id, idempotency_key) WHERE deleted_at IS NULL` enforces uniqueness for active rows.
+- Caller sets `idempotency_key: "<source_kind>:<source_id>:<external_id>:<version>"` in the request body (e.g. `"notion:ws_abc:page_xyz:v3"`).
+- **Caller is responsible for namespacing.** The unique index is `(org_id, idempotency_key)` only — no `source_kind` column. Two different Notion workspaces in the same org both using `"notion:<page_id>"` would collide. Document this requirement in the API reference and validate format in v1.1 (regex check on the key).
+- Partial unique index `(org_id, idempotency_key) WHERE deleted_at IS NULL AND idempotency_key IS NOT NULL` enforces uniqueness for active rows.
 - Insert collision → `409 idempotency.conflict` with the existing task id in `details.existing_task_id`.
 - Survives expiration of the Layer 1 cache. Recreatable after soft-delete (the partial index excludes deleted rows).
 
@@ -690,7 +826,7 @@ GET /v1/tasks?cursor=<opaque>&limit=50
   }
 ```
 
-Cursors encode `(updated_at, id)` base64'd. Stable under inserts because they encode an ordering position, not an offset. `null` next_cursor means end of results.
+Cursors encode `(updated_at, id, org_id)` then **HMAC-signed** with `BETTER_AUTH_SECRET` and base64'd. The HMAC binds the cursor to the org that minted it — a caller can't decode the cursor and probe other orgs' data, and any tampering fails verification. Stable under inserts because the cursor encodes an ordering position, not an offset. `null` next_cursor means end of results.
 
 `limit` defaults to 50; max 100. Larger requests get clamped silently.
 
@@ -700,13 +836,14 @@ Cursors encode `(updated_at, id)` base64'd. Stable under inserts because they en
 
 The `events` table is an append-only ordered change log. Every mutating handler emits a row (or rows) before returning. Event kinds:
 
-- `task.created`, `task.updated`, `task.status_changed`, `task.deleted`
+- `task.created`, `task.updated`, `task.status_changed`, `task.assigned`, `task.deleted`
 - `project.created`, `project.updated`, `project.deleted`
-- `agent.created`, `agent.updated`, `agent.deleted`
+- `agent.created`, `agent.updated`, `agent.deleted`, `agent.key_rotated`
+- `connector.created`, `connector.updated`, `connector.deleted`, `connector.key_rotated`
 - `comment.created`, `comment.deleted`
 - `external_ref.added`, `external_ref.removed`
 
-Consumers (Notion connector, hermes adapter, …) poll `GET /v1/events?since=<last_id>&limit=100` (v1.1 endpoint; schema active v1) and store their cursor client-side. Server-side cursors deferred to v1.1 — if/when admin visibility into consumer lag becomes a need.
+Consumers (Notion connector, hermes adapter, …) poll `GET /v1/events?since=<last_id>&limit=100` (**v1.1 endpoint** — the table is populated v1, but the read API is deferred until the first consumer ships, since exposing it has no value before then) and store their cursor client-side. Server-side cursors deferred to v1.1 — if/when admin visibility into consumer lag becomes a need.
 
 **"Has this row been synced by me?"** answered by `external_refs` presence:
 
@@ -718,6 +855,35 @@ WHERE org_id = ? AND resource_type = 'task' AND resource_id = ?
 
 `external_refs.presence == synced`. No separate per-row sync-state table needed.
 
+### Event payload schemas
+
+The `events.payload` JSON shape per `kind`. Stable contract — additive changes only on v1, breaking changes require a new event kind (`task.status_changed_v2`).
+
+```typescript
+// task.created — { task: { full task row } }
+// task.updated — { changed: { field: [oldValue, newValue], ... } }
+// task.status_changed — { from: <status>, to: <status>, reason?: string }
+// task.assigned — { from: <agent_id|null>, to: <agent_id> }
+// task.deleted — {}  (the task row itself is soft-deleted; lookup the row for body)
+// project.created — { project: { full project row } }
+// project.updated — { changed: { field: [oldValue, newValue], ... } }
+// project.deleted — {}
+// agent.created — { agent: { full agent row } }
+// agent.updated — { changed: { field: [oldValue, newValue], ... } }
+// agent.deleted — {}
+// agent.key_rotated — { rotated_at: <integer ms> }   -- new key emitted to caller, not in event
+// connector.created — { connector: { full connector row } }
+// connector.updated — { changed: ... }
+// connector.deleted — {}
+// connector.key_rotated — { rotated_at: ... }
+// comment.created — { comment: { full comment row } }
+// comment.deleted — {}
+// external_ref.added — { ref: { full external_ref row } }
+// external_ref.removed — { ref_id: <string> }
+```
+
+Consumers reading the event log MUST handle "resource-missing" on follow-up fetch — a `task.created` event followed by a `task.deleted` event in the same poll batch means the row is gone when you fetch it. This is normal; events are immutable, resources are not.
+
 ---
 
 ## Observability
@@ -728,6 +894,114 @@ WHERE org_id = ? AND resource_type = 'task' AND resource_id = ?
 - Per-route latency histograms via Workers Analytics Engine (v1.1).
 
 No external APM in v1. Workers' built-in observability covers the basics.
+
+**Logging hygiene (NEVER log):**
+- Full bearer tokens (only the display prefix is OK)
+- Request bodies on `/v1/auth/*` (passwords, OAuth tokens flow through)
+- `apiKey.metadata` raw (contains org_id which is fine, but in case future plugins add secrets)
+- OAuth provider client secrets, signing keys, Better-Auth secret
+
+Hono's logger middleware is configured with a body-skipper for any path matching `/v1/auth/*` or `/v1/bootstrap`.
+
+---
+
+## Security & web
+
+### CSRF + cookies
+
+Better-auth issues session cookies with `SameSite=Lax` and `Secure` (production) by default. We additionally enforce:
+
+- **All state-changing `/v1/*` endpoints reject `Content-Type: application/x-www-form-urlencoded`.** They accept only `application/json`. Form-encoded requests bypass JSON's CORS preflight; rejecting them collapses the classical CSRF attack surface.
+- For browser clients (future custom UI), use the session cookie path; for non-browser clients use PATs (bearer header), which aren't sent automatically by browsers.
+
+### CORS
+
+Two modes:
+- **SaaS production:** allowed origins from `CORS_ALLOWED_ORIGINS` env var (comma-separated). Credentials enabled. Strict allowlist; no wildcards.
+- **OSS self-host:** defaults to NO origins until configured. The first thing a self-hoster does is set `CORS_ALLOWED_ORIGINS=https://my.notion-connector.example,…`.
+- **Local dev:** `http://localhost:*` allowed via a dev-only middleware bypass when `DB_MODE=single` AND `NODE_ENV=development`.
+
+CORS middleware is registered BEFORE the auth handler so preflights resolve cleanly without auth.
+
+### Rate limiting (v1)
+
+Cloudflare Workers' native rate-limit binding for coarse per-IP and per-key protection:
+
+- Per-IP: 600 requests / minute on `/v1/*` (covers brute-force on auth).
+- Per-key: 60 requests / minute on `/v1/tasks*` and `/v1/events*` for `agent` and `connector` keys (covers runaway polling). Configurable per org in v1.1.
+- Exceeded → `429` with `Retry-After` header.
+
+Better-auth's apiKey rate limiting (the `rateLimitEnabled` flags) is disabled — it's racy under Workers concurrency. Cloudflare's binding handles concurrent counting correctly.
+
+### Token storage and rotation
+
+- All tokens stored as bcrypt-of-sha256 (better-auth default; verified Workers-compatible).
+- `apiKey.expiresAt` default: NULL (no expiry) for `agent` and `connector` keys; 90 days for `pat` (configurable at mint time).
+- `POST /v1/agents/:id/rotate-key` mints a new key first, then disables the old key after a **5-minute grace window** (env-driven `KEY_ROTATION_GRACE_SECONDS`). Lets in-flight requests on the old key complete without hard failure.
+
+---
+
+## Environment variables
+
+Required at startup:
+
+| Var | Required | Default | Notes |
+|---|---|---|---|
+| `BETTER_AUTH_SECRET` | yes | — | 32+ random bytes; used for session signing + cursor HMAC |
+| `BETTER_AUTH_URL` | yes | — | Public base URL (`https://api.example.com` or `http://localhost:8787`) |
+| `DB_MODE` | no | `single` | `single` or `split` |
+| `CORS_ALLOWED_ORIGINS` | no | (empty) | Comma-separated origins for browser clients |
+| `MC_ADMIN_TOKEN` | no¹ | — | Required to call `/v1/bootstrap` on first run |
+| `KEY_ROTATION_GRACE_SECONDS` | no | `300` | Old key valid for N seconds after rotate-key |
+| `EVENTS_RETENTION_DAYS` | no | `365` | Cron purges events older than this |
+| `IDEMPOTENCY_TTL_SECONDS` | no | `86400` | Layer-1 idempotency cache TTL |
+
+OAuth providers (per-provider): `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc. — configured as better-auth `socialProviders`. Omitted providers simply don't appear on the sign-in surface.
+
+¹ Required on first deploy (before any user exists); can be unset after bootstrap completes.
+
+A complete `.env.example` ships in the repo with every variable, sensible dev defaults, and inline comments.
+
+---
+
+## API response conventions
+
+### Time format
+
+Timestamps in responses are returned as **RFC 3339 strings** (`"2026-05-22T19:34:00.000Z"`), not integers. Internal storage stays as INTEGER ms epoch; serialization converts on the way out. This is unambiguous, human-readable, and parses with `new Date(...)` in every language. Clients that need ms-precision parse the string.
+
+### Request IDs
+
+Every response carries `X-Request-Id: <cf-request-id>` so callers can quote it in support tickets. The same ID appears in structured logs.
+
+### API versioning
+
+`/v1/` prefix is the v1 contract. Additive changes (new fields, new endpoints, new event kinds) ship to `/v1/` indefinitely. Breaking changes require `/v2/` with a stated deprecation timeline for `/v1/` (no shorter than 12 months). Event kinds use `kind_v2` naming for forward-compatible additions.
+
+---
+
+## Backups and operational concerns
+
+### SaaS (D1)
+
+- D1 PITR (Time Travel) covers 30 days on paid plan; no separate backup needed for the master DB.
+- Pool DBs likewise. For a premium dedicated pool, customers can request weekly `wrangler d1 export` archives delivered to their own R2 bucket (v1.1 feature).
+
+### Self-host (SQLite)
+
+- `wrangler d1 export DB --output=backup-$(date +%F).sql` from a Cron-triggered Worker, or
+- For Node-build self-host: SQLite file backup via `cp` while WAL checkpointed (better-sqlite3 supports `db.backup()`).
+- Documented in `docs/self-hosting.md` (separate doc, written alongside the v1 implementation).
+
+### Cron-triggered tasks (Cloudflare Cron Triggers)
+
+| Cron | What | When |
+|---|---|---|
+| `0 3 * * *` | Purge `events` older than `EVENTS_RETENTION_DAYS` | Daily 03:00 UTC |
+| `0 4 * * *` | Purge `idempotency_keys` past `expires_at` | Daily 04:00 UTC |
+| `*/15 * * * *` | Purge expired `verification` rows (better-auth) | Every 15min |
+
+For self-host, equivalent cron jobs run via `node-cron` inside the long-running Node process.
 
 ---
 
@@ -783,11 +1057,11 @@ services/mission-control/
       schemas.ts          # Zod schemas
   migrations/
     master/
-      0001_better_auth.sql      # generated by @better-auth/cli generate
-      0002_org_custom_fields.sql # tenantPoolId, plan, deletedAt on organization
-      0003_tenant_pools.sql
+      0001_better_auth_base.sql      # drizzle-kit output of better-auth tables
+      0002_better_auth_additional.sql # additionalFields on organization + apiKey
+      0003_tenant_pools.sql           # hand-written; our routing registry
     pool/
-      0001_init.sql
+      0001_init.sql                   # hand-written; all pool schema
   scripts/
     bootstrap.ts          # first user + first org via better-auth admin API
     seed-dev.ts           # local-dev seed data
@@ -795,18 +1069,35 @@ services/mission-control/
     helpers/
       auth.ts             # signUp(), createOrg(), mintAgentKey() helpers
     routes/
-  wrangler.toml
-  Dockerfile              # Node build for self-hosters
+  wrangler.toml           # compatibility_flags = ["nodejs_compat"]
+                          # required by better-auth on Workers (AsyncLocalStorage).
+                          # multiple [[d1_databases]] entries for master + each pool.
+  Dockerfile              # Node build for self-hosters (uses unenv to run Hono Worker
+                          # on Node + better-sqlite3 — same source, two targets)
+  .env.example            # documented env vars (see "Environment variables" section)
   package.json
   tsconfig.json
   vitest.config.ts
   README.md
   LICENSE                 # MIT
   docs/
+    self-hosting.md       # backup/restore, env vars, Docker run
     specs/
       2026-05-22-master-api-design.md   # this file
     plans/
 ```
+
+### Local OSS Docker target
+
+The OSS Docker image is the **Node build**, not `wrangler dev`. Reasoning:
+- Faster startup (~500ms vs ~3s for wrangler).
+- No dependency on wrangler's CLI lifecycle (parent process, dev server).
+- Deployable to any Node host (Fly, Render, Hetzner) — same image.
+- Hot-reload during contributor development is via `wrangler dev` on the host (not in Docker), which gives parity with prod Workers.
+
+Two clear personas:
+- **OSS self-hoster:** `docker run mc-image` → Node + Hono + better-sqlite3 + SQLite file mounted at `/data/mc.sqlite`.
+- **Contributor / SaaS dev:** `wrangler dev` on the dev machine → workerd + local D1 + hot reload.
 
 ---
 
@@ -877,5 +1168,6 @@ This validates the whole architecture before any agent or connector integration 
 ## Open questions for review
 
 1. **Failure handling for spawn-style operations:** when an agent's `consecutive_failures` would hit a limit, who decides the action? In Hermes's local kanban the dispatcher auto-blocks. In the master, there's no dispatcher — only the agent itself reports. v1 leaves this to convention (agent calls PATCH status=blocked); we may add server-side detection v1.1.
-2. **Migration of org between pools:** schema supports updating `organization.tenantPoolId`, but moving data between pools is non-trivial (cross-DB copy). Out of scope v1; document as ops procedure when first needed.
-3. **Better-auth migration cadence:** when better-auth ships schema updates we'll need to apply them via `@better-auth/cli generate`. We commit the generated SQL — but coordinated upgrades across multiple pool deployments is an ops concern to document.
+2. **Migration of org between pools:** schema supports updating `organization.tenantPoolId`, but moving data between pools is non-trivial (cross-DB copy). The pool resolver's 60s isolate cache also means up to 60 seconds of writes go to the old pool after cutover. Out of scope v1; document as a planned-downtime ops procedure when first needed.
+3. **Better-auth upgrade cadence:** when better-auth ships schema updates, the pipeline is (a) bump `package.json`, (b) `pnpm better-auth generate` regenerates `master.ts`, (c) `pnpm drizzle-kit generate` produces a diff SQL, (d) `wrangler d1 migrations apply` ships it. Coordinated upgrades across pool deployments stays a manual ops procedure for now.
+4. **Bootstrap on first-deploy without `MC_ADMIN_TOKEN`:** Worker refuses to start. Should we instead allow the very first signup unconditionally (and disable the open-signup path after the first user exists)? Tradeoff: more friction during ops vs. brief signup-window vulnerability. v1 picks the strict path.

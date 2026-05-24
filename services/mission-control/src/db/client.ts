@@ -12,17 +12,19 @@ import * as masterSchema from './master.ts';
 import * as poolSchema from './pool.ts';
 
 /**
- * Minimal env shape accepted by the client helpers.
- * The index signature lets callers pass the full Hono Bindings env, which
- * includes dynamic POOL_* keys (e.g. POOL_DEFAULT, POOL_PREMIUM_ACME).
+ * Env shape accepted by the client helpers.
+ *
+ * Intentionally permissive `Record<string, unknown>` so callers can pass
+ * the Cloudflare-generated `Cloudflare.Env`, Hono's `c.env`, a test fixture,
+ * or anything else with the expected keys present. Internal code narrows
+ * via runtime checks; type-safety happens at the access site, not the param.
+ *
+ * This shape accommodates:
+ *  - Cloudflare.Env (DB / MASTER_DB / POOL_DEFAULT / DB_MODE all optional)
+ *  - Dynamic POOL_<NAME> bindings looked up in pool-resolver
+ *  - Auth/middleware enrichment (BETTER_AUTH_SECRET, MC_ADMIN_TOKEN, etc.)
  */
-export type Env = {
-  DB?: D1Database;
-  MASTER_DB?: D1Database;
-  POOL_DEFAULT?: D1Database;
-  DB_MODE?: string;
-  [key: string]: unknown;
-};
+export type Env = Record<string, unknown>;
 
 /** Returns a Drizzle client wired to the master (identity) DB. */
 export function masterClient(env: Env): DrizzleD1Database<typeof masterSchema> {

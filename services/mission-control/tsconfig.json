@@ -8,7 +8,7 @@
     // Cloudflare Workers types come from `worker-configuration.d.ts`, generated
     // by `pnpm cf:types` (wrangler types). Re-run that whenever wrangler.jsonc
     // bindings change.
-    "types": ["node", "./worker-configuration.d.ts"],
+    "types": ["./worker-configuration.d.ts"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,

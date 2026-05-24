@@ -55,6 +55,17 @@ services:
       # has configured. Honored only when the upstream image consults it
       # directly (no harm if unused).
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Disable the HermesWorld sidebar link by default. The upstream
+      # workspace's chat-sidebar.tsx gates the link on
+      # `import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'`. The /playground
+      # route (3D world + iframe to hermes-world.ai + WS to a third-party
+      # Cloudflare Worker at myaurora-agi.workers.dev) is opt-in; this
+      # hides the easy way to stumble into it. Whether Vite captured the
+      # env reference at build-time vs runtime is upstream-build-dependent;
+      # if the link still appears after setting this, add a /etc/hosts
+      # block on the Mac for myaurora-agi.workers.dev + hermes-world.ai.
+      # See 2026-05-21 security audit notes.
+      VITE_HERMESWORLD_ENABLED: "0"
     volumes:
       # Bind the same Mac path that the hermes VM also mounts at ~/.hermes/.
       # This puts workspace's Settings UI on the SAME config the agent reads —

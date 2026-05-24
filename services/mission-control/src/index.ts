@@ -3,6 +3,8 @@ import { cors } from 'hono/cors';
 import { health } from './routes/health.ts';
 import { bootstrap } from './routes/bootstrap.ts';
 import { me } from './routes/me.ts';
+import { agentsRouter } from './routes/agents.ts';
+import { connectorsRouter } from './routes/connectors.ts';
 import { createAuth } from './auth/config.ts';
 
 type Env = {
@@ -43,5 +45,7 @@ app.on(['POST', 'GET'], '/v1/auth/*', async (c) => {
 
 app.route('/v1/bootstrap', bootstrap);
 app.route('/v1/me', me);
+app.route('/v1/agents', agentsRouter);
+app.route('/v1/connectors', connectorsRouter);
 
 export default app;

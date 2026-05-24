@@ -18,10 +18,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { masterClient } from '../db/client.ts';
-import { user, organization, member, apiKey as apiKeyTable } from '../db/master.ts';
+import { user, organization, member } from '../db/master.ts';
 import { createAuth } from '../auth/config.ts';
 import { errorResponse, HttpError } from '../errors.ts';
 import { makeId } from '../ids.ts';
+import { mintApiKey } from '../auth/api-keys.ts';
 
 export const bootstrap = new Hono();
 
@@ -32,34 +33,6 @@ const bodySchema = z.object({
   orgName: z.string().min(1),
   orgSlug: z.string().regex(/^[a-z0-9-]+$/).min(1),
 });
-
-// ---------------------------------------------------------------------------
-// PAT helpers — replicate better-auth's key generation + storage format so
-// that verifyApiKey can authenticate the returned key.
-// ---------------------------------------------------------------------------
-
-const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const KEY_LENGTH = 64; // better-auth defaultKeyLength
-
-/** Generate a random API key string: `<prefix><64 random chars>` */
-function generateRawKey(prefix: string): string {
-  let key = prefix;
-  const arr = crypto.getRandomValues(new Uint8Array(KEY_LENGTH));
-  for (let i = 0; i < KEY_LENGTH; i++) {
-    key += KEY_CHARS[arr[i]! % KEY_CHARS.length];
-  }
-  return key;
-}
-
-/** SHA-256 hash → base64url (no padding), matching better-auth's storage format. */
-async function hashKey(key: string): Promise<string> {
-  const data = new TextEncoder().encode(key);
-  const hashBuf = await crypto.subtle.digest('SHA-256', data);
-  const bytes = new Uint8Array(hashBuf);
-  // base64url (RFC 4648 §5), no padding
-  let b64 = btoa(String.fromCharCode(...bytes));
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
 
 // ---------------------------------------------------------------------------
 
@@ -139,34 +112,17 @@ bootstrap.post('/', async (c) => {
       createdAt: now,
     });
 
-    // Step 3: Mint a PAT directly via Drizzle.
+    // Step 3: Mint a PAT directly via Drizzle (via mintApiKey helper).
     //
     // We bypass auth.api.createApiKey because our custom columns (org_id,
     // principal_type) have NOT NULL constraints that better-auth's INSERT does
-    // not include.  We replicate better-auth's key generation + storage format
-    // exactly so that auth.api.verifyApiKey can authenticate the key:
-    //   - Raw key:    mcpat_<64 random alpha chars>
-    //   - Stored key: SHA-256(raw) → base64url, no padding
-    const PAT_PREFIX = 'mcpat_';
-    const rawKey = generateRawKey(PAT_PREFIX);
-    const hashedKey = await hashKey(rawKey);
-    const keyId = makeId('apk');
-
-    await master.insert(apiKeyTable).values({
-      id: keyId,
+    // not include.
+    const { rawKey } = await mintApiKey(master, {
+      prefix: 'mcpat_',
       name: 'bootstrap PAT',
-      prefix: PAT_PREFIX,
-      // Store only the first 7 chars as "start" (better-auth default: 7).
-      start: rawKey.substring(0, 7),
-      key: hashedKey,
       userId,
       orgId,
       principalType: 'pat',
-      enabled: true,
-      rateLimitEnabled: true,
-      requestCount: 0,
-      createdAt: now,
-      updatedAt: now,
     });
 
     return c.json(

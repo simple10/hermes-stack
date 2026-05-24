@@ -91,6 +91,108 @@ hermes_append() {
   fi
 }
 
+# --- ~/.hermes/.env managed-block helper ----------------------------------
+# We own a single block inside ~/.hermes/.env (between MANAGED_OPEN /
+# MANAGED_CLOSE markers). Lines OUTSIDE that block are user-owned and
+# preserved across every `just build` — that's where plugin env vars
+# (HERMES_AGENTS_OBSERVE_URL, HERMES_LANGFUSE_*, etc.) live. Mirrors the
+# `#>--- svc ---` block convention already used in .stack/.env.
+#
+# Migration: first time the helper runs against a marker-less existing
+# .env (legacy layout), the entire current file is preserved as user
+# content beneath a freshly inserted managed block — nothing is lost.
+MANAGED_OPEN='# >>> hermes-stack managed (rewritten on each `just build`) -- DO NOT EDIT >>>'
+MANAGED_CLOSE='# <<< hermes-stack managed <<<'
+MANAGED_HINT='# User vars below are preserved across `just build`. Add plugin env (e.g. HERMES_AGENTS_OBSERVE_URL) here.'
+
+# hermes_env_rewrite_managed_block CONTENT  — Write CONTENT into the managed
+# block of ~/.hermes/.env. Preserves lines outside the markers. Mount-aware
+# (no-op + manual-cmd warning when HERMES_MOUNT_ENABLED=false, same shape
+# as hermes_write).
+#
+# Three modes by file state:
+#   first   — file missing: write the managed block only, no hint.
+#   migrate — file exists with no markers (legacy layout): preserve the
+#             file as the user-section beneath a fresh managed block, AND
+#             strip lines that set keys the managed block now owns (so
+#             stale values can't shadow new ones under either first-wins
+#             or last-wins .env parsing).  Inserts the user-hint comment
+#             once, immediately after the closing marker.
+#   update  — file has the marker pair: rewrite only the content between
+#             them; leave everything outside (`pre` + `post`) untouched
+#             byte-for-byte.  No hint re-insertion — it lives in `post`
+#             from the migrate run, or the user removed it intentionally.
+hermes_env_rewrite_managed_block() {
+  local content="$1"
+  if [ "$HERMES_MOUNT_ENABLED" != "true" ]; then
+    warn "skip ~/.hermes/.env managed-block rewrite (HERMES_MOUNT_ENABLED=false)"
+    printf '       apply manually inside the VM, taking care to preserve any user-added lines\n' >&2
+    return 0
+  fi
+  local target="$MAC_HERMES/.env"
+  mkdir -p "$(dirname "$target")"
+
+  local mode="first" pre="" post=""
+  if [ -f "$target" ]; then
+    local open_ln close_ln
+    open_ln="$(grep -nF "$MANAGED_OPEN"  "$target" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+    close_ln="$(grep -nF "$MANAGED_CLOSE" "$target" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+    if [ -n "$open_ln" ] && [ -n "$close_ln" ] && [ "$close_ln" -gt "$open_ln" ]; then
+      mode="update"
+      [ "$open_ln" -gt 1 ] && pre="$(sed -n "1,$((open_ln - 1))p" "$target")"
+      post="$(sed -n "$((close_ln + 1)),\$p" "$target")"
+    else
+      if [ -n "${open_ln:-}${close_ln:-}" ]; then
+        warn "~/.hermes/.env: marker pair incomplete — treating entire file as user data and reinserting fresh markers"
+      fi
+      mode="migrate"
+      post="$(cat "$target")"
+      # Strip lines from `post` that set any key the managed block owns.
+      # Otherwise a stale `OPENROUTER_API_KEY=old-value` left over from the
+      # pre-marker layout could shadow the freshly-written managed value
+      # (.env parsers vary on first-wins vs last-wins; safe answer: don't
+      # ship duplicates). Match only top-level KEY=… assignments; in-value
+      # `=` signs (e.g. JWT secrets) don't trip the key-name regex.
+      # Comma-flatten the key list — awk -v rejects embedded newlines.
+      local managed_keys
+      managed_keys="$(printf '%s\n' "$content" | sed -nE 's/^([A-Z_][A-Z0-9_]*)=.*/\1/p' | sort -u | tr '\n' ',')"
+      if [ -n "$managed_keys" ]; then
+        post="$(printf '%s\n' "$post" | awk -v keys="$managed_keys" '
+          BEGIN { n=split(keys, K, ","); for (i=1;i<=n;i++) if (K[i]!="") seen[K[i]]=1 }
+          { line=$0
+            if (match(line, /^[ \t]*[A-Z_][A-Z0-9_]*=/)) {
+              k=substr(line, RSTART, RLENGTH-1); sub(/^[ \t]*/, "", k)
+              if (seen[k]) next
+            }
+            print line
+          }')"
+      fi
+    fi
+  fi
+
+  # Trim leading + trailing blank lines from `post` so neither migration
+  # nor steady-state re-runs accumulate whitespace each pass.
+  local post_clean=""
+  if [ -n "$post" ]; then
+    post_clean="$(printf '%s' "$post" | awk 'NF{p=1} p' | awk 'BEGIN{n=0} {a[n++]=$0} END{for(i=n-1;i>=0&&a[i]=="";i--); for(j=0;j<=i;j++) print a[j]}')"
+  fi
+
+  {
+    [ -n "$pre" ] && printf '%s\n' "$pre"
+    printf '%s\n' "$MANAGED_OPEN"
+    printf '%s\n' "$content"
+    printf '%s\n' "$MANAGED_CLOSE"
+    if [ "$mode" = "migrate" ]; then
+      printf '\n%s\n' "$MANAGED_HINT"
+    fi
+    if [ -n "$post_clean" ]; then
+      [ "$mode" = "update" ] && printf '\n'
+      printf '%s\n' "$post_clean"
+    fi
+  } > "$target"
+  chmod 600 "$target"
+}
+
 log "0. resolve hermes mount config
    HERMES_MOUNT_ENABLED=$HERMES_MOUNT_ENABLED
    HERMES_MOUNT_DIR=$HERMES_MOUNT_DIR
@@ -192,20 +294,16 @@ m 'command -v hermes >/dev/null 2>&1 \
 m "sudo ln -sf /home/$REMOTE_USER/.local/bin/hermes /usr/local/bin/hermes"
 # Map stack-side HERMES_TELEGRAM_* → upstream's un-prefixed TELEGRAM_* names
 # inside the VM (~/.hermes/.env is consumed by hermes-agent, which reads
-# the upstream names). Mount-aware: hermes_write writes Mac-side under the
-# mount when enabled, warn-skips when disabled.
-ENV_PAYLOAD="$(cat <<EOF
-OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+# the upstream names). The .env is written via a marker-delimited managed
+# block: HERMES_ENV_MANAGED accumulates here and in the conditional blocks
+# below (agentmemory / firecrawl / camofox / searxng), then
+# hermes_env_rewrite_managed_block writes it once before step 5. User
+# lines outside the markers (plugin env etc.) are preserved on every
+# build — see the helper's docstring above.
+HERMES_ENV_MANAGED="OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
 TELEGRAM_BOT_TOKEN=${HERMES_TELEGRAM_BOT_TOKEN:-}
 TELEGRAM_ALLOWED_USERS=${HERMES_TELEGRAM_ALLOWED_USERS:-}
-TELEGRAM_HOME_CHANNEL=${HERMES_TELEGRAM_HOME_CHANNEL:-}
-EOF
-)"
-printf '%s' "$ENV_PAYLOAD" | hermes_write .env
-if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
-  chmod 600 "$MAC_HERMES/.env"
-  log "~/.hermes/.env seeded (Mac-side via mount)"
-fi
+TELEGRAM_HOME_CHANNEL=${HERMES_TELEGRAM_HOME_CHANNEL:-}"
 
 MEM="${HERMES_MEMORY:-honcho}"
 log "4. configure Hermes memory provider: $MEM"
@@ -238,12 +336,11 @@ case "$MEM" in
   agentmemory)
     # Third-party (NOT in Hermes' official memory-plugin set): the @agentmemory/mcp
     # shim + memory.provider. Our agentmemory is containerized, so the shim must
-    # reach it at the orb DNS (NOT localhost:3111) — pass URL + secret via
-    # ~/.hermes/.env (step 3 rewrote that file fresh, so this append is
-    # idempotent across builds). npx/node must be on the VM PATH.
-    printf 'AGENTMEMORY_URL=http://agentmemory.%s.orb.local:3111\nAGENTMEMORY_SECRET=%s\n' \
-      "$PROJ" "${AGENTMEMORY_SECRET:-}" \
-      | hermes_append .env
+    # reach it at the orb DNS (NOT localhost:3111) — append URL + secret to
+    # the managed .env block. npx/node must be on the VM PATH.
+    HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
+AGENTMEMORY_URL=http://agentmemory.$PROJ.orb.local:3111
+AGENTMEMORY_SECRET=${AGENTMEMORY_SECRET:-}"
     m 'hermes config set memory.provider agentmemory'
     if [ "$HERMES_MOUNT_ENABLED" = "true" ]; then
       # Mount-side: run python locally on Mac against the shared config.yaml.
@@ -292,14 +389,15 @@ esac
 # Firecrawl (profile [firecrawl]): the self-hosted firecrawl-api ignores
 # client auth (USE_DB_AUTHENTICATION=false), but the firecrawl SDK requires a
 # non-empty FIRECRAWL_API_KEY — so a fixed, clearly-labelled no-auth
-# placeholder (NOT a secret). Append URL+placeholder to ~/.hermes/.env (step 3
-# rewrites that file fresh, so this is idempotent across builds). Only wired
-# when the firecrawl profile is active — don't point Hermes at a dead endpoint.
+# placeholder (NOT a secret). Append to the managed .env block when the
+# firecrawl profile is active; when it's not active, the keys are
+# automatically OMITTED from the rewritten managed block (the block always
+# reflects current stack state, never accumulates stale keys).
 if echo "${COMPOSE_PROFILES:-}" | grep -qw firecrawl; then
-  printf 'FIRECRAWL_API_URL=http://firecrawl-api.%s.orb.local:3002\nFIRECRAWL_API_KEY=%s\n' \
-    "$PROJ" "fc-selfhost-noauth" \
-    | hermes_append .env
-  log "firecrawl: FIRECRAWL_API_URL=http://firecrawl-api.$PROJ.orb.local:3002 + placeholder key -> ~/.hermes/.env"
+  HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
+FIRECRAWL_API_URL=http://firecrawl-api.$PROJ.orb.local:3002
+FIRECRAWL_API_KEY=fc-selfhost-noauth"
+  log "firecrawl: FIRECRAWL_API_URL=http://firecrawl-api.$PROJ.orb.local:3002 + placeholder key -> managed .env block"
 else
   warn "firecrawl not in COMPOSE_PROFILES — skipping Hermes firecrawl env (add 'firecrawl' to COMPOSE_PROFILES to e2e-test it)"
 fi
@@ -312,9 +410,9 @@ fi
 # the camofox-browser service must run without CAMOFOX_ACCESS_KEY — set
 # CAMOFOX_AUTH=disabled in .stack/.env. Only wired when the profile is active.
 if echo "${COMPOSE_PROFILES:-}" | grep -qw camofox-browser; then
-  printf 'CAMOFOX_URL=http://camofox-browser.%s.orb.local:9377\n' "$PROJ" \
-    | hermes_append .env
-  log "camofox: CAMOFOX_URL=http://camofox-browser.$PROJ.orb.local:9377 -> ~/.hermes/.env"
+  HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
+CAMOFOX_URL=http://camofox-browser.$PROJ.orb.local:9377"
+  log "camofox: CAMOFOX_URL=http://camofox-browser.$PROJ.orb.local:9377 -> managed .env block"
 else
   warn "camofox-browser not in COMPOSE_PROFILES — skipping Hermes camofox env"
 fi
@@ -322,18 +420,25 @@ fi
 # SearXNG (profile [searxng]): privacy-respecting metasearch for Hermes'
 # web_search capability (Hermes docs:
 # https://hermes-agent.nousresearch.com/docs/user-guide/features/web-search).
-# Append SEARXNG_URL to ~/.hermes/.env AND flip web.search_backend to searxng.
-# If both [firecrawl] and [searxng] are active, searxng wins (this block runs
-# after firecrawl above + sets search_backend explicitly). Override by
-# manually setting web.search_backend in ~/.hermes/config.yaml after build.
+# Append SEARXNG_URL to the managed .env block AND flip web.search_backend
+# to searxng. If both [firecrawl] and [searxng] are active, searxng wins
+# (this block runs after firecrawl above + sets search_backend explicitly).
+# Override by manually setting web.search_backend in ~/.hermes/config.yaml
+# after build.
 if echo "${COMPOSE_PROFILES:-}" | grep -qw searxng; then
-  printf 'SEARXNG_URL=http://searxng.%s.orb.local:8080\n' "$PROJ" \
-    | hermes_append .env
+  HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
+SEARXNG_URL=http://searxng.$PROJ.orb.local:8080"
   m 'hermes config set web.search_backend searxng'
-  log "searxng: SEARXNG_URL=http://searxng.$PROJ.orb.local:8080 -> ~/.hermes/.env (web.search_backend=searxng)"
+  log "searxng: SEARXNG_URL=http://searxng.$PROJ.orb.local:8080 -> managed .env block (web.search_backend=searxng)"
 else
   warn "searxng not in COMPOSE_PROFILES — skipping Hermes searxng env"
 fi
+
+# Materialize the accumulated managed block now that every conditional
+# section has had its chance to add lines. User lines outside the markers
+# are preserved (see hermes_env_rewrite_managed_block docstring).
+hermes_env_rewrite_managed_block "$HERMES_ENV_MANAGED"
+log "~/.hermes/.env managed block rewritten ($(printf '%s\n' "$HERMES_ENV_MANAGED" | wc -l | tr -d ' ') keys; user lines outside markers preserved)"
 
 log "5. patch config.yaml model: block (litellm.$PROJ.orb.local; key via stdin, never argv)"
 HM="${HERMES_MODEL:-cliproxy/gpt-5.5}"   # HERMES_MODEL lever from sourced .stack/.env

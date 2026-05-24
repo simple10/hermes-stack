@@ -38,7 +38,11 @@ Or check the box in the interactive `hermes plugins` UI.
 
 ## Configure
 
-Set in `~/.hermes/.env` (or `.stack/hermes/.hermes/.env` with the mount):
+Set in `~/.hermes/.env` (or `.stack/hermes/.hermes/.env` with the mount).
+Add the line **outside** the `# >>> hermes-stack managed >>>` block —
+i.e. below the closing `# <<< hermes-stack managed <<<` marker — so
+`just build` doesn't overwrite it. See *What `just build` writes* in
+`services/hermes/README.md`.
 
 ```bash
 HERMES_AGENTS_OBSERVE_URL=http://host.docker.internal:4981

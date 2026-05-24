@@ -57,6 +57,35 @@ The heavy hermes-agent venv + source live at `/opt/hermes-agent/`
 env var — so the mount carries only user config + runtime state
 (~250 MB), not the 1.4 GB Python venv.
 
+## What `just build` writes to `~/.hermes/`
+
+`~/.hermes/.env` is **partially managed**. `build.sh` owns a single
+marker-delimited block (`# >>> hermes-stack managed >>>` …
+`# <<< hermes-stack managed <<<`) — that block is rewritten authoritatively
+on every build to reflect the current `.stack/.env` + active
+`COMPOSE_PROFILES` (`OPENROUTER_API_KEY`, `TELEGRAM_*`, conditionally
+`AGENTMEMORY_*` / `FIRECRAWL_*` / `CAMOFOX_URL` / `SEARXNG_URL`). Lines
+**outside** the markers are user-owned and preserved across builds — that's
+where plugin env (`HERMES_AGENTS_OBSERVE_URL`, `HERMES_LANGFUSE_*`, …)
+lives. Mirrors the `#>--- svc ---` block convention used in `.stack/.env`.
+
+First build against a marker-less legacy file auto-migrates: the entire
+existing file is preserved as the user section beneath a freshly inserted
+managed block, and any pre-marker duplicates of managed keys are stripped
+so stale values can't shadow the new ones. Test fixtures cover the full
+matrix (first-build / migration / steady-state / service-disable / corrupt
+markers / idempotency) — see `services/hermes/build.test.sh`.
+
+`~/.hermes/config.yaml` is **NOT** marker-protected: `build.sh` (and
+`start.sh`) surgically replace the `model:` block on every run, and the
+`HERMES_MEMORY=agentmemory` branch round-trips the whole file through
+`yaml.safe_load`/`yaml.safe_dump` to set `mcp_servers.agentmemory` +
+`memory.provider`. That round-trip drops YAML comments (a limitation of
+pyyaml; `hermes config set` itself has the same constraint inside the
+Hermes CLI). Top-level keys not touched by `build.sh` are preserved, but
+don't rely on comment preservation inside `model:` or the agentmemory
+branch's edits.
+
 When disabled, `build.sh` skips every step that would edit `~/.hermes/*`
 and prints the equivalent `orb -m bash -lc` command for manual apply.
 Other build steps (orb create, apt installs, systemd unit install, the

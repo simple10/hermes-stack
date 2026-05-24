@@ -5,6 +5,7 @@ import { bootstrap } from './routes/bootstrap.ts';
 import { me } from './routes/me.ts';
 import { agentsRouter } from './routes/agents.ts';
 import { connectorsRouter } from './routes/connectors.ts';
+import { projectsRouter } from './routes/projects.ts';
 import { createAuth } from './auth/config.ts';
 
 type Env = {
@@ -47,5 +48,6 @@ app.route('/v1/bootstrap', bootstrap);
 app.route('/v1/me', me);
 app.route('/v1/agents', agentsRouter);
 app.route('/v1/connectors', connectorsRouter);
+app.route('/v1/projects', projectsRouter);
 
 export default app;

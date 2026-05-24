@@ -62,9 +62,12 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
       viaUserId = session.user.id;
 
       // Look up the user's role in this org.
-      const m = await masterClient(env).query.member.findFirst({
-        where: and(eq(member.userId, session.user.id), eq(member.organizationId, orgId)),
-      });
+      const memberRows = await masterClient(env)
+        .select()
+        .from(member)
+        .where(and(eq(member.userId, session.user.id), eq(member.organizationId, orgId)))
+        .limit(1);
+      const m = memberRows[0];
       if (!m) {
         throw new HttpError(403, 'auth.not_member', 'Not a member of the active organization');
       }
@@ -81,34 +84,44 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
       const verified = await auth.api.verifyApiKey({ body: { key: bearer } });
 
       if (!verified.valid || !verified.key) {
-        const errMsg = verified.error?.message ?? 'Invalid or expired token';
-        throw new HttpError(401, 'auth.invalid_token', errMsg);
+        // verified.error.message may be a RawError object or a plain string in
+        // different union branches — normalise to string for the HttpError.
+        const errMsg: unknown = (verified as { error?: { message?: unknown } }).error?.message;
+        const errorMessage = typeof errMsg === 'string' ? errMsg : 'Invalid or expired token';
+        throw new HttpError(401, 'auth.invalid_token', errorMessage);
       }
 
       const keyId = verified.key.id;
-      viaUserId = verified.key.userId;
       viaKeyId = keyId;
 
       // Workaround: better-auth verifyApiKey returns Omit<ApiKey, "key">
       // which does NOT include our additionalFields (orgId, principalType).
       // We do a follow-up Drizzle query against the apiKey table to fetch them.
-      const keyRow = await masterClient(env).query.apiKey.findFirst({
-        where: eq(apiKeyTable.id, keyId),
-      });
+      const keyRows = await masterClient(env)
+        .select()
+        .from(apiKeyTable)
+        .where(eq(apiKeyTable.id, keyId))
+        .limit(1);
+      const keyRow = keyRows[0];
       if (!keyRow) {
         // Race: key was deleted between verify and fetch. Treat as invalid.
         throw new HttpError(401, 'auth.invalid_token', 'API key not found after verification');
       }
 
       orgId = keyRow.orgId;
+      viaUserId = keyRow.userId ?? undefined;
       const ptype = keyRow.principalType as 'pat' | 'agent' | 'connector';
 
       if (ptype === 'pat') {
         principal = { type: 'user', id: keyRow.userId };
         // Look up the user's org role.
-        const m = await masterClient(env).query.member.findFirst({
-          where: and(eq(member.userId, keyRow.userId), eq(member.organizationId, orgId)),
-        });
+        if (!orgId) throw new HttpError(401, 'auth.invalid_token', 'No org_id on key');
+        const patMemberRows = await masterClient(env)
+          .select()
+          .from(member)
+          .where(and(eq(member.userId, keyRow.userId), eq(member.organizationId, orgId)))
+          .limit(1);
+        const m = patMemberRows[0];
         if (!m) {
           throw new HttpError(403, 'auth.not_member', 'API key user is not a member of this org');
         }

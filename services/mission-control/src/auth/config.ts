@@ -1,9 +1,9 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { organization, apiKey } from 'better-auth/plugins';
-import { drizzle } from 'drizzle-orm/d1';
 import type { D1Database } from '@cloudflare/workers-types';
 import * as schema from '../db/master.ts';
+import { masterClient } from '../db/client.ts';
 
 export type AuthEnv = {
   DB?: D1Database;
@@ -14,10 +14,9 @@ export type AuthEnv = {
 };
 
 export function createAuth(env: AuthEnv) {
-  // Defer drizzle() into the factory so the schema import stays CLI-safe.
-  const binding = env.DB_MODE === 'split' ? env.MASTER_DB : env.DB;
-  if (!binding) throw new Error('master DB binding not found');
-  const db = drizzle(binding, { schema });
+  // Use masterClient() which transparently picks D1 or better-sqlite3 Drizzle
+  // adapter based on whether we're on Workers or Node self-host target.
+  const db = masterClient(env as Parameters<typeof masterClient>[0]);
 
   // better-auth's Drizzle adapter looks up tables by their better-auth model
   // name.  The apiKey plugin uses the lowercase key "apikey" to resolve the

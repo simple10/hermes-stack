@@ -22,16 +22,17 @@
   "dependencies": {
     "@better-auth/api-key": "1.6.11",
     "better-auth": "1.6.11",
-    "drizzle-orm": "0.45.2",
-    "hono": "4.12.22",
+    "drizzle-orm": "1.0.0-rc.3",
+    "hono": "4.12.19",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.16.6",
     "@types/node": "24.12.4",
-    "drizzle-kit": "0.31.10",
-    "typescript": "5.9.3",
-    "vitest": "4.1.7"
+    "drizzle-kit": "1.0.0-rc.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.0",
+    "vitest": "4.1.6"
   },
   "engines": {
     "node": ">=22.0.0",

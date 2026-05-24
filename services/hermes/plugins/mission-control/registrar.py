@@ -123,6 +123,10 @@ async def _init_events_cursor(
     """Set links_db.mc_cursors.events to MC's current head id so the
     first pull cycle picks up only NEW events (not the entire history).
 
+    Uses `order='desc'&limit=1` to look up the tail of the stream in a
+    single round-trip. ASC + limit=1 would return the OLDEST event,
+    causing the plugin to replay the entire history on first connect.
+
     Returns the head id we set (or 0 if the stream is empty).
     """
     resp = await client.events_list(
@@ -130,6 +134,7 @@ async def _init_events_cursor(
         since=0,
         kinds="task,comment,external_ref",
         limit=1,
+        order="desc",
     )
     events = resp.get("events") or []
     if not events:

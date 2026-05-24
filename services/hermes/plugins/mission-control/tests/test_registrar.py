@@ -235,6 +235,31 @@ async def test_register_initializes_events_cursor_to_head(env, tmp_path, mock_cl
         ldb_conn.close()
 
 
+async def test_register_uses_order_desc_to_get_head_not_oldest(env, tmp_path, mock_client_factory):
+    """Regression: a prior version passed `order='asc'` (default), which
+    returns the OLDEST event on an org with history → the plugin would
+    replay every prior event on first connect. Must use order='desc'."""
+    auth_path = tmp_path / "auth.json"
+    links_db_path = tmp_path / "links.db"
+    mock_c = mock_client_factory()
+
+    with patch("mission_control.registrar.mc_client.McClient", return_value=mock_c):
+        cfg._reset_cache_for_tests()
+        await registrar.register(env, auth_path, links_db_path, "mcpat_x", name="vm1")
+
+    # The cursor-init call passed order='desc' + limit=1
+    cursor_init_calls = [
+        c for c in mock_c.events_list.call_args_list
+        if c.kwargs.get("limit") == 1
+    ]
+    assert cursor_init_calls, "expected at least one events_list(limit=1) call"
+    last = cursor_init_calls[-1]
+    assert last.kwargs.get("order") == "desc", (
+        f"events-cursor init must pass order='desc' to get the head, "
+        f"got kwargs={last.kwargs}"
+    )
+
+
 async def test_register_leaves_cursor_at_zero_when_events_empty(env, tmp_path, mock_client_factory):
     auth_path = tmp_path / "auth.json"
     links_db_path = tmp_path / "links.db"

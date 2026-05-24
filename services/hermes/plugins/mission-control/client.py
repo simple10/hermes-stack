@@ -112,15 +112,22 @@ class McClient:
         kinds: Optional[str] = None,
         limit: int = 100,
         cursor: Optional[str] = None,
+        order: Optional[str] = None,
     ) -> dict:
         """GET /v1/events. `kinds` is a comma-separated string of
         resource_type values (e.g. 'task,comment,external_ref').
+
+        `order='desc'` returns rows in reverse-id order — used by the
+        registrar to look up the current head of the stream without
+        replaying history. Default (omitted) is ASC pagination.
         """
         params: dict[str, Any] = {"since": since, "limit": limit}
         if kinds is not None:
             params["kinds"] = kinds
         if cursor is not None:
             params["cursor"] = cursor
+        if order is not None:
+            params["order"] = order
         return await self._request(
             "GET", "/v1/events",
             key=connector_key, params=params,

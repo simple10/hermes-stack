@@ -42,6 +42,10 @@ const querySchema = z.object({
   kinds: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(100),
   cursor: z.string().optional(),
+  // 'desc' returns rows in reverse id order — used by consumers to look up
+  // the current head of the stream (e.g. registrar bootstrap). 'asc' is the
+  // pagination default.
+  order: z.enum(['asc', 'desc']).default('asc'),
 });
 
 // ---------------------------------------------------------------------------
@@ -65,7 +69,7 @@ eventsRouter.get(
           parsed.error.issues,
         );
       }
-      const { since, kinds, limit, cursor } = parsed.data;
+      const { since, kinds, limit, cursor, order } = parsed.data;
 
       let kindsList: string[] | undefined;
       if (kinds) {
@@ -86,6 +90,7 @@ eventsRouter.get(
         kinds: kindsList,
         limit,
         cursor: cursor ?? null,
+        order,
       });
 
       // Decode payload (stored as TEXT JSON) into objects for the response.

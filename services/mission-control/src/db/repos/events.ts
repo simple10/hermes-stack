@@ -10,7 +10,7 @@
  * This replaces the standalone emitEvent() function that previously lived in
  * src/events/emit.ts (deleted in Task 4 of the DAL refactor).
  */
-import { and, asc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
 import { events } from '../pool.ts';
 import type { AuthContext } from '../../auth/types.ts';
 
@@ -77,19 +77,27 @@ export function eventsRepo(ctx: AuthContext) {
     },
 
     /**
-     * List events for this org with id > since, optionally filtered by
-     * resource_type. Returns up to `limit` rows ordered by id ASC.
+     * List events for this org, optionally filtered by resource_type.
      *
-     * events.id is monotonic per pool DB; v1 has one pool so a single
-     * integer `since` cursor suffices. `cursor` (opaque — currently the
-     * Number-as-string of the last seen id) is used for within-window
-     * paging when a single since-window has more than `limit` events.
+     * Two read modes via ``order``:
+     *   - ``'asc'`` (default): standard forward pagination. Filters id > since;
+     *     orders ASC; advance ``since`` to the highest id seen for the next
+     *     page. ``cursor`` (Number-as-string) overrides ``since`` for
+     *     within-window paging.
+     *   - ``'desc'``: tail-of-stream lookup. Filters id > since; orders DESC.
+     *     A single ``limit=1`` call returns the current head id — used by
+     *     consumers (e.g. the Hermes plugin's registrar) to initialize a
+     *     cursor at "now" without replaying history.
+     *
+     * events.id is monotonic per pool DB; v1 has one pool so a single integer
+     * since cursor suffices.
      */
     async list(args: {
       since: number;
       kinds?: string[]; // resource_type values
       limit: number;
       cursor?: string | null;
+      order?: 'asc' | 'desc';
     }): Promise<{ rows: typeof events.$inferSelect[]; nextCursorId: number | null }> {
       const lower = args.cursor ? Number(args.cursor) : args.since;
       const conditions = [
@@ -99,16 +107,25 @@ export function eventsRepo(ctx: AuthContext) {
       if (args.kinds && args.kinds.length > 0) {
         conditions.push(inArray(events.resourceType, args.kinds));
       }
+      const orderBy = args.order === 'desc' ? desc(events.id) : asc(events.id);
       const rows = await ctx.pool
         .select()
         .from(events)
         .where(and(...conditions))
-        .orderBy(asc(events.id))
+        .orderBy(orderBy)
         .limit(args.limit + 1);
 
       const hasMore = rows.length > args.limit;
       const trimmed = hasMore ? rows.slice(0, args.limit) : rows;
-      const nextCursorId = hasMore ? trimmed[trimmed.length - 1]!.id : null;
+      // nextCursorId only meaningful for ASC order — DESC is a tail-lookup
+      // mode, not a paging mode. Callers should re-issue with a refreshed
+      // since if they need to scan further back.
+      const nextCursorId =
+        args.order === 'desc'
+          ? null
+          : hasMore
+            ? trimmed[trimmed.length - 1]!.id
+            : null;
       return { rows: trimmed, nextCursorId };
     },
 

@@ -55,16 +55,19 @@ services:
       # has configured. Honored only when the upstream image consults it
       # directly (no harm if unused).
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      # Disable the HermesWorld sidebar link by default. The upstream
-      # workspace's chat-sidebar.tsx gates the link on
-      # `import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'`. The /playground
-      # route (3D world + iframe to hermes-world.ai + WS to a third-party
-      # Cloudflare Worker at myaurora-agi.workers.dev) is opt-in; this
-      # hides the easy way to stumble into it. Whether Vite captured the
-      # env reference at build-time vs runtime is upstream-build-dependent;
-      # if the link still appears after setting this, add a /etc/hosts
-      # block on the Mac for myaurora-agi.workers.dev + hermes-world.ai.
-      # See 2026-05-21 security audit notes.
+      # Disable the HermesWorld sidebar link. Upstream's chat-sidebar.tsx
+      # gates the link on `import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'`.
+      # CAVEAT (2026-05-21): on the pinned upstream image, Vite already
+      # inlined the env access to `const fpe={}` at BUILD time, so passing
+      # this var at runtime does NOTHING — the bundle reads an empty
+      # object regardless. We keep this line as a forward-compat hint and
+      # to make our intent explicit. To actually hide the link on the
+      # current digest, run inside the container:
+      #   sed -i 's|const fpe={}|const fpe={VITE_HERMESWORLD_ENABLED:"0"}|g' \
+      #       /app/dist/client/assets/main-*.js
+      # That patch reverts on container recreate. See README.md "Security
+      # notes" for the durable options (entrypoint sed override, Mac
+      # /etc/hosts block, custom image build) we deferred.
       VITE_HERMESWORLD_ENABLED: "0"
     volumes:
       # Bind the same Mac path that the hermes VM also mounts at ~/.hermes/.

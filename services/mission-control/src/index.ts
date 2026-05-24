@@ -7,6 +7,8 @@ import { agentsRouter } from './routes/agents.ts';
 import { connectorsRouter } from './routes/connectors.ts';
 import { projectsRouter } from './routes/projects.ts';
 import { tasksRouter } from './routes/tasks.ts';
+import { commentsRouter } from './routes/comments.ts';
+import { externalRefsRouter } from './routes/external-refs.ts';
 import { createAuth } from './auth/config.ts';
 
 type Env = {
@@ -51,5 +53,7 @@ app.route('/v1/agents', agentsRouter);
 app.route('/v1/connectors', connectorsRouter);
 app.route('/v1/projects', projectsRouter);
 app.route('/v1/tasks', tasksRouter);
+app.route('/v1/tasks', commentsRouter);
+app.route('/v1/external_refs', externalRefsRouter);
 
 export default app;

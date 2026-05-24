@@ -80,63 +80,85 @@ PAT-driven registration flow."
 
 **Background.** The MC spec consistently shows list responses as `{ "data": [...], "next_cursor": "..." }` (see spec lines 694, 825). The current MC implementation diverged: every route returns its resource name as the key (`{tasks, next_cursor}`, `{projects, next_cursor}`, `{comments, next_cursor}`, etc.) and emits `next_cursor: null` on the last page. The plugin's pull loop (and the entire plan that follows) assumes the spec — `{data, next_cursor}` with a tip cursor on the last page. This task brings the MC implementation back into line with its own spec.
 
-**Files (verified by review):**
-- Modify: `services/mission-control/src/pagination.ts` (the real home of `encodeCursor`; also `helpers.ts` if a shared envelope helper makes sense)
-- Modify: `services/mission-control/src/routes/tasks.ts` (~line 344-347 — change `{tasks: ..., next_cursor}` → `{data: ..., next_cursor}` and ensure the cursor is always set)
-- Modify: `services/mission-control/src/routes/projects.ts` (~line 135-138)
-- Modify: `services/mission-control/src/routes/agents.ts` (list handler)
-- Modify: `services/mission-control/src/routes/connectors.ts` (list handler)
-- Modify: `services/mission-control/src/routes/comments.ts` (~line 228-231 — change `{comments: ...}` → `{data: ...}`)
-- Modify: `services/mission-control/src/routes/external_refs.ts` (list handler)
-- Modify: every existing test that asserts on `response.tasks` / `response.projects` / `response.comments` / etc. — switch to `response.data`. Find with: `grep -nR "\.tasks\b\|\.projects\b\|\.comments\b\|\.agents\b\|\.connectors\b\|\.external_refs\b" services/mission-control/test/api/`
-- Modify: `services/mission-control/docs/specs/2026-05-22-master-api-design.md` pagination section (the spec already says `data` — just update the "`null` next_cursor" sentence)
-- Test: `services/mission-control/test/api/pagination.test.ts` (new) — uses the existing route-level `app.fetch(req)` test pattern (NOT the repo-level pattern; repos return bare arrays without envelopes)
+**Files (verified against the real tree — note hyphenated paths):**
+- Modify: `services/mission-control/src/pagination.ts` — add `paginated()` async helper (`encodeCursor` is async and takes `(payload, secret)`)
+- Modify: `services/mission-control/src/routes/tasks.ts` (around line 320-352 — replaces the `let nextCursor: string | null = null; if (hasMore) ...` block + the `{tasks: ..., next_cursor: nextCursor}` envelope)
+- Modify: `services/mission-control/src/routes/projects.ts`
+- Modify: `services/mission-control/src/routes/agents.ts`
+- Modify: `services/mission-control/src/routes/connectors.ts`
+- Modify: `services/mission-control/src/routes/comments.ts`
+- Modify: `services/mission-control/src/routes/external-refs.ts` (hyphenated)
+- Modify: every existing test under `services/mission-control/test/routes/` and `test/isolation.test.ts` that asserts on `response.tasks` / `response.projects` / `response.comments` / etc. (find with: `grep -nR "body\.\(tasks\|projects\|comments\|agents\|connectors\|external_refs\)" services/mission-control/test/`)
+- Modify: `services/mission-control/docs/specs/2026-05-22-master-api-design.md` pagination section (the spec already documents `{data, ...}` correctly — just update the "`null` next_cursor" sentence)
+- Test: `services/mission-control/test/routes/pagination-envelope.test.ts` (new) — uses the existing route-test pattern (`import app from '../../src/index.ts'` + `app.fetch(req, TEST_ENV)`). NOT to be confused with the existing `test/pagination.test.ts` which tests the cursor primitives.
 
-- [ ] **Step 1: Find the cursor + envelope code**
+- [ ] **Step 1: Confirm shape of the existing code**
 
 ```bash
-grep -nR "encodeCursor\|next_cursor" services/mission-control/src/ | head -30
-grep -nR "ownerCtx\|ownerApp" services/mission-control/test/ | head -10
+grep -n "encodeCursor\|next_cursor" services/mission-control/src/pagination.ts
+sed -n '320,355p' services/mission-control/src/routes/tasks.ts
+head -30 services/mission-control/test/routes/tasks.test.ts
 ```
 
-Confirm:
-- `encodeCursor` lives in `services/mission-control/src/pagination.ts`.
-- Each route handler manually builds `{ <resource>: rows, next_cursor: hasMore ? encodeCursor(...) : null }`.
-- Test helpers in `services/mission-control/test/api/_helpers.ts` (or similar) use `app.fetch(req)` and parse JSON.
+Confirm (already verified in prior review):
+- `encodeCursor` is `async (payload, secret) => Promise<string>`.
+- Each route does: `let nextCursor: string | null = null; if (hasMore) nextCursor = await encodeCursor({updatedAt, id, orgId}, secret); return c.json({tasks: rows..., next_cursor: nextCursor})`.
+- Test pattern: `import app from '../../src/index.ts'`, `import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts'`, `const TEST_ENV = { ...env, MC_ADMIN_TOKEN: '...' }`, then `app.fetch(new Request(url, init), TEST_ENV)`.
 
 - [ ] **Step 2: Write the failing test (new file)**
 
-Create `services/mission-control/test/api/pagination.test.ts` using the same patterns as the other tests in `test/api/` (mirror imports / fixtures from `test/api/tasks.test.ts`):
+Create `services/mission-control/test/routes/pagination-envelope.test.ts`:
 
 ```ts
-import { describe, expect, it, beforeAll } from 'vitest';
+/**
+ * Verifies the {data, next_cursor} envelope and tip-cursor behavior the
+ * Hermes MC plugin's pull loop depends on.
+ *
+ * Distinct from test/pagination.test.ts (which tests cursor primitives).
+ */
+import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env } from 'cloudflare:workers';
 import { applyD1Migrations } from 'cloudflare:test';
-import { inject } from 'vitest';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
+import app from '../../src/index.ts';
+import { createOrgFixture } from '../helpers/orgs.ts';
 
-// Mirror the helpers used by test/api/tasks.test.ts for setting up an
-// authed org + user + PAT. Names may differ slightly — adapt to whatever
-// the existing tests import.
-import { bootstrapOrgWithPat, app } from './_helpers';
+const ADMIN_TOKEN = 'pagination-envelope-test-token';
+const TEST_ENV = { ...env, MC_ADMIN_TOKEN: ADMIN_TOKEN } as any;
+
+let pat = '';
+let orgId = '';
+let projectId = '';
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB as D1Database, inject('d1Migrations') as D1Migration[]);
+
+  const fix = await createOrgFixture(env.DB as D1Database, 'Envelope Test Org', 'env-test');
+  pat = fix.pat;
+  orgId = fix.orgId;
+
+  // Create one project to use across tests.
+  const r = await app.fetch(new Request('http://x/v1/projects', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'P', slug: 'p-env-test' }),
+  }), TEST_ENV);
+  const body = await r.json() as { project: { id: string } };
+  projectId = body.project.id;
+
+  // And one task so list endpoints have content.
+  await app.fetch(new Request('http://x/v1/tasks', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, title: 't' }),
+  }), TEST_ENV);
 });
 
 describe('pagination envelope + tip cursor', () => {
   it('GET /v1/tasks returns {data, next_cursor} with non-null cursor even on the last page', async () => {
-    const { pat, projectId } = await bootstrapOrgWithPat();
-    // create 1 task
-    await app.fetch(new Request('http://x/v1/tasks', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, title: 't' }),
-    }), env);
-
     const res = await app.fetch(new Request('http://x/v1/tasks?limit=100', {
       headers: { 'Authorization': `Bearer ${pat}` },
-    }), env);
+    }), TEST_ENV);
     expect(res.status).toBe(200);
     const body = await res.json() as { data: unknown[]; next_cursor: string | null };
     expect(body).toHaveProperty('data');
@@ -144,128 +166,150 @@ describe('pagination envelope + tip cursor', () => {
     expect(body.data.length).toBe(1);
     expect(body.next_cursor).not.toBeNull();
     expect(body.next_cursor).not.toBe('');
-    expect((body as any).tasks).toBeUndefined();  // envelope normalized
+    expect((body as any).tasks).toBeUndefined();  // envelope normalized away
   });
 
   it('reusing the tip cursor returns empty data with a still-valid cursor', async () => {
-    const { pat } = await bootstrapOrgWithPat();
-    const page1 = await (await app.fetch(new Request('http://x/v1/tasks?limit=100', {
+    const page1res = await app.fetch(new Request('http://x/v1/tasks?limit=100', {
       headers: { 'Authorization': `Bearer ${pat}` },
-    }), env)).json() as any;
+    }), TEST_ENV);
+    const page1 = await page1res.json() as any;
 
-    const page2 = await (await app.fetch(new Request(`http://x/v1/tasks?limit=100&cursor=${page1.next_cursor}`, {
-      headers: { 'Authorization': `Bearer ${pat}` },
-    }), env)).json() as any;
+    const page2res = await app.fetch(new Request(
+      `http://x/v1/tasks?limit=100&cursor=${encodeURIComponent(page1.next_cursor)}`,
+      { headers: { 'Authorization': `Bearer ${pat}` } },
+    ), TEST_ENV);
+    const page2 = await page2res.json() as any;
     expect(page2.data.length).toBe(0);
     expect(page2.next_cursor).not.toBeNull();
   });
 
   it.each([
-    ['/v1/projects', 'data'],
-    ['/v1/agents',   'data'],
-    ['/v1/connectors', 'data'],
-    ['/v1/external_refs?resource_type=task&resource_id=t_x', 'data'],
-  ])('GET %s returns {data, next_cursor} envelope', async (path, key) => {
-    const { pat } = await bootstrapOrgWithPat();
-    const res = await app.fetch(new Request(`http://x${path}`, {
+    '/v1/projects',
+    '/v1/agents',
+    '/v1/connectors',
+  ])('GET %s returns {data, next_cursor} envelope', async (path) => {
+    const res = await app.fetch(new Request(`http://x${path}?limit=100`, {
       headers: { 'Authorization': `Bearer ${pat}` },
-    }), env);
-    const body = await res.json() as Record<string, unknown>;
-    expect(body).toHaveProperty(key);
-    expect(body).toHaveProperty('next_cursor');
-    expect(Array.isArray(body[key])).toBe(true);
-  });
-
-  it('GET /v1/tasks/:id/comments returns {data, next_cursor}', async () => {
-    const { pat, projectId } = await bootstrapOrgWithPat();
-    const create = await (await app.fetch(new Request('http://x/v1/tasks', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, title: 't' }),
-    }), env)).json() as { id: string };
-
-    const res = await app.fetch(new Request(`http://x/v1/tasks/${create.id}/comments?limit=100`, {
-      headers: { 'Authorization': `Bearer ${pat}` },
-    }), env);
+    }), TEST_ENV);
+    expect(res.status).toBe(200);
     const body = await res.json() as Record<string, unknown>;
     expect(body).toHaveProperty('data');
     expect(body).toHaveProperty('next_cursor');
-    expect(body.next_cursor).not.toBeNull();  // even with zero comments, tip cursor is set
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(body.next_cursor).not.toBeNull();
+  });
+
+  it('GET /v1/tasks/:id/comments returns {data, next_cursor} with tip cursor even on empty', async () => {
+    // Fresh task with zero comments.
+    const c = await app.fetch(new Request('http://x/v1/tasks', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, title: 't-no-comments' }),
+    }), TEST_ENV);
+    const task = await c.json() as { task: { id: string } };
+
+    const res = await app.fetch(new Request(`http://x/v1/tasks/${task.task.id}/comments?limit=100`, {
+      headers: { 'Authorization': `Bearer ${pat}` },
+    }), TEST_ENV);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toHaveProperty('data');
+    expect(body.data).toEqual([]);
+    expect(body.next_cursor).not.toBeNull();
   });
 });
 ```
 
-(The helper names `bootstrapOrgWithPat` and `app` are illustrative — when implementing, copy the actual imports from any existing `test/api/*.test.ts` file in the same directory. If no shared helper exists, use the same inline `POST /v1/bootstrap` setup that the integration test in mission-control's own `test/api/auth.test.ts` uses.)
+(If `POST /v1/projects` returns a different shape than `{project: {id}}`, check the route's response and adapt — the shape pattern follows tasks.ts.)
 
 - [ ] **Step 3: Run the new test — verify it fails**
 
 ```bash
-cd services/mission-control && pnpm test -- test/api/pagination.test.ts
+cd services/mission-control && pnpm test -- test/routes/pagination-envelope.test.ts
 ```
 
 Expected: all assertions fail — current envelopes use `tasks`/`projects`/`comments`/etc. keys and `next_cursor: null` on last page.
 
 - [ ] **Step 4: Add a shared envelope helper**
 
-Add to `services/mission-control/src/pagination.ts` (or create `src/envelope.ts`):
+Append to `services/mission-control/src/pagination.ts` (next to the existing `encodeCursor` / `decodeCursor`):
 
 ```ts
-import { encodeCursor } from './pagination';
-
-/** Build a paginated response envelope from a list of rows.
+/**
+ * Build a paginated response envelope from a list of rows.
  *
- * Rows are the result of `repo.list({limit, cursor})`. The envelope key
- * is always `data` (per spec). next_cursor is always populated — when
- * hasMore is false, the cursor is a "tip" pointing at the last row's
- * position, so future polls resume cleanly. When rows is empty AND no
- * prior cursor was passed, returns a zero-position tip cursor so first
- * polls also have something to save.
+ * Rows are the result of `repo.list({ limit, cursor })`. The envelope key
+ * is always `data` (per spec). `next_cursor` is always populated — when
+ * the rows fit in one page, the cursor is a "tip" pointing at the last
+ * row's position, so future polls resume cleanly. When `rows` is empty,
+ * returns a zero-position tip cursor so first polls also have something
+ * to save.
+ *
+ * Callers must pre-trim `rows` to `limit` items (do NOT pass `limit + 1`
+ * here — this helper just emits whatever you give it).
  */
-export function paginated<T extends { id: string; updatedAt: number }>(
+export async function paginated<T extends { id: string; updatedAt: number }>(
   rows: T[],
-  limit: number,
   orgId: string,
-): { data: T[]; next_cursor: string } {
-  let cursorRow: { updatedAt: number; id: string };
-  if (rows.length > 0) {
-    cursorRow = rows[rows.length - 1];
-  } else {
-    cursorRow = { updatedAt: 0, id: '' };
-  }
-  return {
-    data: rows,
-    next_cursor: encodeCursor({
-      updatedAt: cursorRow.updatedAt,
-      id: cursorRow.id,
-      orgId,
-    }),
-  };
+  secret: string,
+): Promise<{ data: T[]; next_cursor: string }> {
+  const cursorRow = rows.length > 0
+    ? { updatedAt: rows[rows.length - 1]!.updatedAt, id: rows[rows.length - 1]!.id }
+    : { updatedAt: 0, id: '' };
+  const next_cursor = await encodeCursor(
+    { updatedAt: cursorRow.updatedAt, id: cursorRow.id, orgId },
+    secret,
+  );
+  return { data: rows, next_cursor };
 }
 ```
 
 - [ ] **Step 5: Update each list route to use the helper**
 
-Pattern, applied to every list handler in `src/routes/*.ts`:
+Pattern, applied to every list handler in `src/routes/*.ts`. The handler keeps requesting `limit + 1` rows so it can detect "has more", but for `next_cursor` it just calls the helper unconditionally with the trimmed `rows`. The old `let nextCursor: string | null = null; if (hasMore) ...` block goes away.
 
 Before:
 ```ts
-return c.json({ tasks: rows, next_cursor: hasMore ? encodeCursor(...) : null });
+let rows = await db.tasks(ctx).list({ /* ... */ limit: limit + 1, cursor });
+const hasMore = rows.length > limit;
+if (hasMore) rows = rows.slice(0, limit);
+
+let nextCursor: string | null = null;
+if (hasMore) {
+  const last = rows[rows.length - 1]!;
+  nextCursor = await encodeCursor({ updatedAt: last.updatedAt, id: last.id, orgId: ctx.orgId }, secret);
+}
+return c.json({ tasks: rows.map(serializeTimestamps), next_cursor: nextCursor });
 ```
 
 After:
 ```ts
-return c.json(paginated(rows, limit, ctx.orgId));
+import { paginated } from '../pagination.ts';
+// ...
+let rows = await db.tasks(ctx).list({ /* ... */ limit: limit + 1, cursor });
+if (rows.length > limit) rows = rows.slice(0, limit);
+
+return c.json(await paginated(rows.map(serializeTimestamps), ctx.orgId, secret));
 ```
 
-Apply to: tasks, projects, agents, connectors, comments (in `routes/comments.ts`), external_refs. For each route, also REMOVE the manual `hasMore` calculation (the helper just emits the tip cursor unconditionally).
+Apply to: `tasks.ts`, `projects.ts`, `agents.ts`, `connectors.ts`, `comments.ts`, `external-refs.ts`. For each file, also re-check that the response envelope key is now uniformly `data` (no `tasks:` / `projects:` / `comments:` / etc.). Note for `routes/comments.ts`: the helper takes `secret` — the same `BETTER_AUTH_SECRET ?? ''` the route already passes to `encodeCursor`.
+
+If `serializeTimestamps` strips the `updatedAt` numeric (replacing it with an ISO string), keep a parallel `rowsForCursor` reference with the numeric value, or split: compute the cursor BEFORE serialization (since the helper reads `rows[last].updatedAt`). Concrete pattern:
+
+```ts
+const trimmed = rows.length > limit ? rows.slice(0, limit) : rows;
+const envelope = await paginated(trimmed, ctx.orgId, secret);
+return c.json({ data: envelope.data.map(serializeTimestamps), next_cursor: envelope.next_cursor });
+```
 
 - [ ] **Step 6: Update existing tests that assert on the old envelope keys**
 
 ```bash
-cd services/mission-control && grep -nR "\.tasks\b\|\.projects\b\|\.comments\b\|\.agents\b\|\.connectors\b\|\.external_refs\b" test/api/ | head -50
+cd services/mission-control && grep -nE "body\.(tasks|projects|comments|agents|connectors|external_refs)\b" test/ | head -50
 ```
 
-For each hit where the access is on a parsed-JSON response (e.g. `body.tasks.length`), rename to `body.data.length`. Don't change repo-internal references (`db.tasks(ctx)...`) — those stay.
+For each hit where the access is on a parsed-JSON response (e.g. `body.tasks.length`), rename to `body.data.length`. Don't change repo-internal references (`db.tasks(ctx)...`) — those stay. Be careful in `test/isolation.test.ts` and `test/cascade.test.ts` — both touch list endpoints.
 
 - [ ] **Step 7: Update the spec prose**
 
@@ -286,7 +330,9 @@ Expected: ~456 + new pagination tests, all green. If any pre-existing test fails
 ```bash
 git add services/mission-control/src/pagination.ts \
         services/mission-control/src/routes/ \
-        services/mission-control/test/api/ \
+        services/mission-control/test/routes/ \
+        services/mission-control/test/isolation.test.ts \
+        services/mission-control/test/cascade.test.ts \
         services/mission-control/docs/specs/2026-05-22-master-api-design.md
 git commit -m "feat(mc): {data, next_cursor} envelope + tip cursor on last page
 
@@ -401,20 +447,26 @@ def list_events_since(
         "SELECT * FROM task_events WHERE id > ? ORDER BY id ASC LIMIT ?",
         (last_id, limit),
     ).fetchall()
-    return [
-        Event(
-            id=r["id"],
-            task_id=r["task_id"],
-            kind=r["kind"],
-            payload=json.loads(r["payload"]) if r["payload"] else None,
-            run_id=r["run_id"] if "run_id" in r.keys() else None,
-            created_at=r["created_at"],
+    out = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload"]) if r["payload"] else None
+        except Exception:
+            payload = None
+        out.append(
+            Event(
+                id=r["id"],
+                task_id=r["task_id"],
+                kind=r["kind"],
+                payload=payload,
+                created_at=r["created_at"],
+                run_id=(int(r["run_id"]) if "run_id" in r.keys() and r["run_id"] is not None else None),
+            )
         )
-        for r in rows
-    ]
+    return out
 ```
 
-(Match the existing `Event` dataclass field set — verify by reading the existing `list_events` body.)
+(Mirrors the existing `list_events` body exactly — same payload try/except, same `Event` field order, same `run_id` defensive cast. Verified at `kanban_db.py:1838-1859`.)
 
 - [ ] **Step 5: Run — verify pass**
 

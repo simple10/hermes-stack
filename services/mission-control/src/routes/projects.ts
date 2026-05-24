@@ -24,7 +24,7 @@ import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { projects } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
 import { emitEvent } from '../events/emit.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -86,8 +86,7 @@ projectsRouter.post(
           updatedAt: now,
         });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('UNIQUE') || msg.includes('unique')) {
+        if (isUniqueViolation(e)) {
           // Find the conflicting project to return its id.
           const conflictRows = await ctx.pool
             .select()
@@ -285,8 +284,7 @@ projectsRouter.patch(
           .set(patch)
           .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('UNIQUE') || msg.includes('unique')) {
+        if (isUniqueViolation(e)) {
           const conflictSlug = input.data.slug ?? existing.slug;
           const patchConflictRows = await ctx.pool
             .select()

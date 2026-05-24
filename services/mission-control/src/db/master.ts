@@ -130,11 +130,21 @@ export const apiKey = sqliteTable('apiKey', {
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   permissions: text('permissions'),
   metadata: text('metadata'),
+  // better-auth 1.6+ apikey fields (both required by the plugin):
+  //   - configId scopes a key to one of the plugin's `configurations`
+  //     (we use 'default' since we don't define multiple configurations).
+  //     verifyApiKey rejects keys whose configId ≠ opts.configId.
+  //   - referenceId is the owner-of-record (user id for user-owned keys;
+  //     org id for org-owned keys).
+  configId: text('config_id').notNull().default('default'),
+  referenceId: text('reference_id').notNull(),
   // additionalFields — promoted from metadata for indexed lookups
   orgId: text('org_id').notNull(),
   principalType: text('principal_type').notNull(),
 }, (t) => ({
   orgPrincipalIdx: index('api_key_org_principal').on(t.orgId, t.principalType),
+  configIdx: index('api_key_config').on(t.configId),
+  referenceIdx: index('api_key_reference').on(t.referenceId),
 }));
 
 // ---------------------------------------------------------------------------

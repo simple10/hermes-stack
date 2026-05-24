@@ -125,3 +125,23 @@ export function serializeRow<T>(row: T): any {
  * All existing `serializeTimestamps(row)` calls now also get camelCase→snake_case.
  */
 export const serializeTimestamps = serializeRow;
+
+// ---------------------------------------------------------------------------
+// isUniqueViolation()
+// ---------------------------------------------------------------------------
+
+/**
+ * True when an error thrown by a Drizzle write is a UNIQUE-constraint
+ * violation (SQLite SQLITE_CONSTRAINT_UNIQUE / SQLITE_CONSTRAINT_PRIMARYKEY).
+ *
+ * Drizzle 1.0 wraps every DB error in `DrizzleQueryError` whose `.message`
+ * starts with "Failed query:" — the original SQLite error message lives on
+ * `.cause.message`. Walk the chain so callers don't have to know the wrapping.
+ */
+export function isUniqueViolation(e: unknown): boolean {
+  for (let cur: unknown = e; cur != null; cur = (cur as { cause?: unknown }).cause) {
+    const msg = (cur as { message?: unknown }).message;
+    if (typeof msg === 'string' && /UNIQUE|unique constraint/i.test(msg)) return true;
+  }
+  return false;
+}

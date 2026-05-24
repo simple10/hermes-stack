@@ -41,7 +41,7 @@ import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { tasks, taskComments, events, agents, projects } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
 import { emitEvent } from '../events/emit.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import { validateTransition, TERMINAL } from '../state-machine/tasks.ts';
@@ -211,8 +211,7 @@ tasksRouter.post(
           updatedAt: now,
         });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('UNIQUE') || msg.includes('unique')) {
+        if (isUniqueViolation(e)) {
           // Layer-2 semantic dedup: find the conflicting active task.
           if (idempotency_key) {
             const dedupeRows = await ctx.pool

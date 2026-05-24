@@ -36,7 +36,7 @@ import { apiKey as apiKeyTable } from '../db/master.ts';
 import { agents, tasks } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
 import { emitEvent } from '../events/emit.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -102,8 +102,7 @@ agentsRouter.post('/', requireMember('owner', 'admin', 'member'), async (c) => {
         updatedAt: now,
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('UNIQUE') || msg.includes('unique')) {
+      if (isUniqueViolation(e)) {
         throw new HttpError(409, 'agent.duplicate_name', `An agent named '${name}' already exists in this org`);
       }
       throw e;

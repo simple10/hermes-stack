@@ -25,7 +25,7 @@ import { apiKey as apiKeyTable } from '../db/master.ts';
 import { connectors, externalRefs } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
 import { emitEvent } from '../events/emit.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -91,8 +91,7 @@ connectorsRouter.post('/', requireMember('owner', 'admin'), async (c) => {
         updatedAt: now,
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('UNIQUE') || msg.includes('unique')) {
+      if (isUniqueViolation(e)) {
         throw new HttpError(409, 'connector.duplicate_name', `A connector named '${name}' already exists in this org`);
       }
       throw e;

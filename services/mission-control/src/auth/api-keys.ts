@@ -85,6 +85,12 @@ export async function mintApiKey(
     start: rawKey.substring(0, 7),
     key: hashedKey,
     userId: args.userId,
+    // better-auth 1.6+ requires both fields on every key row:
+    //   configId='default' = no custom apikey configurations declared
+    //   referenceId=userId = user-owned key (matches createApiKey's default
+    //   when called without an explicit org-owned binding)
+    configId: 'default',
+    referenceId: args.userId,
     orgId: args.orgId,
     principalType: args.principalType,
     enabled: true,

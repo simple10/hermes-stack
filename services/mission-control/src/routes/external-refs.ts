@@ -40,7 +40,7 @@ import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { externalRefs, tasks, projects, agents, connectors, taskComments } from '../db/pool.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { makeId } from '../ids.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
 import { emitEvent } from '../events/emit.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
@@ -215,8 +215,7 @@ externalRefsRouter.post(
           updatedAt: now,
         });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('UNIQUE') || msg.includes('unique')) {
+        if (isUniqueViolation(e)) {
           throw new HttpError(
             409,
             'external_ref.duplicate',

@@ -7,10 +7,8 @@
  *   - payload is JSON-serialized
  *   - emit with no payload stores null
  */
-import { describe, it, expect, beforeAll, inject } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { db } from '../../../src/db/repos/index.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, agentCtx, asOrgId } from './_ctx.ts';
@@ -20,9 +18,6 @@ import { events } from '../../../src/db/pool.ts';
 import { eq } from 'drizzle-orm';
 import type { Env } from '../../../src/db/client.ts';
 
-beforeAll(async () => {
-  await applyD1Migrations((env.DB as D1Database), inject('d1Migrations') as D1Migration[]);
-});
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-evt`; }
@@ -32,6 +27,7 @@ async function makeOrg(name: string) {
   return { ...fix, orgId: asOrgId(fix.orgId) };
 }
 
+export function eventsRepoTests() {
 describe('eventsRepo', () => {
   it('emit inserts a row with orgId + actor from ctx', async () => {
     const orgA = await makeOrg('evt-a');
@@ -100,3 +96,4 @@ describe('eventsRepo', () => {
     expect(rows.length).toBe(2);
   });
 });
+}

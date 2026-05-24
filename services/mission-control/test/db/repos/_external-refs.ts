@@ -13,10 +13,8 @@
  *   - owner ctx can insert ref with any source_id (no restriction)
  *   - countBySource counts active refs for a given sourceId
  */
-import { describe, it, expect, beforeAll, inject } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { db } from '../../../src/db/repos/index.ts';
 import { DuplicateError, ForbiddenError } from '../../../src/db/repos/_errors.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
@@ -24,9 +22,6 @@ import { ownerCtx, agentCtx, connectorCtx, asOrgId } from './_ctx.ts';
 import { makeId } from '../../../src/ids.ts';
 import type { Env } from '../../../src/db/client.ts';
 
-beforeAll(async () => {
-  await applyD1Migrations((env.DB as D1Database), inject('d1Migrations') as D1Migration[]);
-});
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-xrf`; }
@@ -49,6 +44,7 @@ function exampleRef(overrides: Partial<{
   };
 }
 
+export function externalRefsRepoTests() {
 describe('externalRefsRepo', () => {
   it('insert stamps orgId from ctx', async () => {
     const orgA = await makeOrg('xrf-a');
@@ -166,3 +162,4 @@ describe('externalRefsRepo', () => {
     expect(count).toBe(2);
   });
 });
+}

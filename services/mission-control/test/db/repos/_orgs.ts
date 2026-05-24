@@ -7,18 +7,13 @@
  *   - update patches the org for ctx.orgId
  *   - update does not affect another org (scope enforcement)
  */
-import { describe, it, expect, beforeAll, inject } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { db } from '../../../src/db/repos/index.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, asOrgId } from './_ctx.ts';
 import type { Env } from '../../../src/db/client.ts';
 
-beforeAll(async () => {
-  await applyD1Migrations((env.DB as D1Database), inject('d1Migrations') as D1Migration[]);
-});
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-org`; }
@@ -28,6 +23,7 @@ async function makeOrg(name: string) {
   return { ...fix, orgId: asOrgId(fix.orgId) };
 }
 
+export function orgsRepoTests() {
 describe('orgsRepo', () => {
   it('findById returns the org for ctx.orgId', async () => {
     const orgA = await makeOrg('org-a');
@@ -72,3 +68,4 @@ describe('orgsRepo', () => {
     expect(orgB2!.name).not.toBe('OrgA Renamed');
   });
 });
+}

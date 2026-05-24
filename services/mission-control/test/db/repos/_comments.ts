@@ -9,19 +9,14 @@
  *   - listByTask returns only comments for that task, ordered asc by createdAt
  *   - list does not surface another org's comments on the same taskId
  */
-import { describe, it, expect, beforeAll, inject } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { db } from '../../../src/db/repos/index.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, agentCtx, asOrgId } from './_ctx.ts';
 import { makeId } from '../../../src/ids.ts';
 import type { Env } from '../../../src/db/client.ts';
 
-beforeAll(async () => {
-  await applyD1Migrations((env.DB as D1Database), inject('d1Migrations') as D1Migration[]);
-});
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-cmt`; }
@@ -31,6 +26,7 @@ async function makeOrg(name: string) {
   return { ...fix, orgId: asOrgId(fix.orgId) };
 }
 
+export function commentsRepoTests() {
 describe('commentsRepo', () => {
   it('insert stamps orgId, authorType, authorId from ctx', async () => {
     const orgA = await makeOrg('cmt-a');
@@ -108,3 +104,4 @@ describe('commentsRepo', () => {
     expect(list.every((c) => c.taskId === task.id)).toBe(true);
   });
 });
+}

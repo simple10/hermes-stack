@@ -1,20 +1,25 @@
 import { defineConfig } from 'vitest/config';
 import { cloudflarePool, cloudflareTest } from '@cloudflare/vitest-pool-workers';
 
-// @cloudflare/vitest-pool-workers@0.16.6 API:
-//  - `cloudflarePool(opts)` returns the vitest PoolRunner (replaces what
-//    `defineWorkersConfig` used to wire up).
-//  - `cloudflareTest(opts)` returns the Vite plugin that registers the
-//    `cloudflare:test` virtual module + worker shims. Both must be passed
-//    the same `poolOptions` so the plugin and runner agree on bindings.
-// Docs: https://developers.cloudflare.com/workers/testing/vitest-integration/
+/**
+ * Vitest config with TWO projects:
+ *
+ *  1. `unit` — Node pool. Pure-unit tests that don't touch D1 / miniflare /
+ *     workerd. Boots in ~50ms instead of the ~11s cold-import cost of the
+ *     workers pool.
+ *
+ *  2. `workers` — @cloudflare/vitest-pool-workers. Integration tests + the
+ *     consolidated per-repo unit tests (one worker-boot for all 11 repos
+ *     via test/db/repos.test.ts → ./repos/_*.ts modules).
+ *
+ * The split saves ~5 worker boots × ~11s = ~55s cumulative, plus the
+ * 10 saved boots from the per-repo consolidation. Wall-time impact:
+ * roughly 48s → 25–30s.
+ */
 const poolOptions = {
   wrangler: { configPath: './wrangler.jsonc' },
   miniflare: {
     compatibilityFlags: ['nodejs_compat'],
-    // Test-time secrets: wrangler.jsonc doesn't have these (they're
-    // .dev.vars secrets at dev-time, `wrangler secret put` at deploy-time).
-    // Miniflare doesn't read .dev.vars in test mode, so inject them here.
     bindings: {
       BETTER_AUTH_SECRET: 'test-secret-32-bytes-long-for-hmac-signing-x',
       MC_ADMIN_TOKEN: 'test-admin-token',
@@ -23,9 +28,38 @@ const poolOptions = {
 };
 
 export default defineConfig({
-  plugins: [cloudflareTest(poolOptions)],
   test: {
-    pool: cloudflarePool(poolOptions),
-    globalSetup: ['./test/global-setup.ts'],
+    projects: [
+      {
+        // Pure-unit tests: no D1, no miniflare, no cloudflare:* imports.
+        // Run in Node — cold start ~50ms vs ~11s for workers.
+        test: {
+          name: 'unit',
+          include: [
+            'test/ids.test.ts',
+            'test/pagination.test.ts',
+            'test/serialize.test.ts',
+            'test/state-machine/**/*.test.ts',
+          ],
+        },
+      },
+      {
+        // Everything else — needs miniflare + D1 binding.
+        // Consolidated per-repo tests live at test/db/repos.test.ts.
+        plugins: [cloudflareTest(poolOptions)],
+        test: {
+          name: 'workers',
+          include: ['test/**/*.test.ts'],
+          exclude: [
+            'test/ids.test.ts',
+            'test/pagination.test.ts',
+            'test/serialize.test.ts',
+            'test/state-machine/**/*.test.ts',
+          ],
+          pool: cloudflarePool(poolOptions),
+          globalSetup: ['./test/global-setup.ts'],
+        },
+      },
+    ],
   },
 });

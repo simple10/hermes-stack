@@ -12,10 +12,8 @@
  *   - lookupApiKey (static) looks up a key by its hashed token
  *   - lookupApiKeyById (static) looks up a key by its id
  */
-import { describe, it, expect, beforeAll, inject } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { db } from '../../../src/db/repos/index.ts';
 import { lookupApiKey, lookupApiKeyById } from '../../../src/db/repos/api-keys.ts';
 import { hashKey } from '../../../src/auth/api-keys.ts';
@@ -24,9 +22,6 @@ import { ownerCtx, asOrgId } from './_ctx.ts';
 import { makeId } from '../../../src/ids.ts';
 import type { Env } from '../../../src/db/client.ts';
 
-beforeAll(async () => {
-  await applyD1Migrations((env.DB as D1Database), inject('d1Migrations') as D1Migration[]);
-});
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-apk`; }
@@ -36,6 +31,7 @@ async function makeOrg(name: string) {
   return { ...fix, orgId: asOrgId(fix.orgId) };
 }
 
+export function apiKeysRepoTests() {
 describe('apiKeysRepo', () => {
   it('mintForAgent mints a key with principalType=agent', async () => {
     const orgA = await makeOrg('apk-a');
@@ -122,3 +118,4 @@ describe('apiKeysRepo', () => {
     expect(row!.orgId).toBe(orgA.orgId);
   });
 });
+}

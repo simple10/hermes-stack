@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src/routes/ src/auth/middleware.ts",
     "cf:types": "wrangler types",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
@@ -30,6 +31,7 @@
     "@cloudflare/vitest-pool-workers": "0.16.6",
     "@types/node": "24.12.4",
     "drizzle-kit": "1.0.0-rc.3",
+    "eslint": "^9.18.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.0",
     "vitest": "4.1.6"

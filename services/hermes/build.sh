@@ -369,8 +369,27 @@ fi
 
 log "6. install units + logtail (NO native honcho/pg). Templates use
    __REMOTE_USER__ which gets sed-substituted to '$REMOTE_USER' here so
-   /home/<user>/... paths inside the VM match the actual unix account."
-sed "s|__REMOTE_USER__|$REMOTE_USER|g" "$D/bin/hermes-logtail.sh" \
+   /home/<user>/... paths inside the VM match the actual unix account.
+   HERMES_LOGTAIL_DASHBOARD adds (or omits) a 'journalctl -fu
+   hermes-dashboard' line via the __LOGTAIL_DASHBOARD_LINE__ placeholder."
+HERMES_LOGTAIL_DASHBOARD_VAL="${HERMES_LOGTAIL_DASHBOARD:-false}"
+if [ "$HERMES_LOGTAIL_DASHBOARD_VAL" = "true" ]; then
+  # No file log for the dashboard (its unit emits to journald) — tail the
+  # unit's journal instead. -n0 starts at the live tail; -o cat strips the
+  # systemd prefix so the sed re-prefix isn't doubled.
+  LOGTAIL_DASHBOARD_LINE='journalctl -fu hermes-dashboard -n0 -o cat 2>/dev/null | sed -u "s/^/[hermes-dashboard] /" > /dev/console &'
+  log "logtail: dashboard journal -> /dev/console (HERMES_LOGTAIL_DASHBOARD=true)"
+else
+  LOGTAIL_DASHBOARD_LINE='# hermes-dashboard journal tail disabled (HERMES_LOGTAIL_DASHBOARD=false)'
+fi
+# `&` is a sed replacement-string metachar (= the matched text) — escape it
+# so the shell `&` background operator survives into the rendered script.
+# `~` is the sed delimiter (the enabled line is pipe-heavy; `#` would clash
+# with the disabled-branch's leading comment marker).
+LOGTAIL_DASHBOARD_LINE_ESC="$(printf '%s' "$LOGTAIL_DASHBOARD_LINE" | sed 's~&~\\&~g')"
+sed -e "s|__REMOTE_USER__|$REMOTE_USER|g" \
+    -e "s~__LOGTAIL_DASHBOARD_LINE__~$LOGTAIL_DASHBOARD_LINE_ESC~" \
+    "$D/bin/hermes-logtail.sh" \
   | orb -m "$VM" bash -lc 'sudo tee /usr/local/bin/hermes-logtail.sh >/dev/null && sudo chmod +x /usr/local/bin/hermes-logtail.sh'
 for unit in hermes-dashboard hermes-gateway hermes-logtail; do
   sed "s|__REMOTE_USER__|$REMOTE_USER|g" "$D/systemd/$unit.service" \

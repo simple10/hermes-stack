@@ -22,6 +22,7 @@ HERMES_GATEWAY_ALLOW_ACCESS=false  # bind gateway 0.0.0.0:8642 for docker consum
 HERMES_GATEWAY_API_KEY=             # minted by setup when ALLOW_ACCESS=true
 HERMES_MOUNT_ENABLED=true          # bind-mount ~/.hermes/ from Mac path below
 HERMES_MOUNT_DIR=.stack/hermes/.hermes  # Mac-side source for the mount
+HERMES_LOGTAIL_DASHBOARD=false     # also mirror hermes-dashboard journal to OrbStack Logs tab
 ```
 
 All keys carry the `HERMES_` prefix to avoid collisions with other

@@ -6,7 +6,8 @@
  * Tests that require a clean state truncate the user table before running.
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 

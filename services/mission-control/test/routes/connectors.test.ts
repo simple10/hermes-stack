@@ -7,7 +7,8 @@
  *   - Token prefix: 'mccnn_'
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts';

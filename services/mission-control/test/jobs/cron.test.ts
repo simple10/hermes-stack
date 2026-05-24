@@ -7,7 +7,8 @@
  *   3. Asserts that expired rows are gone and non-expired rows survive.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import { inject } from 'vitest';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { handleScheduled } from '../../src/jobs/cron.ts';

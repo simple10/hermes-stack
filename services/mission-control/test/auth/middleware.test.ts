@@ -8,7 +8,8 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { Hono } from 'hono';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { authMiddleware } from '../../src/auth/middleware.ts';
 

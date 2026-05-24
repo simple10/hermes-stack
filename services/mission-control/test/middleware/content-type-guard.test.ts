@@ -7,7 +7,8 @@
  *   - GET requests are never rejected regardless of content-type
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 

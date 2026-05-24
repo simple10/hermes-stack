@@ -8,7 +8,8 @@
  *   - cache: second call for same org doesn't hit master DB (smoke test)
  */
 import { describe, it, expect, beforeAll, beforeEach, inject } from 'vitest';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { resolvePoolForOrg, _clearPoolCache } from '../../src/db/pool-resolver.ts';
 import { masterClient, type Env } from '../../src/db/client.ts';

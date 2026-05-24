@@ -41,7 +41,8 @@
  */
 
 import { describe, it, expect, beforeAll, inject } from 'vitest';
-import { env, applyD1Migrations } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
+import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture } from '../helpers/orgs.ts';
@@ -636,10 +637,19 @@ describe('DELETE /v1/external_refs/:id', () => {
   });
 
   it('agent can delete own ref (source_id == principal.id)', async () => {
-    // Create a ref as agent.
+    // Create a dedicated task so the (resource_type, resource_id, source_kind,
+    // source_id) tuple is unique to this test — earlier tests in this file
+    // already use (task, taskId, hermes, agentId).
+    const taskRes = await req('POST', '/v1/tasks', pat, {
+      project_id: projectId,
+      title: 'XRef delete-own task',
+      agent_id: agentId,
+    });
+    const localTaskId = (await taskRes.json() as { task: { id: string } }).task.id;
+
     const createRes = await req('POST', '/v1/external_refs', agentKey, {
       resource_type: 'task',
-      resource_id: taskId,
+      resource_id: localTaskId,
       source_kind: 'hermes',
       source_id: agentId,
       external_id: `agent-local-del-${Date.now()}`,
@@ -688,10 +698,18 @@ describe('DELETE /v1/external_refs/:id', () => {
   });
 
   it('agent 2 cannot delete a ref created by agent 1', async () => {
+    // Dedicated task — see comment in 'agent can delete own ref' for why.
+    const taskRes = await req('POST', '/v1/tasks', pat, {
+      project_id: projectId,
+      title: 'XRef agent1->agent2 task',
+      agent_id: agentId,
+    });
+    const localTaskId = (await taskRes.json() as { task: { id: string } }).task.id;
+
     // Agent 1 creates a ref.
     const createRes = await req('POST', '/v1/external_refs', agentKey, {
       resource_type: 'task',
-      resource_id: taskId,
+      resource_id: localTaskId,
       source_kind: 'hermes',
       source_id: agentId,
       external_id: `agent1-for-agent2-del-${Date.now()}`,

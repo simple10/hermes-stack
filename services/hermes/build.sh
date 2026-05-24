@@ -193,6 +193,77 @@ hermes_env_rewrite_managed_block() {
   chmod 600 "$target"
 }
 
+# hermes_sync_plugin NAME  — Copy services/hermes/plugins/<NAME>/ into the
+# VM's ~/.hermes/plugins/<NAME>/, mount-aware. Excludes Python build
+# artifacts (.venv, __pycache__, .pytest_cache).
+#
+# When HERMES_MOUNT_ENABLED=false, no-op + print the equivalent manual
+# orb command for the operator to apply inside the VM.
+hermes_sync_plugin() {
+  local name="$1"
+  local src="$D/plugins/$name"      # $D is the script's dir (services/hermes/)
+  [ -d "$src" ] || die "hermes_sync_plugin: source plugin dir not found: $src"
+
+  if [ "$HERMES_MOUNT_ENABLED" != "true" ]; then
+    warn "skip plugin sync for '$name' (HERMES_MOUNT_ENABLED=false)"
+    printf '       apply manually inside the VM:\n' >&2
+    printf '         orb -m %s bash -lc '\''mkdir -p ~/.hermes/plugins/%s && rsync -a --delete --exclude=.venv/ --exclude=__pycache__/ --exclude=.pytest_cache/ <repo>/services/hermes/plugins/%s/ ~/.hermes/plugins/%s/'\''\n' "$VM" "$name" "$name" "$name" >&2
+    return 0
+  fi
+
+  local dest="$MAC_HERMES/plugins/$name"
+  mkdir -p "$dest"
+  rsync -a --delete \
+    --exclude=.venv/ \
+    --exclude=__pycache__/ \
+    --exclude=.pytest_cache/ \
+    "$src/" "$dest/"
+  log "synced plugin '$name' → $dest"
+}
+
+# hermes_enable_plugin NAME  — Idempotently append NAME to ~/.hermes/
+# config.yaml's plugins.enabled list. Mount-aware (no-op + warn when
+# HERMES_MOUNT_ENABLED=false). Uses pyyaml round-trip; comments inside
+# the file may be lost (pyyaml limitation — same trade-off as the
+# agentmemory section).
+hermes_enable_plugin() {
+  local name="$1"
+
+  if [ "$HERMES_MOUNT_ENABLED" != "true" ]; then
+    warn "skip plugin enable for '$name' (HERMES_MOUNT_ENABLED=false)"
+    printf '       apply manually inside the VM:\n' >&2
+    printf '         orb -m %s bash -lc '\''hermes plugins enable %s'\''\n' "$VM" "$name" >&2
+    return 0
+  fi
+
+  local cfg="$MAC_HERMES/config.yaml"
+  mkdir -p "$(dirname "$cfg")"
+  python3 - "$cfg" "$name" <<'PY'
+import sys
+try:
+    import yaml
+except Exception:
+    raise SystemExit("pyyaml unavailable; pip install pyyaml on the Mac")
+import os
+path, name = sys.argv[1], sys.argv[2]
+d = (yaml.safe_load(open(path)) if os.path.exists(path) else {}) or {}
+plugins = d.setdefault("plugins", {}) if isinstance(d.get("plugins") or {}, dict) else {}
+if not isinstance(plugins, dict):
+    plugins = {}
+    d["plugins"] = plugins
+enabled = plugins.get("enabled") or []
+if not isinstance(enabled, list):
+    enabled = []
+if name not in enabled:
+    enabled.append(name)
+plugins["enabled"] = enabled
+d["plugins"] = plugins
+yaml.safe_dump(d, open(path, "w"), sort_keys=False, default_flow_style=False)
+print(f"plugins.enabled now: {enabled}")
+PY
+  log "enabled plugin '$name' in ~/.hermes/config.yaml"
+}
+
 log "0. resolve hermes mount config
    HERMES_MOUNT_ENABLED=$HERMES_MOUNT_ENABLED
    HERMES_MOUNT_DIR=$HERMES_MOUNT_DIR

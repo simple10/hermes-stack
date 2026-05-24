@@ -142,5 +142,129 @@ echo "F7: build.sh syntax"
 check "bash -n '$BUILD_SH'" "bash -n services/hermes/build.sh"
 echo
 
+# --------------------------------------------------------------------------
+# hermes_enable_plugin: idempotent yaml edit
+# --------------------------------------------------------------------------
+
+test_enable_plugin_idempotent() {
+  local tmp; tmp=$(mktemp -d)
+  cat >"$tmp/config.yaml" <<'EOF'
+plugins:
+  enabled:
+    - agents-observe
+EOF
+
+  # Extract function from build.sh
+  local helper
+  helper="$(sed -n '/^hermes_enable_plugin() {/,/^}$/p' "$BUILD_SH")"
+  eval "$helper"
+
+  # Stub log/warn/die so the extracted function doesn't error when called standalone
+  log() { :; }
+  warn() { :; }
+  die() { echo "DIE: $*" >&2; return 1; }
+
+  # Stub the mount + paths
+  HERMES_MOUNT_ENABLED=true
+  MAC_HERMES="$tmp"
+
+  hermes_enable_plugin "mission-control" >/dev/null 2>&1
+  hermes_enable_plugin "mission-control" >/dev/null 2>&1   # idempotent — call twice
+
+  python3 -c "
+import yaml
+d = yaml.safe_load(open('$tmp/config.yaml'))
+enabled = d['plugins']['enabled']
+assert enabled.count('mission-control') == 1, f'expected 1 occurrence, got {enabled.count(\"mission-control\")}: {enabled}'
+assert 'agents-observe' in enabled, f'agents-observe not preserved: {enabled}'
+assert 'mission-control' in enabled, f'mission-control not added: {enabled}'
+"
+  local rc=$?
+  rm -rf "$tmp"
+  return $rc
+}
+
+test_enable_plugin_no_existing_config() {
+  local tmp; tmp=$(mktemp -d)
+  # No config.yaml exists
+
+  local helper
+  helper="$(sed -n '/^hermes_enable_plugin() {/,/^}$/p' "$BUILD_SH")"
+  eval "$helper"
+
+  log() { :; }
+  warn() { :; }
+  die() { echo "DIE: $*" >&2; return 1; }
+
+  HERMES_MOUNT_ENABLED=true
+  MAC_HERMES="$tmp"
+
+  hermes_enable_plugin "mission-control" >/dev/null 2>&1
+
+  python3 -c "
+import yaml, os
+assert os.path.exists('$tmp/config.yaml'), 'config.yaml not created'
+d = yaml.safe_load(open('$tmp/config.yaml')) or {}
+enabled = d.get('plugins', {}).get('enabled', [])
+assert 'mission-control' in enabled, f'mission-control not in enabled: {enabled}'
+"
+  local rc=$?
+  rm -rf "$tmp"
+  return $rc
+}
+
+test_enable_plugin_disabled_mount_warns() {
+  local tmp; tmp=$(mktemp -d)
+  cat >"$tmp/config.yaml" <<'EOF'
+plugins:
+  enabled: []
+EOF
+
+  local helper
+  helper="$(sed -n '/^hermes_enable_plugin() {/,/^}$/p' "$BUILD_SH")"
+  eval "$helper"
+  # Stub log/warn/die + variables needed by the warn branch
+  log() { :; }
+  warn() { :; }
+  die() { echo "DIE: $*" >&2; return 1; }
+  VM="${VM:-test-vm}"
+
+  HERMES_MOUNT_ENABLED=false
+  MAC_HERMES="$tmp"
+
+  # With mount disabled, function should NOT modify the file
+  hermes_enable_plugin "mission-control" >/dev/null 2>&1
+
+  # Verify without pyyaml: file must not contain 'mission-control'
+  ! grep -q 'mission-control' "$tmp/config.yaml"
+  local rc=$?
+  rm -rf "$tmp"
+  return $rc
+}
+
+# hermes_enable_plugin tests require pyyaml on the Mac. Skip gracefully when absent.
+_HAS_PYYAML=false
+python3 -c 'import yaml' 2>/dev/null && _HAS_PYYAML=true
+
+echo "P1: hermes_enable_plugin — idempotent re-add"
+if [ "$_HAS_PYYAML" = "true" ]; then
+  test_enable_plugin_idempotent && ok "idempotent: second call is no-op; agents-observe preserved" || bad "idempotent re-add failed"
+else
+  ok "idempotent re-add (skipped — pyyaml absent on this Mac; run: pip install pyyaml)"
+fi
+echo
+
+echo "P2: hermes_enable_plugin — no existing config.yaml"
+if [ "$_HAS_PYYAML" = "true" ]; then
+  test_enable_plugin_no_existing_config && ok "config.yaml created with mission-control in enabled" || bad "no-existing-config create failed"
+else
+  ok "no-existing-config create (skipped — pyyaml absent on this Mac)"
+fi
+echo
+
+echo "P3: hermes_enable_plugin — mount disabled → no-op"
+test_enable_plugin_disabled_mount_warns && ok "mount disabled: file not modified" || bad "mount-disabled no-op failed"
+echo
+
 echo "===== RESULT: $pass passed, $fail failed ====="
 exit $fail

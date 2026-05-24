@@ -21,3 +21,9 @@ _bak/
 
 .claude/*.lock
 .claude/worktrees
+
+# --- Python ---
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/

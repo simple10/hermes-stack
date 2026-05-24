@@ -226,6 +226,7 @@ _chrome-cdp-up:
     @set -a; source "{{lib}}"; set +a; \
      require_stack_env; \
      set -a; source "{{root}}/.stack/.env"; set +a; \
+     stack_render_compose; \
      port="${CHROME_CDP_PORT:-19298}"; bport="${CHROME_CDP_BRIDGE_PORT:-19299}"; \
      proj="$(stack_project)"; \
      run_dir="{{root}}/.stack/chrome-cdp"; data_dir="$run_dir/data"; \
@@ -309,6 +310,7 @@ _chrome-cdp-up:
 # stop` (as a depends_on dep).
 _chrome-cdp-down:
     @set -a; source "{{lib}}"; set +a; \
+     [ -f "$STACK_DIR/.env" ] && stack_render_compose; \
      run_dir="{{root}}/.stack/chrome-cdp"; \
      pid_file="$run_dir/chrome.pid"; \
      if [ -f "$pid_file" ]; then \

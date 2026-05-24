@@ -109,9 +109,14 @@ export function apiKeysRepo(ctx: AuthContext) {
 
     /**
      * Revoke (disable) a key immediately.
+     * @param id        The key ID to revoke.
+     * @param expiresAt Optional grace window (ms epoch).  When provided the key
+     *                  is soft-expired (expiresAt set) rather than hard-disabled
+     *                  (enabled=false).  Used by rotate-key to give old keys a
+     *                  grace window before they stop working.
      */
-    async revoke(id: string): Promise<void> {
-      await disableApiKey(master, id);
+    async revoke(id: string, expiresAt?: number): Promise<void> {
+      await disableApiKey(master, id, expiresAt);
     },
 
     /**
@@ -176,6 +181,50 @@ export function apiKeysRepo(ctx: AuthContext) {
      *
      * Returns { newKey: rawKey, oldExpiresAt }.
      */
+    /**
+     * Find the active (enabled) API key for an agent (by metadata.agent_id).
+     * Returns null if no active key is found.
+     */
+    async findActiveForAgent(agentId: string): Promise<ApiKeyRow | null> {
+      const rows = await master
+        .select()
+        .from(apiKeyTable)
+        .where(and(scope, eq(apiKeyTable.principalType, 'agent')));
+      return rows.find((k) => {
+        try {
+          const meta =
+            typeof k.metadata === 'string'
+              ? (JSON.parse(k.metadata) as { agent_id?: string })
+              : (k.metadata as { agent_id?: string } | null);
+          return meta?.agent_id === agentId && k.enabled !== false;
+        } catch {
+          return false;
+        }
+      }) ?? null;
+    },
+
+    /**
+     * Find the active (enabled) API key for a connector (by metadata.connector_id).
+     * Returns null if no active key is found.
+     */
+    async findActiveForConnector(connectorId: string): Promise<ApiKeyRow | null> {
+      const rows = await master
+        .select()
+        .from(apiKeyTable)
+        .where(and(scope, eq(apiKeyTable.principalType, 'connector')));
+      return rows.find((k) => {
+        try {
+          const meta =
+            typeof k.metadata === 'string'
+              ? (JSON.parse(k.metadata) as { connector_id?: string })
+              : (k.metadata as { connector_id?: string } | null);
+          return meta?.connector_id === connectorId && k.enabled !== false;
+        } catch {
+          return false;
+        }
+      }) ?? null;
+    },
+
     async mintAndExpireExisting(
       newKeyFactory: () => Promise<{ id: string; rawKey: string }>,
       oldKeyId: string,

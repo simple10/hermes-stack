@@ -152,6 +152,23 @@ export function tasksRepo(ctx: AuthContext) {
       return result[0]?.count ?? 0;
     },
 
+    /**
+     * List active (non-terminal) task IDs for a given agent within this org.
+     * Used by the agent-delete route to populate the has_active_tasks error details.
+     * Does NOT apply the per-principal scope filter — it's an admin-level query.
+     */
+    async listActiveIdsByAgent(agentId: string): Promise<string[]> {
+      const rows = await ctx.pool.select({ id: tasks.id })
+        .from(tasks)
+        .where(and(
+          eq(tasks.orgId, ctx.orgId),
+          eq(tasks.agentId, agentId),
+          active(tasks),
+          sql`${tasks.status} IN ('ready', 'in_progress', 'blocked')`,
+        ));
+      return rows.map((r) => r.id);
+    },
+
     // Escape hatches
     scoped: () => ctx.pool.select().from(tasks).where(scope),
     scope: scope!,

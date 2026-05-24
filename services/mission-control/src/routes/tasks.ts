@@ -36,12 +36,11 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { and, desc, eq, gt, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
-import { tasks, taskComments, events, agents, projects } from '../db/pool.ts';
-import { HttpError, errorResponse } from '../errors.ts';
-import { makeId } from '../ids.ts';
-import { active, isUniqueViolation, serializeTimestamps } from '../db/helpers.ts';
+import { tasks, taskComments, events } from '../db/pool.ts';
+import { HttpError, errorResponse, DuplicateError } from '../errors.ts';
+import { active, serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import { validateTransition, TERMINAL } from '../state-machine/tasks.ts';
@@ -162,12 +161,7 @@ tasksRouter.post(
       // ---------------------------------------------------------------------------
       // Validate project_id exists and is active.
       // ---------------------------------------------------------------------------
-      const projectCheckRows = await ctx.pool
-        .select()
-        .from(projects)
-        .where(and(eq(projects.id, project_id), eq(projects.orgId, ctx.orgId), active(projects)))
-        .limit(1);
-      const projectRow = projectCheckRows[0];
+      const projectRow = await db.projects(ctx).findById(project_id);
       if (!projectRow) {
         throw new HttpError(422, 'task.invalid_project', `Project '${project_id}' not found or inactive`);
       }
@@ -176,12 +170,7 @@ tasksRouter.post(
       // Validate agent_id if provided.
       // ---------------------------------------------------------------------------
       if (agent_id) {
-        const agentCheckRows = await ctx.pool
-          .select()
-          .from(agents)
-          .where(and(eq(agents.id, agent_id), eq(agents.orgId, ctx.orgId), active(agents)))
-          .limit(1);
-        const agentRow = agentCheckRows[0];
+        const agentRow = await db.agents(ctx).findById(agent_id);
         if (!agentRow) {
           throw new HttpError(422, 'task.invalid_agent', `Agent '${agent_id}' not found or inactive`);
         }
@@ -190,14 +179,11 @@ tasksRouter.post(
       // ---------------------------------------------------------------------------
       // Insert task.
       // ---------------------------------------------------------------------------
-      const taskId = makeId('task');
-      const now = Date.now();
       const initialStatus = agent_id ? 'ready' : 'pending';
 
+      let row: typeof tasks.$inferSelect;
       try {
-        await ctx.pool.insert(tasks).values({
-          id: taskId,
-          orgId: ctx.orgId,
+        row = await db.tasks(ctx).insert({
           projectId: project_id,
           agentId: agent_id ?? null,
           title,
@@ -207,46 +193,30 @@ tasksRouter.post(
           metadata: metadata ? JSON.stringify(metadata) : null,
           idempotencyKey: idempotency_key ?? null,
           createdByUserId: ctx.viaUserId ?? null,
-          createdAt: now,
-          updatedAt: now,
         });
       } catch (e) {
-        if (isUniqueViolation(e)) {
+        if (e instanceof DuplicateError && idempotency_key) {
           // Layer-2 semantic dedup: find the conflicting active task.
-          if (idempotency_key) {
-            const dedupeRows = await ctx.pool
-              .select()
-              .from(tasks)
-              .where(
-                and(
-                  eq(tasks.orgId, ctx.orgId),
-                  eq(tasks.idempotencyKey, idempotency_key),
-                  isNull(tasks.deletedAt),
-                ),
-              )
-              .limit(1);
-            const existing = dedupeRows[0];
-            throw new HttpError(
-              409,
-              'idempotency.conflict',
-              `An active task with idempotency_key '${idempotency_key}' already exists`,
-              { existing_task_id: existing?.id ?? null },
-            );
-          }
-          throw e;
+          const dedupeRows = await ctx.pool
+            .select()
+            .from(tasks)
+            .where(
+              and(
+                eq(tasks.orgId, ctx.orgId),
+                eq(tasks.idempotencyKey, idempotency_key),
+                isNull(tasks.deletedAt),
+              ),
+            )
+            .limit(1);
+          const existing = dedupeRows[0];
+          throw new HttpError(
+            409,
+            'idempotency.conflict',
+            `An active task with idempotency_key '${idempotency_key}' already exists`,
+            { existing_task_id: existing?.id ?? null },
+          );
         }
         throw e;
-      }
-
-      // Fetch the freshly inserted row.
-      const taskInsertRows = await ctx.pool
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.orgId, ctx.orgId)))
-        .limit(1);
-      const row = taskInsertRows[0];
-      if (!row) {
-        throw new HttpError(500, 'internal', 'Task row disappeared after insert');
       }
 
       // ---------------------------------------------------------------------------
@@ -254,7 +224,7 @@ tasksRouter.post(
       // ---------------------------------------------------------------------------
       await db.events(ctx).emit({
         resourceType: 'task',
-        resourceId: taskId,
+        resourceId: row.id,
         kind: 'task.created',
         payload: { task: serializeTimestamps(row) },
       });
@@ -262,7 +232,7 @@ tasksRouter.post(
       if (agent_id) {
         await db.events(ctx).emit({
           resourceType: 'task',
-          resourceId: taskId,
+          resourceId: row.id,
           kind: 'task.assigned',
           payload: { from: null, to: agent_id },
         });
@@ -280,7 +250,6 @@ tasksRouter.post(
           await recordIdempotency(ctx.pool, ctx.orgId, 'POST /v1/tasks', idempotencyHeader, bodyHash, 201, responseBody, ttlSeconds);
         } catch {
           // Non-fatal: if the record fails, the response still goes through.
-          // On the next retry the idempotency check will miss and re-execute.
         }
       }
 
@@ -323,6 +292,8 @@ tasksRouter.get(
 
       if (ctx.role === 'agent') {
         // Agents always see only their own tasks; ignore any provided agent_id.
+        // (The repo's per-principal filter also enforces this, but we pass
+        //  it explicitly as a filter for consistency with the list() API.)
         agentIdFilter = ctx.principal.id;
       } else if (agentIdRaw === 'me') {
         // 'me' is only valid for agent principals.
@@ -347,57 +318,27 @@ tasksRouter.get(
       // ---------------------------------------------------------------------------
       // Cursor decode.
       // ---------------------------------------------------------------------------
-      let afterUpdatedAt: number | undefined;
-      let afterId: string | undefined;
+      let cursor: { updatedAt: number; id: string } | undefined;
 
       if (cursorRaw) {
         const decoded = await decodeCursor(cursorRaw, secret);
         if (!decoded || decoded.orgId !== ctx.orgId) {
           throw new HttpError(400, 'task.invalid_cursor', 'Invalid or expired pagination cursor');
         }
-        afterUpdatedAt = decoded.updatedAt;
-        afterId = decoded.id;
+        cursor = { updatedAt: decoded.updatedAt, id: decoded.id };
       }
 
       // ---------------------------------------------------------------------------
-      // Build WHERE conditions.
+      // Query via repo.
       // ---------------------------------------------------------------------------
-      const conditions = [
-        eq(tasks.orgId, ctx.orgId),
-        active(tasks),
-      ];
-
-      if (projectIdFilter) conditions.push(eq(tasks.projectId, projectIdFilter));
-      if (agentIdFilter) conditions.push(eq(tasks.agentId, agentIdFilter));
-      if (statusList && statusList.length > 0) {
-        conditions.push(inArray(tasks.status, statusList));
-      }
-      if (updatedSinceMs !== null) {
-        conditions.push(gt(tasks.updatedAt, updatedSinceMs));
-      }
-
-      // Keyset cursor condition.
-      let rows: typeof tasks.$inferSelect[];
-
-      if (afterUpdatedAt !== undefined && afterId !== undefined) {
-        const cursorCondition = or(
-          lt(tasks.updatedAt, afterUpdatedAt),
-          and(eq(tasks.updatedAt, afterUpdatedAt), lt(tasks.id, afterId)),
-        );
-        rows = await ctx.pool
-          .select()
-          .from(tasks)
-          .where(and(...conditions, cursorCondition))
-          .orderBy(desc(tasks.updatedAt), desc(tasks.id))
-          .limit(limit + 1);
-      } else {
-        rows = await ctx.pool
-          .select()
-          .from(tasks)
-          .where(and(...conditions))
-          .orderBy(desc(tasks.updatedAt), desc(tasks.id))
-          .limit(limit + 1);
-      }
+      let rows = await db.tasks(ctx).list({
+        projectId: projectIdFilter,
+        agentId: agentIdFilter,
+        statuses: statusList as any,
+        updatedSince: updatedSinceMs ?? undefined,
+        limit: limit + 1,
+        cursor,
+      });
 
       const hasMore = rows.length > limit;
       if (hasMore) rows = rows.slice(0, limit);
@@ -433,12 +374,9 @@ tasksRouter.get(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const taskDetailRows = await ctx.pool
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)))
-        .limit(1);
-      const row = taskDetailRows[0];
+      // Use findByIdForOrg so we get the task regardless of principal filter,
+      // then enforce agent ownership manually to return 403 (not 404).
+      const row = await db.tasks(ctx).findByIdForOrg(id);
       if (!row) {
         throw new HttpError(404, 'task.not_found', `Task ${id} not found`);
       }
@@ -500,12 +438,8 @@ tasksRouter.patch(
         );
       }
 
-      const patchCheckRows = await ctx.pool
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)))
-        .limit(1);
-      const existing = patchCheckRows[0];
+      // Use findByIdForOrg so agent can get a 403 (not 404) on another agent's task.
+      const existing = await db.tasks(ctx).findByIdForOrg(id);
       if (!existing) {
         throw new HttpError(404, 'task.not_found', `Task ${id} not found`);
       }
@@ -607,12 +541,7 @@ tasksRouter.patch(
         if (newAgentId !== oldAgentId) {
           // Validate new agent if not unassigning.
           if (newAgentId) {
-            const newAgentRows = await ctx.pool
-              .select()
-              .from(agents)
-              .where(and(eq(agents.id, newAgentId), eq(agents.orgId, ctx.orgId), active(agents)))
-              .limit(1);
-            const agentRow = newAgentRows[0];
+            const agentRow = await db.agents(ctx).findById(newAgentId);
             if (!agentRow) {
               throw new HttpError(422, 'task.invalid_agent', `Agent '${newAgentId}' not found or inactive`);
             }
@@ -623,7 +552,6 @@ tasksRouter.patch(
 
           // Auto-promote: if assigning an agent to a pending task (and no explicit
           // status transition was requested), atomically set status to 'ready'.
-          // This matches the create-time rule: "POST with agent_id → status = ready".
           if (newAgentId !== null && existing.status === 'pending' && statusTo === null) {
             patch.status = 'ready';
             statusFrom = 'pending';
@@ -632,18 +560,8 @@ tasksRouter.patch(
         }
       }
 
-      // Apply update.
-      await ctx.pool
-        .update(tasks)
-        .set(patch)
-        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)));
-
-      const patchUpdatedRows = await ctx.pool
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)))
-        .limit(1);
-      const updated = patchUpdatedRows[0];
+      // Apply update via repo (org-scoped).
+      const updated = await db.tasks(ctx).update(id, patch);
 
       // ---------------------------------------------------------------------------
       // Emit events.
@@ -708,26 +626,12 @@ tasksRouter.delete(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const deleteCheckRows = await ctx.pool
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)))
-        .limit(1);
-      const existing = deleteCheckRows[0];
+      const existing = await db.tasks(ctx).findById(id);
       if (!existing) {
         throw new HttpError(404, 'task.not_found', `Task ${id} not found`);
       }
 
-      const now = Date.now();
-      await ctx.pool
-        .update(tasks)
-        .set({
-          deletedAt: now,
-          deletedByType: ctx.principal.type,
-          deletedById: ctx.principal.id,
-          updatedAt: now,
-        })
-        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)));
+      await db.tasks(ctx).softDelete(id);
 
       await db.events(ctx).emit({
         resourceType: 'task',

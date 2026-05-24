@@ -152,8 +152,23 @@ async def _handle_task_status_changed(ev: dict, env: cfg.Env, auth: cfg.Auth, cl
 
     payload = ev.get("payload") or {}
     to_status = payload.get("to")
-    mc_task = payload.get("task") or {"status": to_status, "metadata": {}}
-    mc_task.setdefault("status", to_status)
+    # MC's task.status_changed payload is {from, to, reason?} (per the MC
+    # spec). The event doesn't carry the full task row; we synthesize a
+    # minimal mc_task that lifts the `reason` into the metadata fields
+    # mc_to_local() reads (block_reason for blocked, failure_reason for
+    # failed). updated_at is taken from the event's created_at so the
+    # link's last_pulled_at advances correctly.
+    reason = payload.get("reason")
+    metadata: dict = {}
+    if to_status == "blocked" and reason is not None:
+        metadata["block_reason"] = reason
+    if to_status == "failed" and reason is not None:
+        metadata["failure_reason"] = reason
+    mc_task = {
+        "status": to_status,
+        "metadata": metadata,
+        "updated_at": ev.get("created_at") or 0,
+    }
     action, extras = status_map.mc_to_local(mc_task)
 
     if action in ("skip", "noop"):

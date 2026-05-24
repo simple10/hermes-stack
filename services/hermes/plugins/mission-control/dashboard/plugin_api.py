@@ -14,15 +14,19 @@ from typing import Any, Optional
 
 from fastapi import APIRouter
 
+# Hermes' plugin manager registers loaded plugins under the ``hermes_plugins``
+# namespace (see _source/hermes_cli/plugins.py _NS_PARENT), so in production
+# our package is ``hermes_plugins.mission_control``. The test harness uses
+# the bare ``mission_control`` name via a conftest shim; try production
+# first, then fall back so both contexts work.
 try:
-    from mission_control import config as cfg
-    from mission_control import links_db as ldb
-    from mission_control import runtime as mc_runtime
+    from hermes_plugins.mission_control import config as cfg
+    from hermes_plugins.mission_control import links_db as ldb
+    from hermes_plugins.mission_control import runtime as mc_runtime
 except ImportError:
-    import importlib
-    cfg = importlib.import_module("mission_control.config")
-    ldb = importlib.import_module("mission_control.links_db")
-    mc_runtime = importlib.import_module("mission_control.runtime")
+    from mission_control import config as cfg  # type: ignore[no-redef]
+    from mission_control import links_db as ldb  # type: ignore[no-redef]
+    from mission_control import runtime as mc_runtime  # type: ignore[no-redef]
 
 log = logging.getLogger("hermes.plugins.mission_control.dashboard")
 

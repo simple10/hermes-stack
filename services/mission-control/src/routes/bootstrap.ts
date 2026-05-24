@@ -102,6 +102,7 @@ bootstrap.post('/', async (c) => {
       name: orgName,
       slug: orgSlug,
       createdAt: now,
+      updatedAt: now,
     });
 
     await master.insert(member).values({

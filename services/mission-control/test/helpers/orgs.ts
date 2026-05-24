@@ -69,6 +69,7 @@ export async function createOrgFixture(
     name,
     slug,
     createdAt: now,
+    updatedAt: now,
   });
 
   // Insert member (owner).

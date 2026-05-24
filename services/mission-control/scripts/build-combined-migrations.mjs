@@ -7,13 +7,21 @@
  *
  * Run: node scripts/build-combined-migrations.mjs
  */
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const masterDir = 'migrations/master';
 const poolDir = 'migrations/pool';
 const outDir = 'migrations/combined';
 
+// Remove stale generated files before regenerating so renamed files don't linger.
+try {
+  for (const f of readdirSync(outDir).filter((f) => f.endsWith('.sql'))) {
+    rmSync(join(outDir, f));
+  }
+} catch {
+  // outDir doesn't exist yet — ok
+}
 mkdirSync(outDir, { recursive: true });
 
 const masterFiles = readdirSync(masterDir)

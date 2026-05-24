@@ -36,6 +36,7 @@ describe('pool resolver (single-DB mode)', () => {
       tenantPoolId: 'default',
       plan: 'free',
       createdAt: new Date(),
+      updatedAt: new Date(),
     }).onConflictDoNothing();
 
     const pool = await resolvePoolForOrg(env, 'org_pr_test1');
@@ -65,6 +66,7 @@ describe('pool resolver (single-DB mode)', () => {
       tenantPoolId: 'default',
       plan: 'free',
       createdAt: new Date(),
+      updatedAt: new Date(),
     }).onConflictDoNothing();
 
     const pool1 = await resolvePoolForOrg(env, 'org_pr_test2');

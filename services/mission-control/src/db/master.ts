@@ -77,6 +77,7 @@ export const organization = sqliteTable('organization', {
   logo: text('logo'),
   metadata: text('metadata'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   // additionalFields
   tenantPoolId: text('tenant_pool_id').notNull().default('default'),
   plan: text('plan').notNull().default('free'),

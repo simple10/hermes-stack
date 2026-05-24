@@ -6,6 +6,7 @@ import { me } from './routes/me.ts';
 import { agentsRouter } from './routes/agents.ts';
 import { connectorsRouter } from './routes/connectors.ts';
 import { projectsRouter } from './routes/projects.ts';
+import { tasksRouter } from './routes/tasks.ts';
 import { createAuth } from './auth/config.ts';
 
 type Env = {
@@ -49,5 +50,6 @@ app.route('/v1/me', me);
 app.route('/v1/agents', agentsRouter);
 app.route('/v1/connectors', connectorsRouter);
 app.route('/v1/projects', projectsRouter);
+app.route('/v1/tasks', tasksRouter);
 
 export default app;

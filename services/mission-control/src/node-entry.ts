@@ -26,8 +26,10 @@ import { serve } from '@hono/node-server';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import cron from 'node-cron';
 import { wrapSqliteAsD1 } from './db/sqlite-adapter.ts';
 import worker from './index.ts';
+import { handleScheduled } from './jobs/cron.ts';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -107,6 +109,27 @@ serve(
     console.log(`[mission-control] DB: ${DB_PATH}`);
   },
 );
+
+// ---------------------------------------------------------------------------
+// Cron schedules (self-host only; Cloudflare Workers uses wrangler.toml crons)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the three scheduled triggers in wrangler.toml:
+//   0 3 * * *    — purge events older than EVENTS_RETENTION_DAYS
+//   0 4 * * *    — purge expired idempotency_keys rows
+//   */15 * * * * — purge expired better-auth verification rows
+
+cron.schedule('0 3 * * *', () => {
+  handleScheduled({ cron: '0 3 * * *' } as any, env as any, fakeCtx);
+});
+cron.schedule('0 4 * * *', () => {
+  handleScheduled({ cron: '0 4 * * *' } as any, env as any, fakeCtx);
+});
+cron.schedule('*/15 * * * *', () => {
+  handleScheduled({ cron: '*/15 * * * *' } as any, env as any, fakeCtx);
+});
+
+console.log('[mission-control] cron schedules registered');
 
 // ---------------------------------------------------------------------------
 // Migration runner

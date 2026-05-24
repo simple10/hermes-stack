@@ -27,7 +27,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "0.16.9",
+    "@cloudflare/vitest-pool-workers": "0.16.6",
     "@types/node": "24.12.4",
     "drizzle-kit": "0.31.10",
     "typescript": "5.9.3",

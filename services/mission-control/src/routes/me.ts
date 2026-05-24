@@ -5,11 +5,10 @@
  * in the response (serialised timestamps).
  */
 import { Hono } from 'hono';
-import { and, eq } from 'drizzle-orm';
 import { authMiddleware } from '../auth/middleware.ts';
 import type { AuthContext } from '../auth/types.ts';
-import { agents, connectors } from '../db/pool.ts';
-import { active, serializeTimestamps } from '../db/helpers.ts';
+import { serializeTimestamps } from '../db/helpers.ts';
+import { db } from '../db/repos/index.ts';
 
 type Variables = { auth: AuthContext };
 
@@ -27,23 +26,13 @@ me.get('/', async (c) => {
   };
 
   if (ctx.principal.type === 'agent') {
-    const agentRows = await ctx.pool
-      .select()
-      .from(agents)
-      .where(and(eq(agents.id, ctx.principal.id), eq(agents.orgId, ctx.orgId), active(agents)))
-      .limit(1);
-    const a = agentRows[0];
-    if (a) base.agent = serializeTimestamps(a);
+    const agent = await db.agents(ctx).findById(ctx.principal.id);
+    if (agent) base.agent = serializeTimestamps(agent);
   }
 
   if (ctx.principal.type === 'connector') {
-    const connectorRows = await ctx.pool
-      .select()
-      .from(connectors)
-      .where(and(eq(connectors.id, ctx.principal.id), eq(connectors.orgId, ctx.orgId), active(connectors)))
-      .limit(1);
-    const cn = connectorRows[0];
-    if (cn) base.connector = serializeTimestamps(cn);
+    const connector = await db.connectors(ctx).findById(ctx.principal.id);
+    if (connector) base.connector = serializeTimestamps(connector);
   }
 
   return c.json(base);

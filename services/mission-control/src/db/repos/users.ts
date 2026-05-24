@@ -13,12 +13,29 @@ import { and, eq } from 'drizzle-orm';
 import { user, member } from '../master.ts';
 import { masterClient } from '../client.ts';
 import type { AuthContext } from '../../auth/types.ts';
+import type { Env } from '../client.ts';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type UserRow = typeof user.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Static lookup — for bootstrap (no ctx available)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether ANY user exists in the master DB.
+ *
+ * Used by the bootstrap endpoint BEFORE any AuthContext exists to gate the
+ * one-time setup flow.  Returns true if at least one user row exists.
+ */
+export async function lookupAnyUserExists(env: Env): Promise<boolean> {
+  const master = masterClient(env);
+  const rows = await master.select({ id: user.id }).from(user).limit(1);
+  return rows.length > 0;
+}
 
 // ---------------------------------------------------------------------------
 // Factory

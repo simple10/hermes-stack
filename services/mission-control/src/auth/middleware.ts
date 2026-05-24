@@ -16,11 +16,10 @@
  * middleware factories applied per-route after authMiddleware.
  */
 import type { MiddlewareHandler } from 'hono';
-import { and, eq } from 'drizzle-orm';
 import { createAuth } from './config.ts';
 import { resolvePoolForOrg } from '../db/pool-resolver.ts';
-import { masterClient } from '../db/client.ts';
-import { member, apiKey as apiKeyTable } from '../db/master.ts';
+import { lookupMemberRole } from '../db/repos/members.ts';
+import { lookupApiKeyById } from '../db/repos/api-keys.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import type { AuthContext, OrgId } from './types.ts';
 import { asOrgId } from './types.ts';
@@ -63,12 +62,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
       viaUserId = session.user.id;
 
       // Look up the user's role in this org.
-      const memberRows = await masterClient(env)
-        .select()
-        .from(member)
-        .where(and(eq(member.userId, session.user.id), eq(member.organizationId, orgId)))
-        .limit(1);
-      const m = memberRows[0];
+      const m = await lookupMemberRole(env, session.user.id, orgId);
       if (!m) {
         throw new HttpError(403, 'auth.not_member', 'Not a member of the active organization');
       }
@@ -97,13 +91,8 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
 
       // Workaround: better-auth verifyApiKey returns Omit<ApiKey, "key">
       // which does NOT include our additionalFields (orgId, principalType).
-      // We do a follow-up Drizzle query against the apiKey table to fetch them.
-      const keyRows = await masterClient(env)
-        .select()
-        .from(apiKeyTable)
-        .where(eq(apiKeyTable.id, keyId))
-        .limit(1);
-      const keyRow = keyRows[0];
+      // We do a follow-up lookup against the apiKey table to fetch them.
+      const keyRow = await lookupApiKeyById(env, keyId);
       if (!keyRow) {
         // Race: key was deleted between verify and fetch. Treat as invalid.
         throw new HttpError(401, 'auth.invalid_token', 'API key not found after verification');
@@ -117,12 +106,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
         principal = { type: 'user', id: keyRow.userId };
         // Look up the user's org role.
         if (!orgId) throw new HttpError(401, 'auth.invalid_token', 'No org_id on key');
-        const patMemberRows = await masterClient(env)
-          .select()
-          .from(member)
-          .where(and(eq(member.userId, keyRow.userId), eq(member.organizationId, orgId)))
-          .limit(1);
-        const m = patMemberRows[0];
+        const m = await lookupMemberRole(env, keyRow.userId, orgId);
         if (!m) {
           throw new HttpError(403, 'auth.not_member', 'API key user is not a member of this org');
         }

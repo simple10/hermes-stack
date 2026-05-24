@@ -82,6 +82,22 @@ export async function lookupApiKey(env: Env, hashedToken: string): Promise<ApiKe
   return rows[0] ?? null;
 }
 
+/**
+ * Look up an API key row by its ID (the primary key, not the hashed token).
+ *
+ * Used by auth middleware after better-auth's verifyApiKey returns the key ID.
+ * Returns the full row (including orgId, principalType, metadata) or null.
+ */
+export async function lookupApiKeyById(env: Env, keyId: string): Promise<ApiKeyRow | null> {
+  const master = masterClient(env);
+  const rows = await master
+    .select()
+    .from(apiKeyTable)
+    .where(eq(apiKeyTable.id, keyId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Factory — for handlers (ctx available)
 // ---------------------------------------------------------------------------

@@ -18,11 +18,12 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { masterClient } from '../db/client.ts';
-import { user, organization, member } from '../db/master.ts';
+import { organization, member } from '../db/master.ts';
 import { createAuth } from '../auth/config.ts';
 import { errorResponse, HttpError } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { mintApiKey } from '../auth/api-keys.ts';
+import { lookupAnyUserExists } from '../db/repos/users.ts';
 
 export const bootstrap = new Hono();
 
@@ -52,9 +53,8 @@ bootstrap.post('/', async (c) => {
     }
 
     // Gate 3: no users may exist yet.
-    const master = masterClient(env);
-    const existing = await master.select({ id: user.id }).from(user).limit(1);
-    if (existing.length > 0) {
+    const anyUserExists = await lookupAnyUserExists(env);
+    if (anyUserExists) {
       return errorResponse(
         c,
         new HttpError(409, 'bootstrap.already_done', 'A user already exists; bootstrap endpoint is closed'),
@@ -89,10 +89,11 @@ bootstrap.post('/', async (c) => {
 
     // Step 2: Insert organization + member directly via Drizzle.
     //
-    // We bypass auth.api.createOrganization because better-auth's Drizzle adapter
-    // has a double-insert bug: the low-level adapter.createOrganization() already
-    // inserts the member row, and then the endpoint code calls adapter.createMember()
-    // a second time, violating the UNIQUE(organization_id, user_id) constraint.
+    // repo-escape: bootstrap bypasses better-auth's createOrganization adapter
+    // to avoid a double-insert bug: the adapter inserts member, then the endpoint
+    // calls createMember again, violating the UNIQUE(organization_id, user_id)
+    // constraint. Direct insert is the only reliable path here.
+    const master = masterClient(env);
     const now = new Date();
     const orgId = makeId('org');
     const memberId = makeId('mbr');
@@ -113,11 +114,11 @@ bootstrap.post('/', async (c) => {
       createdAt: now,
     });
 
-    // Step 3: Mint a PAT directly via Drizzle (via mintApiKey helper).
+    // Step 3: Mint a PAT directly via mintApiKey helper.
     //
-    // We bypass auth.api.createApiKey because our custom columns (org_id,
-    // principal_type) have NOT NULL constraints that better-auth's INSERT does
-    // not include.
+    // repo-escape: bootstrap runs before ctx exists, so apiKeysRepo(ctx) is not
+    // available. mintApiKey() is a low-level static function that takes a master
+    // client directly.
     const { rawKey } = await mintApiKey(master, {
       prefix: 'mcpat_',
       name: 'bootstrap PAT',

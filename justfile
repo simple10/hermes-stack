@@ -185,11 +185,19 @@ start-cleanup:
 #                          the "hermes CLI hangs 1+min on dead CDP URL" bug)
 #   - just stop          : tears down Chrome + proxy regardless of lever
 #                          (lever stays set; next start re-provisions)
-# localhost-proxy is a TRANSIENT sidecar, never in COMPOSE_PROFILES. Since
-# stack_render_compose only include:s services that ARE in COMPOSE_PROFILES,
-# we surface it to compose with an explicit second -f file each time we
-# touch it. Docker compose merges multiple -f files; --profile localhost-proxy
-# activates the now-visible service.
+# localhost-proxy has TWO valid states, distinguished by COMPOSE_PROFILES:
+#   - Persistent (in COMPOSE_PROFILES): user enabled it explicitly via
+#     `just enable localhost-proxy` to bridge their own ports (LOCALHOST_PROXY_PORTS
+#     in the #>--- localhost-proxy --- block of .stack/.env). Lives in the
+#     generated docker-compose.yaml, brought up by normal `dc up -d`.
+#   - Transient (NOT in COMPOSE_PROFILES): only running because chrome-cdp
+#     brought it up. Surfaced to compose via an explicit second -f file.
+# chrome-cdp-enable + chrome-cdp-disable handle both states: csv_add /
+# csv_remove their bridge port in .stack/.env's LOCALHOST_PROXY_PORTS
+# (block-aware via stack_upsert), and choose the dc invocation based on
+# whether localhost-proxy is in COMPOSE_PROFILES. chrome-cdp-disable only
+# tears down the container when localhost-proxy is in the transient state;
+# when persistent, it recreates with the now-shorter port list.
 # Flip HOST_CHROME_CDP_ENABLED=true + provision Chrome+proxy+URL wiring.
 chrome-cdp-enable:
     @set -a; source "{{lib}}"; set +a; \
@@ -243,12 +251,23 @@ _chrome-cdp-up:
          || { kill "$(cat "$chrome_pid")" 2>/dev/null; rm -f "$chrome_pid"; die "CDP did not come up on $port"; }; \
      fi; \
      log "chrome-cdp: bringing up localhost-proxy with chrome mapping (+ any LOCALHOST_PROXY_PORTS extras)"; \
-     user_ports="$(env_get "$STACK_DIR/.env" LOCALHOST_PROXY_PORTS)"; \
      chrome_map="$bport:$port"; \
-     case ",$user_ports," in *",$chrome_map,"*) merged="$user_ports" ;; *) merged="${user_ports:+$user_ports,}$chrome_map" ;; esac; \
-     mkdir -p "$STACK_DIR/localhost-proxy"; \
-     env_upsert "$STACK_DIR/localhost-proxy/.generated.env" LOCALHOST_PROXY_PORTS "$merged"; \
-     dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy up -d --force-recreate localhost-proxy >/dev/null; \
+     case "$(stack_env_block_status localhost-proxy)" in \
+       missing)  _svc_stack_env localhost-proxy | stack_env_block_append localhost-proxy ;; \
+       disabled) stack_env_block_toggle localhost-proxy enabled ;; \
+       enabled)  : ;; \
+     esac; \
+     csv_add "$STACK_DIR/.env" LOCALHOST_PROXY_PORTS "$chrome_map"; \
+     merged="$(stack_get LOCALHOST_PROXY_PORTS)"; \
+     case ",$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)," in \
+       *",localhost-proxy,"*) lp_persistent=1 ;; \
+       *)                     lp_persistent=0 ;; \
+     esac; \
+     if [ "$lp_persistent" = "1" ]; then \
+       dc up -d --force-recreate localhost-proxy >/dev/null; \
+     else \
+       dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy up -d --force-recreate localhost-proxy >/dev/null; \
+     fi; \
      first_svc="$(echo "${STACK_MACHINES:-hermes}" | tr ', ' ' ' | awk '{print $1}')"; \
      first_vm="$(stack_vm_name "$first_svc")"; \
      mch_running="$(orb list 2>/dev/null | awk -v m="$first_vm" '$1==m && $2=="running"{print "1"}')"; \
@@ -303,10 +322,24 @@ _chrome-cdp-down:
        rm -f "$pid_file"; \
      fi; \
      if [ -f "$STACK_DIR/.env" ]; then \
-       echo "== chrome-cdp: stopping localhost-proxy =="; \
-       dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy stop localhost-proxy >/dev/null 2>&1 || true; \
-       dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy rm -f localhost-proxy >/dev/null 2>&1 || true; \
-       rm -f "$STACK_DIR/localhost-proxy/.generated.env"; \
+       set -a; source "{{root}}/.stack/.env"; set +a; \
+       bport="${CHROME_CDP_BRIDGE_PORT:-19299}"; port="${CHROME_CDP_PORT:-19298}"; \
+       chrome_map="$bport:$port"; \
+       if [ "$(stack_env_block_status localhost-proxy)" = "enabled" ]; then \
+         csv_remove "$STACK_DIR/.env" LOCALHOST_PROXY_PORTS "$chrome_map" 2>/dev/null || true; \
+       fi; \
+       case ",$(env_get "$STACK_DIR/.env" COMPOSE_PROFILES)," in \
+         *",localhost-proxy,"*) lp_persistent=1 ;; \
+         *)                     lp_persistent=0 ;; \
+       esac; \
+       if [ "$lp_persistent" = "1" ]; then \
+         echo "== chrome-cdp: localhost-proxy is in COMPOSE_PROFILES (persistent) — recreating with reduced port list =="; \
+         dc up -d --force-recreate localhost-proxy >/dev/null 2>&1 || true; \
+       else \
+         echo "== chrome-cdp: localhost-proxy is transient (not in COMPOSE_PROFILES) — tearing down =="; \
+         dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy stop localhost-proxy >/dev/null 2>&1 || true; \
+         dc -f services/localhost-proxy/compose.yaml --profile localhost-proxy rm -f localhost-proxy >/dev/null 2>&1 || true; \
+       fi; \
      fi; \
      mount_enabled="$(env_get "$STACK_DIR/.env" HERMES_MOUNT_ENABLED 2>/dev/null)"; \
      mount_enabled="${mount_enabled:-true}"; \

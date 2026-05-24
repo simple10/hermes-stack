@@ -575,8 +575,14 @@ _svc_env_field() {
 # file in a subshell so the caller's env isn't polluted. SERVICE_STACK_ENV
 # should be SINGLE-QUOTED so any ${...} refs inside it are preserved
 # literally and only expanded later when .stack/.env itself is sourced.
+#
+# Bash gotcha: `local svc="$1" f="…/$svc/…"` evaluates `$svc` in the f=
+# expansion using the CALLER's svc (usually empty), NOT the just-assigned
+# value — assignments on a single local line don't take effect until the
+# statement finishes. Split across two locals so $svc is visible.
 _svc_stack_env() {
-  local svc="$1" f="$STACK_ROOT/services/$svc/service.env"
+  local svc="$1"
+  local f="$STACK_ROOT/services/$svc/service.env"
   [ -f "$f" ] || return 0
   (
     SERVICE_STACK_ENV=""

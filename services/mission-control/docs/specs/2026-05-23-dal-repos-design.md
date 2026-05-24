@@ -326,12 +326,49 @@ Coverage gate: every repo file has ≥ 80% line coverage from its unit tests.
 
 ## Error model
 
-Repos throw the same error types route handlers already use:
-- `HttpError(409, 'task.duplicate_idempotency_key', ...)` — wrapped via `isUniqueViolation(e)` check
-- `HttpError(404, ...)` — repos return `null`; the handler turns that into 404 (repo doesn't know about HTTP)
-- `HttpError(409, 'task.invalid_transition', ...)` — state-machine validation happens in the handler, not the repo
+Repos throw **typed domain errors** — never HTTP-aware. Route handlers catch these and map to HTTP responses.
 
-Repos only know about data. HTTP semantics stay in handlers.
+```ts
+// src/db/repos/_errors.ts
+export class DuplicateError extends Error {
+  constructor(public resource: string, public details: Record<string, unknown> = {}) {
+    super(`${resource} already exists`);
+    this.name = 'DuplicateError';
+  }
+}
+
+export class ForbiddenError extends Error {
+  constructor(public code: string, message: string, public details: Record<string, unknown> = {}) {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+```
+
+How each layer signals:
+- **Not found**: repos return `null` (or `[]`). Handler maps null → 404 with the right error code (`task.not_found`, etc.).
+- **Duplicate**: repos throw `DuplicateError('task', { existing_task_id })`. Handler maps → `HttpError(409, 'task.duplicate_idempotency_key', ...)`.
+- **Forbidden** (machine principal trying to act outside its scope, e.g. agent posting external_ref with someone else's source_id): repo throws `ForbiddenError('external_ref.source_id_forbidden', ...)`. Handler maps → `HttpError(403, ...)`.
+- **State-machine violations**: stay in the handler. The repo accepts the new status; the handler validates the transition first.
+
+Pattern in handlers:
+
+```ts
+try {
+  const task = await db.tasks(ctx).insert(values);
+  return c.json({ task: serializeRow(task) }, 201);
+} catch (e) {
+  if (e instanceof DuplicateError) {
+    return errorResponse(c, new HttpError(409, 'task.duplicate_idempotency_key', e.message, e.details));
+  }
+  if (e instanceof ForbiddenError) {
+    return errorResponse(c, new HttpError(403, e.code, e.message, e.details));
+  }
+  throw e;
+}
+```
+
+Repos stay HTTP-agnostic; handlers translate domain errors into HTTP. Same `HttpError` class as today.
 
 ---
 
@@ -385,3 +422,56 @@ Deferred to follow-up:
 1. **Members table access pattern** — `db.members(ctx).roleFor(userId, orgId)` is needed by auth middleware itself, BEFORE `ctx` exists. The members repo may need a static `membersRepo.roleFor(env, userId, orgId)` variant that doesn't take ctx. Resolve during implementation.
 2. **`tasks.list` filter shape vs handler-side decoding** — the handler decodes the cursor; the repo accepts the already-decoded `{updatedAt, id}`. Document the contract; alternative is having the repo decode but that pulls HMAC-secret reading into the repo (smell).
 3. **`scoped()` chainable typing** — Drizzle's builder types may flow through cleanly or may need an explicit return type annotation. Find out during implementation; not a blocker.
+
+---
+
+## Reviewer findings — resolved
+
+A pre-implementation sub-agent review surfaced concrete issues. Resolutions:
+
+1. **`emitEvent` signature mismatch with the proposed repo.**
+   Current `emitEvent(pool, { orgId, resourceType, resourceId, kind, actor, payload })` takes `pool` + an args object that already includes `orgId`. The proposed `events` repo takes `ctx` and derives orgId.
+   **Resolution:** Two-step migration. First, replace the events repo with a NEW method `db.events(ctx).emit({resourceType, resourceId, kind, payload})` that takes only kind-specific args (orgId + actor come from ctx). Then update every `emitEvent(pool, ...)` callsite to `db.events(ctx).emit(...)`. The legacy `emitEvent` function gets deleted; no compat shim. Catch every callsite in one commit during Task 4 Step 3.
+
+2. **Error model contradiction (repos throw HttpError vs HTTP semantics stay in handlers).**
+   **Resolution:** Repos throw typed domain errors (`DuplicateError`, `ForbiddenError`); handlers catch and map to HttpError. See updated "Error model" section above.
+
+3. **`softDelete` deleter attribution differs between app-side and trigger-side.**
+   Trigger-based cascade uses `deleted_by_type = 'system'` (DB-side; not changeable from app). App-side `softDelete` writes the calling principal.
+   **Resolution:** Document the asymmetry explicitly. Direct soft-delete of a parent table writes the principal as deleter; cascade-soft-deleted children get `'system'`. This matches existing behavior (the triggers already do this). Per-repo tests assert both paths.
+
+4. **`apiKeysRepo` missing rotate-key method.**
+   **Resolution:** Add `mintAndExpireExisting(args, oldKeyId, expiresAt)` to the api-keys repo. The agent/connector route's rotate handler calls this single repo method instead of orchestrating two operations.
+
+5. **`events.list()` API hand-waving.**
+   Spec implied a `list(filter)` method but events are deferred to v1.1. Plan didn't say what to build now.
+   **Resolution:** v1 events repo exposes ONLY `emit(...)` — no `list`. When the `/v1/events` route ships in v1.1, add `list(filter)` then.
+
+6. **ESLint rule must cover `masterClient(env)` in routes, not just `ctx.pool`.**
+   **Resolution:** Rule flags any of:
+   - `ctx.pool.{select|insert|update|delete}`
+   - `masterClient(...).{select|insert|update|delete}` (regardless of arg shape)
+   - `c.env.DB`, `c.env.MASTER_DB`, `c.env.POOL_*` (direct binding access)
+   `// repo-escape: <reason>` comment exempts the next line. Health check exempted via path-level allowlist.
+
+7. **`test/helpers/orgs.ts` needs `OrgId` ripple in Task 10.**
+   **Resolution:** Add to Task 10's file list. `createOrgFixture` returns `{userId: string, orgId: OrgId, pat: string}`; tests using the orgId in repo calls get the brand automatically.
+
+8. **`system` namespace `purgeOlderThan` signature inconsistency.**
+   **Resolution:** Take `(binding, cutoff)` — binding is mandatory (single-pool today, multi-pool when sharded). Drop `env` arg; binding is the only thing actually needed. Same for `idempotencyKeys.purgeExpired`.
+
+9. **`users` repo `findById` JOIN through `member`.**
+   **Resolution:** Repo's `findById(userId)` does:
+   ```ts
+   select user.* from user
+   inner join member on member.user_id = user.id
+   where member.organization_id = ctx.orgId AND user.id = userId
+   limit 1
+   ```
+   Documented in the repo file.
+
+10. **Per-repo unit tests will add 30-60s to CI.**
+    **Resolution:** Acknowledged. Acceptable for the safety win; revisit if it becomes a productivity drag.
+
+11. **`activeRows` in `_base.ts` duplicates `active` in `helpers.ts`.**
+    **Resolution:** Drop `activeRows`; repos import `active` directly from `helpers.ts`.

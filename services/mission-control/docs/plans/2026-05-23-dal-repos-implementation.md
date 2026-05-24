@@ -801,3 +801,106 @@ git diff --cached
 2. **`scoped()` return type** — Drizzle's chainable builder may need an explicit return type or generic to flow properly. Address during Task 3 Step 1.
 3. **`scope` extraction for joins** — if no concrete join callsite exists, defer the join-helper pattern; just expose `table` and `scope` for now and add joins on demand.
 4. **`api-keys` repo overlap with `src/auth/api-keys.ts`** — pick one: either move the SHA-256+base64url primitives into the repo, or keep them in auth/api-keys.ts as low-level utilities and have the repo wrap them. Task 5 Step 4 picks the latter; verify it actually works.
+
+---
+
+## Reviewer findings — plan amendments
+
+A pre-implementation review surfaced concrete plan gaps. Amendments to the tasks below; see the spec's "Reviewer findings — resolved" for the architectural decisions.
+
+### Amendment A: Task 2 — `_base.ts` is no-op
+
+`_base.ts` is empty/optional now. Each repo imports `active` from `src/db/helpers.ts` directly and re-exports `AuthContext` from `src/auth/types.ts`. Delete the `activeRows` proposal.
+
+### Amendment B: Task 2 — Add `src/db/repos/_errors.ts`
+
+Add a new file containing the typed domain errors (`DuplicateError`, `ForbiddenError`) per spec's updated error model. Import these from every repo that catches a UNIQUE violation. Step 1 becomes "create `_errors.ts` + the empty `index.ts`".
+
+### Amendment C: Task 4 — Events repo signature
+
+The `db.events(ctx).emit({resourceType, resourceId, kind, payload})` method takes only kind-specific args. `orgId` + `actor` come from ctx.
+
+**Add migration step:** find every `emitEvent(pool, {...})` callsite and rewrite to `db.events(ctx).emit({...})`. Concrete files to update (verified via grep):
+- `src/routes/agents.ts`
+- `src/routes/connectors.ts`
+- `src/routes/projects.ts`
+- `src/routes/tasks.ts`
+- `src/routes/comments.ts`
+- `src/routes/external-refs.ts`
+- `src/routes/bootstrap.ts` (if it emits an org.created event — verify)
+
+After every callsite is updated, **delete `src/events/emit.ts` entirely** (no shim). Update the events test if it imports the old function.
+
+This is a bigger Task-4 commit than originally scoped. Adjust commit message accordingly.
+
+### Amendment D: Task 5 — `apiKeysRepo` rotate-key
+
+Add method `db.apiKeys(ctx).mintAndExpireExisting({...newKeyArgs}, oldKeyId, expiresAt)` — used by agent/connector rotate-key routes. Atomically (well, sequentially) mints a new key and sets the old key's expiresAt to `now + grace`. Returns `{newKey, oldExpiresAt}`.
+
+### Amendment E: Task 6 — `system.*` signatures
+
+```ts
+system.events.purgeOlderThan(binding: D1Database, cutoff: number): Promise<void>
+system.idempotencyKeys.purgeExpired(binding: D1Database, now: number): Promise<void>
+system.verification.purgeExpired(masterBinding: D1Database, now: number): Promise<void>
+```
+
+Drop the `env` arg; callers pass the binding explicitly. `src/jobs/cron.ts` resolves the right binding from env and passes it.
+
+### Amendment F: Task 7 — Handler error-mapping pattern
+
+Every route handler now needs:
+
+```ts
+import { DuplicateError, ForbiddenError } from '../db/repos/_errors.ts';
+
+// at the catch site (or in errorResponse helper):
+if (e instanceof DuplicateError) {
+  return errorResponse(c, new HttpError(409, `${e.resource}.duplicate`, e.message, e.details));
+}
+if (e instanceof ForbiddenError) {
+  return errorResponse(c, new HttpError(403, e.code, e.message, e.details));
+}
+```
+
+Cleaner: extend `errorResponse()` itself in `src/errors.ts` to handle these automatically. Recommended approach — one place, every handler benefits. Add as Step 0 of Task 7.
+
+### Amendment G: Task 8 — agent/connector saga semantics preserved
+
+The compensating delete on apiKey-mint failure must keep using `deleted_by_type = 'system'` (matches current behavior; the agent never went live, so the deletion isn't a user-initiated soft-delete). Two options:
+- Repo's `softDelete` accepts an optional `actor` override; saga passes `{type:'system', id:'compensating-action'}`.
+- Bypass `softDelete` for the compensating path and write `deleted_at` directly via `.scoped().update({...}).where(...)`.
+
+Pick option 1 — keeps all mutations going through the repo.
+
+### Amendment H: Task 9 — `lookupApiKey(env, hashedToken)` for middleware
+
+The middleware also looks up apiKey rows before ctx exists. Add a static lookup (`apiKeysRepo`'s env-only variant) the middleware can call.
+
+Concrete: `apiKeysRepo` exports both:
+- `apiKeysRepo(ctx)` — for handlers
+- `apiKeysRepoStatic.lookupByHash(env, hashedToken)` — for middleware
+Same pattern as `members`.
+
+### Amendment I: Task 10 — Add `test/helpers/orgs.ts` to the files list
+
+After OrgId is branded, `createOrgFixture` returns `{userId, orgId, pat}` where `orgId` is typed `OrgId`. Cast `orgId as OrgId` at the return site of the helper. Tests passing the fixture's `orgId` to repo calls then satisfy the brand.
+
+### Amendment J: Task 11 — ESLint rule expanded scope
+
+Rule must flag:
+- `ctx.pool.{select|insert|update|delete}` (current)
+- `masterClient(...).{select|insert|update|delete}` (any call returning a Drizzle client followed by a write/read)
+- `c.env.DB`, `c.env.MASTER_DB`, `c.env.POOL_*` direct access in route handlers
+
+The rule logic walks `MemberExpression` nodes for these patterns. Allow `// repo-escape: <reason>` exemption.
+
+Allowlist: `src/routes/health.ts` may call `c.env.DB.prepare('SELECT 1')` (the readiness probe). Either exclude via path config or add the exemption comment in the file.
+
+### Amendment K: Task 12 — Grep also for `masterClient`
+
+```sh
+grep -rn "ctx\.pool\.\|masterClient(\|c\.env\.\(DB\|MASTER_DB\|POOL_\)" src/routes/ | grep -v "repo-escape:"
+```
+
+Expected: only the health.ts probe call (with the exemption comment).

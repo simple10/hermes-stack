@@ -602,6 +602,15 @@ tasksRouter.patch(
           changedFields['agent_id'] = [oldAgentId, newAgentId];
           patch.agentId = newAgentId;
           agentIdChanged = true;
+
+          // Auto-promote: if assigning an agent to a pending task (and no explicit
+          // status transition was requested), atomically set status to 'ready'.
+          // This matches the create-time rule: "POST with agent_id → status = ready".
+          if (newAgentId !== null && existing.status === 'pending' && statusTo === null) {
+            patch.status = 'ready';
+            statusFrom = 'pending';
+            statusTo = 'ready';
+          }
         }
       }
 

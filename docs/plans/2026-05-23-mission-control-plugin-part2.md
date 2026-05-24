@@ -691,6 +691,10 @@ worker subprocesses don't hit disk on every plugin discovery."
 - Create: `services/hermes/plugins/mission-control/client.py`
 - Test: `services/hermes/plugins/mission-control/tests/test_client.py`
 
+**Notes on test style:** use the `respx_mock` pytest fixture (NOT the `@respx.mock` decorator) — the fixture is more reliable under `asyncio_mode = "auto"` and avoids decorator-ordering edge cases observed in respx 0.21+ / httpx 0.27+. Pattern: `async def test_x(respx_mock): respx_mock.get(...).mock(return_value=...)`.
+
+**Module-import hygiene:** none of the tests in this file should `import gateway.run` (directly or transitively) — that import sets `_HERMES_GATEWAY=1` at module load, which the conftest fixture only scrubs once-per-test (the import happens during collection). The McClient code itself never touches gateway code, so this is naturally safe; if a future test pulls in gateway-side helpers, scrub `_HERMES_GATEWAY` explicitly inside the test body after the import.
+
 - [ ] **Step 1: Write failing tests**
 
 ```python
@@ -698,7 +702,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-import respx
 
 from mission_control import client as mc_client
 
@@ -710,9 +713,7 @@ def _make_client():
     return mc_client.McClient(base_url=BASE, timeout_s=2.0)
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_me_with_agent_key():
+async def test_me_with_agent_key(respx_mock):
     route = respx.get(f"{BASE}/v1/me").mock(
         return_value=httpx.Response(200, json={"org": {"id": "org_1"},
                                                 "principal_type": "agent",
@@ -724,10 +725,8 @@ async def test_me_with_agent_key():
     assert route.calls.last.request.headers["authorization"] == "Bearer mcagt_xxx"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_tasks_list_passes_filters():
-    respx.get(f"{BASE}/v1/tasks").mock(
+async def test_tasks_list_passes_filters(respx_mock):
+    respx_mock.get(f"{BASE}/v1/tasks").mock(
         return_value=httpx.Response(200, json={"data": [], "next_cursor": "abc"}))
     c = _make_client()
     result = await c.tasks_list(agent_key="mcagt_x", agent_id="agt_1",
@@ -738,10 +737,8 @@ async def test_tasks_list_passes_filters():
     assert result["next_cursor"] == "abc"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_tasks_create_idempotency_header():
-    respx.post(f"{BASE}/v1/tasks").mock(
+async def test_tasks_create_idempotency_header(respx_mock):
+    respx_mock.post(f"{BASE}/v1/tasks").mock(
         return_value=httpx.Response(201, json={"id": "t_new", "updated_at": 999}))
     c = _make_client()
     result = await c.tasks_create(connector_key="mccnn_x",
@@ -754,10 +751,8 @@ async def test_tasks_create_idempotency_header():
     assert result["id"] == "t_new"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_tasks_patch():
-    respx.patch(f"{BASE}/v1/tasks/t_1").mock(
+async def test_tasks_patch(respx_mock):
+    respx_mock.patch(f"{BASE}/v1/tasks/t_1").mock(
         return_value=httpx.Response(200, json={"id": "t_1", "updated_at": 1000}))
     c = _make_client()
     result = await c.tasks_patch(agent_key="mcagt_x", mc_task_id="t_1",
@@ -765,10 +760,8 @@ async def test_tasks_patch():
     assert result["updated_at"] == 1000
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_comments_list_cursor():
-    respx.get(f"{BASE}/v1/tasks/t_1/comments").mock(
+async def test_comments_list_cursor(respx_mock):
+    respx_mock.get(f"{BASE}/v1/tasks/t_1/comments").mock(
         return_value=httpx.Response(200, json={"data": [], "next_cursor": "c2"}))
     c = _make_client()
     r = await c.task_comments_list(agent_key="mcagt_x", mc_task_id="t_1",
@@ -778,10 +771,8 @@ async def test_comments_list_cursor():
     assert r["next_cursor"] == "c2"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_comment_create_idempotency_header():
-    respx.post(f"{BASE}/v1/tasks/t_1/comments").mock(
+async def test_comment_create_idempotency_header(respx_mock):
+    respx_mock.post(f"{BASE}/v1/tasks/t_1/comments").mock(
         return_value=httpx.Response(201, json={"id": "cmt_1"}))
     c = _make_client()
     r = await c.task_comment_create(key="mcagt_x", mc_task_id="t_1",
@@ -792,10 +783,8 @@ async def test_comment_create_idempotency_header():
     assert r["id"] == "cmt_1"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_external_ref_create_idempotency_header():
-    respx.post(f"{BASE}/v1/external_refs").mock(
+async def test_external_ref_create_idempotency_header(respx_mock):
+    respx_mock.post(f"{BASE}/v1/external_refs").mock(
         return_value=httpx.Response(201, json={"id": "xrf_1"}))
     c = _make_client()
     r = await c.external_ref_create(agent_key="mcagt_x",
@@ -807,29 +796,23 @@ async def test_external_ref_create_idempotency_header():
     assert call.headers["idempotency-key"] == "hermes:xrf:local_abc"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_401_raises_auth_failed():
-    respx.get(f"{BASE}/v1/me").mock(
+async def test_401_raises_auth_failed(respx_mock):
+    respx_mock.get(f"{BASE}/v1/me").mock(
         return_value=httpx.Response(401, json={"error": {"code": "auth.invalid"}}))
     c = _make_client()
     with pytest.raises(mc_client.AuthFailed):
         await c.me("mcagt_bad")
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_5xx_raises_transient():
-    respx.get(f"{BASE}/v1/me").mock(return_value=httpx.Response(503))
+async def test_5xx_raises_transient(respx_mock):
+    respx_mock.get(f"{BASE}/v1/me").mock(return_value=httpx.Response(503))
     c = _make_client()
     with pytest.raises(httpx.HTTPStatusError):
         await c.me("mcagt_x")
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_409_with_existing_id_surfaces_in_error():
-    respx.post(f"{BASE}/v1/tasks").mock(
+async def test_409_with_existing_id_surfaces_in_error(respx_mock):
+    respx_mock.post(f"{BASE}/v1/tasks").mock(
         return_value=httpx.Response(409, json={"error": {
             "code": "idempotency.conflict",
             "details": {"existing_task_id": "t_dupe"},
@@ -842,10 +825,8 @@ async def test_409_with_existing_id_surfaces_in_error():
     assert exc.value.existing_task_id == "t_dupe"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_agents_create_returns_id_and_key():
-    respx.post(f"{BASE}/v1/agents").mock(
+async def test_agents_create_returns_id_and_key(respx_mock):
+    respx_mock.post(f"{BASE}/v1/agents").mock(
         return_value=httpx.Response(201, json={
             "agent": {"id": "agt_new"},
             "key": "mcagt_secret",
@@ -856,10 +837,8 @@ async def test_agents_create_returns_id_and_key():
     assert r["key"] == "mcagt_secret"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_connectors_create_returns_id_and_key():
-    respx.post(f"{BASE}/v1/connectors").mock(
+async def test_connectors_create_returns_id_and_key(respx_mock):
+    respx_mock.post(f"{BASE}/v1/connectors").mock(
         return_value=httpx.Response(201, json={
             "connector": {"id": "cnn_new"},
             "key": "mccnn_secret",
@@ -869,10 +848,8 @@ async def test_connectors_create_returns_id_and_key():
     assert r["connector"]["id"] == "cnn_new"
 
 
-@pytest.mark.asyncio
-@respx.mock
-async def test_projects_list_returns_data():
-    respx.get(f"{BASE}/v1/projects").mock(
+async def test_projects_list_returns_data(respx_mock):
+    respx_mock.get(f"{BASE}/v1/projects").mock(
         return_value=httpx.Response(200, json={"data": [{"id": "prj_1", "slug": "p", "name": "P"}],
                                                 "next_cursor": "tip"}))
     c = _make_client()
@@ -1164,7 +1141,13 @@ Behavior:
 - Comments phase: for each `link in links_db.list_active_links(ldb_conn)`, page comments forward from `link.last_comment_cursor`. After each page (including empty), save `next_cursor` to the link. Break when data is empty.
 - After both phases succeed: `set_pull_cursor('tasks', highest)`, then `purge_apply_log(older_than_ms=24*3600*1000)`.
 
-Tests use respx to mock MC, real in-memory DBs.
+Tests use respx_mock fixture to mock MC, real in-memory DBs. Required test cases:
+- Happy path: one new MC task → local kanban row created with `board=env.board`, link inserted, external_ref POSTed.
+- 401 mid-pull: loop catches AuthFailed, sets status='auth_failed', exits, does NOT advance cursor.
+- 5xx mid-pull: backoff schedule honored (use a fake sleep to assert delays of ~5s, ~30s, ~120s with ±25% jitter on consecutive failures; reset to 0 after a success).
+- Tasks-cursor stays unchanged when the comments phase raises (partial-failure recovery).
+- `kanban_db.connect` always called with `board=env.board` (assert via monkeypatch wrapper that captures kwargs).
+- Round-trip with push: pull creates task → simulate dispatcher's `claimed` event → push's PATCH lands at MC with `status=in_progress` → next pull sees the echoed updated_at and is a no-op via mc_apply_log.
 
 Commit:
 
@@ -1190,7 +1173,14 @@ Behavior:
   - `commented`: skip if comment id is already in `mc_comment_links` or if author starts with `mission-control:`; else `client.task_comment_create(key=agent_key, idempotency_key=f'hermes:cmt:{local_comment_id}')` and on success `insert_comment_link(source='pushed')`.
 - Loop wrapper `push_loop(env, auth, ldb_conn, kanban_conn, client, stop_event)`: same shape as pull_loop.
 
-Tests cover: each event-kind path; outcome disambiguation for completed; comment dedup both via mc_comment_links and via author prefix; 409 state-machine conflict triggers a state re-pull; orphan-link delete on 404; idempotency keys present on POSTs.
+Tests cover (mandatory):
+- Each event-kind path (claimed/blocked/unblocked/archived/scheduled/completed/completion_blocked_hallucination/commented).
+- `completed` event outcome disambiguation: assert `kanban_db.latest_run` is called for the task; with `outcome='completed'` PATCH sends `status=completed`; with `outcome='crashed'` (and each other failure outcome) PATCH sends `status=failed` with `failure_reason` populated.
+- Comment dedup BOTH via `mc_comment_links.has_local()` AND via `author.startswith('mission-control:')` — separate test for each path.
+- 409 state-machine conflict (e.g. PATCH `completed` on a task MC already marked `cancelled`): re-pull MC's canonical state, apply locally, clear `push_dirty`.
+- 404 from MC: orphan-link delete + local task archive with `result='removed from mc'`.
+- Idempotency-Key header present on every comment POST (`hermes:cmt:<local_id>`).
+- Auth: agent_key used for PATCH and comment_create; agent_key used for external_ref (matches spec §"Idempotency summary").
 
 Commit:
 
@@ -1215,7 +1205,46 @@ Behavior:
 - Module-level `_status` dict tracks `loops_running`, last success times, error counts; exported via `get_status()`.
 - `stop()` sets the stop event (mostly for tests; production never calls).
 
-Test: `test_runtime.start_runs_a_thread`: monkeypatch the loops to assert they get awaited, start, sleep briefly, assert thread is alive, stop, assert thread terminates.
+Test: `test_runtime.start_runs_loops_in_a_daemon_thread`. Sketch:
+
+```python
+import asyncio
+import time
+
+from mission_control import runtime
+
+
+def test_start_runs_loops_in_a_daemon_thread(monkeypatch, tmp_path):
+    pull_calls, push_calls = [], []
+
+    async def fake_pull_loop(*args, stop_event, **kw):
+        while not stop_event.is_set():
+            pull_calls.append(time.time())
+            await asyncio.sleep(0.05)
+
+    async def fake_push_loop(*args, stop_event, **kw):
+        while not stop_event.is_set():
+            push_calls.append(time.time())
+            await asyncio.sleep(0.05)
+
+    # Patch at the runtime module's namespace (where they're referenced),
+    # not where pull_loop/push_loop are defined.
+    monkeypatch.setattr("mission_control.runtime.pull_loop", fake_pull_loop)
+    monkeypatch.setattr("mission_control.runtime.push_loop", fake_push_loop)
+
+    runtime.start(env=None, auth=None,
+                  ldb_conn_factory=lambda: None,
+                  kanban_conn_factory=lambda: None,
+                  client_factory=lambda: None)
+    time.sleep(0.2)
+    assert runtime.get_status()["loops_running"] is True
+    assert len(pull_calls) >= 2
+    assert len(push_calls) >= 2
+
+    runtime.stop()
+    time.sleep(0.1)
+    assert runtime.get_status()["loops_running"] is False
+```
 
 Commit:
 
@@ -1278,7 +1307,13 @@ Behavior:
   7. On success: `links_db.insert_link(source='pushed')`, then `client.external_ref_create(agent_key, source_kind='hermes', source_id=auth.agent_id, external_id=local_task_id, idempotency_key=f'hermes:xrf:{local_task_id}')`.
   8. Return `{mc_task_id, already_linked: False}`.
 
-Tests cover happy path, already-linked, idempotency conflict matches link, unknown slug, no env.
+Tests cover:
+- Happy path: local task → MC POST → link inserted with `source='pushed'` → external_ref POSTed with **agent key** (not connector key) + correct idempotency-key header.
+- Already-linked: re-call returns `{mc_task_id: existing, already_linked: True}` without re-POSTing.
+- Idempotency conflict whose `details.existing_task_id` matches the local link's `mc_task_id`: treat as success, return `already_linked=True`.
+- Idempotency conflict whose `existing_task_id` does NOT match our link (or no link exists): log ERROR + raise to caller.
+- Unknown slug: friendly error pointing at `hermes mc refresh-projects`.
+- No env / no auth: clear error "plugin not registered".
 
 Commit:
 
@@ -1460,7 +1495,40 @@ to v1.1 once upstream's dashboard plugin-bundle pipeline is documented.
 `hermes_enable_plugin <name>`:
 - Same mount-aware pattern. Reads `~/.hermes/config.yaml` via python3 + pyyaml round-trip (same as the agentmemory section does for `mcp_servers`), appends `<name>` to `plugins.enabled` if missing, writes back.
 
-Test: write a tmpdir config.yaml without `plugins.enabled`, run `hermes_enable_plugin "mission-control"`, assert resulting yaml has `plugins.enabled: ['mission-control']`. Re-run, assert still single entry (idempotent).
+Test (follow the existing `build.test.sh` pattern at lines 22-46 that slices `hermes_env_rewrite_managed_block`):
+
+```bash
+test_hermes_enable_plugin_idempotent() {
+  local tmp=$(mktemp -d)
+  cat > "$tmp/config.yaml" <<EOF
+plugins:
+  enabled:
+    - agents-observe
+EOF
+
+  # Extract the function out of build.sh so we can call it in isolation
+  local helper="$(sed -n '/^hermes_enable_plugin() {/,/^}$/p' services/hermes/build.sh)"
+  eval "$helper"
+
+  # Stub mount + paths so the helper writes to our tmpdir
+  HERMES_MOUNT_ENABLED=true
+  MAC_HERMES="$tmp"
+
+  hermes_enable_plugin "mission-control"
+  hermes_enable_plugin "mission-control"  # second call → idempotent
+
+  python3 -c "
+import yaml
+d = yaml.safe_load(open('$tmp/config.yaml'))
+enabled = d['plugins']['enabled']
+assert enabled.count('mission-control') == 1, enabled
+assert 'agents-observe' in enabled, enabled
+"
+  rm -rf "$tmp"
+}
+```
+
+The `sed -n '/^func() {/,/^}$/p'` extraction pattern mirrors the existing `hermes_env_rewrite_managed_block` test fixture. Requires `python3` + `pyyaml` available on the build host (already required by other build.sh paths — agentmemory section uses the same).
 
 Commit:
 

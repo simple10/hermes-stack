@@ -266,5 +266,124 @@ echo "P3: hermes_enable_plugin — mount disabled → no-op"
 test_enable_plugin_disabled_mount_warns && ok "mount disabled: file not modified" || bad "mount-disabled no-op failed"
 echo
 
+# --------------------------------------------------------------------------
+# MC lever: extract-and-eval tests
+# --------------------------------------------------------------------------
+
+# ROOT is used inside extracted sections (mirrors build.sh context where
+# the section can reference $ROOT via the surrounding script).
+ROOT="$REPO_ROOT"
+
+test_mc_lever_url_set_pat_set() {
+  local section
+  section="$(sed -n '/^# MissionControl/,/^fi$/p' "$BUILD_SH")"
+
+  hermes_sync_plugin() { _SYNC_CALLED_WITH="$1"; }
+  hermes_enable_plugin() { _ENABLE_CALLED_WITH="$1"; }
+  log() { :; }
+  warn() { :; }
+
+  HERMES_ENV_MANAGED=""
+  HERMES_MC_URL="https://mc.example.com"
+  HERMES_MC_USER_PAT="mcpat_abc"
+  VM="test-vm"
+  unset HERMES_MC_AGENT_NAME HERMES_MC_BOARD HERMES_MC_POLL_INTERVAL \
+        HERMES_MC_DEFAULT_PROJECT_SLUG HERMES_MC_DEBUG 2>/dev/null || true
+
+  eval "$section"
+
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_URL=https://mc.example.com" || return 1
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_BOARD=mc"                   || return 1
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_POLL_INTERVAL=10"           || return 1
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_USER_PAT=mcpat_abc"         || return 1
+  [ "$_SYNC_CALLED_WITH"   = "mission-control" ] || return 1
+  [ "$_ENABLE_CALLED_WITH" = "mission-control" ] || return 1
+}
+
+test_mc_lever_url_set_no_pat() {
+  local section
+  section="$(sed -n '/^# MissionControl/,/^fi$/p' "$BUILD_SH")"
+
+  hermes_sync_plugin() { :; }
+  hermes_enable_plugin() { :; }
+  log() { :; }
+  warn() { :; }
+
+  HERMES_ENV_MANAGED=""
+  HERMES_MC_URL="https://mc.example.com"
+  unset HERMES_MC_USER_PAT 2>/dev/null || true
+  VM="test-vm"
+  unset HERMES_MC_AGENT_NAME HERMES_MC_BOARD HERMES_MC_POLL_INTERVAL \
+        HERMES_MC_DEFAULT_PROJECT_SLUG HERMES_MC_DEBUG 2>/dev/null || true
+
+  eval "$section"
+
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_USER_PAT" && return 1
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_URL="     || return 1
+  return 0
+}
+
+test_mc_lever_url_unset_skips() {
+  local section
+  section="$(sed -n '/^# MissionControl/,/^fi$/p' "$BUILD_SH")"
+
+  local _SYNC_CALLS=0
+  hermes_sync_plugin() { _SYNC_CALLS=$((_SYNC_CALLS + 1)); }
+  hermes_enable_plugin() { :; }
+  log() { :; }
+  warn() { :; }
+
+  HERMES_ENV_MANAGED=""
+  unset HERMES_MC_URL 2>/dev/null || true
+
+  eval "$section"
+
+  echo "$HERMES_ENV_MANAGED" | grep -q "HERMES_MC_" && return 1
+  [ "$_SYNC_CALLS" = "0" ] || return 1
+  return 0
+}
+
+test_mc_lever_second_build_idempotent_managed_block() {
+  local section
+  section="$(sed -n '/^# MissionControl/,/^fi$/p' "$BUILD_SH")"
+
+  hermes_sync_plugin() { :; }
+  hermes_enable_plugin() { :; }
+  log() { :; }
+  warn() { :; }
+
+  HERMES_MC_URL="https://mc.example.com"
+  HERMES_MC_USER_PAT="mcpat_x"
+  VM="test-vm"
+  unset HERMES_MC_AGENT_NAME HERMES_MC_BOARD HERMES_MC_POLL_INTERVAL \
+        HERMES_MC_DEFAULT_PROJECT_SLUG HERMES_MC_DEBUG 2>/dev/null || true
+
+  HERMES_ENV_MANAGED=""
+  eval "$section"
+  local first="$HERMES_ENV_MANAGED"
+
+  HERMES_ENV_MANAGED=""
+  eval "$section"
+  local second="$HERMES_ENV_MANAGED"
+
+  [ "$first" = "$second" ] || return 1
+}
+
+echo "L1: MC lever — URL + PAT set → all keys in managed block, helpers invoked"
+test_mc_lever_url_set_pat_set && ok "URL+PAT: managed block populated, sync+enable called" || bad "URL+PAT lever failed"
+echo
+
+echo "L2: MC lever — URL set, no PAT → no PAT line emitted"
+test_mc_lever_url_set_no_pat && ok "no-PAT: PAT line absent, URL present" || bad "no-PAT lever failed"
+echo
+
+echo "L3: MC lever — URL unset → no MC keys, no helper calls"
+test_mc_lever_url_unset_skips && ok "URL unset: managed block clean, sync not called" || bad "URL-unset lever failed"
+echo
+
+echo "L4: MC lever — second build idempotent (byte-identical managed-block addition)"
+test_mc_lever_second_build_idempotent_managed_block && ok "idempotent: two evals produce identical managed-block addition" || bad "idempotency failed"
+echo
+
 echo "===== RESULT: $pass passed, $fail failed ====="
 exit $fail

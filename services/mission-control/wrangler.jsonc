@@ -3,6 +3,10 @@
   "name": "mission-control",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-22",
+  // nodejs_compat enables node:* imports (used by better-auth core for
+  // async_hooks). Required at runtime; without it: "No such module
+  // 'node:async_hooks'" on first request.
+  "compatibility_flags": ["nodejs_compat"],
 
   "observability": {
 		"enabled": true

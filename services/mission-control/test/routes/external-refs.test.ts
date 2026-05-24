@@ -278,17 +278,16 @@ describe('POST /v1/external_refs', () => {
       metadata: { foo: 'bar' },
     });
     expect(res.status).toBe(201);
-    // Drizzle returns camelCase property names.
     const data = await res.json() as { external_ref: Record<string, unknown> };
     expect(data.external_ref['id']).toMatch(/^xrf_/);
-    expect(data.external_ref['resourceType']).toBe('task');
-    expect(data.external_ref['resourceId']).toBe(taskId);
-    expect(data.external_ref['sourceKind']).toBe('notion');
-    expect(data.external_ref['sourceId']).toBe('ws-owner-test');
-    expect(data.external_ref['externalId']).toBe('page-owner-test');
-    expect(data.external_ref['externalUrl']).toBe('https://notion.so/page-owner-test');
-    expect(typeof data.external_ref['createdAt']).toBe('string');
-    expect((data.external_ref['createdAt'] as string)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(data.external_ref['resource_type']).toBe('task');
+    expect(data.external_ref['resource_id']).toBe(taskId);
+    expect(data.external_ref['source_kind']).toBe('notion');
+    expect(data.external_ref['source_id']).toBe('ws-owner-test');
+    expect(data.external_ref['external_id']).toBe('page-owner-test');
+    expect(data.external_ref['external_url']).toBe('https://notion.so/page-owner-test');
+    expect(typeof data.external_ref['created_at']).toBe('string');
+    expect((data.external_ref['created_at'] as string)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('409 duplicate: same (resource_type, resource_id, source_kind, source_id)', async () => {
@@ -370,9 +369,8 @@ describe('POST /v1/external_refs', () => {
       external_id: 'notion-block-comment-1',
     });
     expect(res.status).toBe(201);
-    // Drizzle returns camelCase property names.
     const data = await res.json() as { external_ref: Record<string, unknown> };
-    expect(data.external_ref['resourceType']).toBe('comment');
+    expect(data.external_ref['resource_type']).toBe('comment');
   });
 
   it('can create ref for agent resource_type', async () => {
@@ -468,45 +466,41 @@ describe('GET /v1/external_refs', () => {
   it('filters by resource_type=task', async () => {
     const res = await req('GET', `/v1/external_refs?resource_type=task&resource_id=${listTaskId}`, pat);
     expect(res.status).toBe(200);
-    // Drizzle returns camelCase property names.
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
     for (const ref of data.external_refs) {
-      expect(ref['resourceType']).toBe('task');
-      expect(ref['resourceId']).toBe(listTaskId);
+      expect(ref['resource_type']).toBe('task');
+      expect(ref['resource_id']).toBe(listTaskId);
     }
   });
 
   it('filters by source_kind=notion', async () => {
     const res = await req('GET', `/v1/external_refs?source_kind=notion&resource_id=${listTaskId}`, pat);
     expect(res.status).toBe(200);
-    // Drizzle returns camelCase property names.
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
     for (const ref of data.external_refs) {
-      expect(ref['sourceKind']).toBe('notion');
+      expect(ref['source_kind']).toBe('notion');
     }
   });
 
   it('filters by source_id', async () => {
     const res = await req('GET', `/v1/external_refs?source_id=list-ws-1`, pat);
     expect(res.status).toBe(200);
-    // Drizzle returns camelCase property names.
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
     for (const ref of data.external_refs) {
-      expect(ref['sourceId']).toBe('list-ws-1');
+      expect(ref['source_id']).toBe('list-ws-1');
     }
   });
 
   it('filters by external_id', async () => {
     const res = await req('GET', `/v1/external_refs?external_id=list-page-1`, pat);
     expect(res.status).toBe(200);
-    // Drizzle returns camelCase property names.
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
     for (const ref of data.external_refs) {
-      expect(ref['externalId']).toBe('list-page-1');
+      expect(ref['external_id']).toBe('list-page-1');
     }
   });
 

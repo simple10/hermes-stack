@@ -196,23 +196,23 @@ describe('POST /v1/tasks/:taskId/comments', () => {
   it('owner can post a comment → 201', async () => {
     const res = await req('POST', `/v1/tasks/${ownedTaskId}/comments`, pat, { body: 'First owner comment' });
     expect(res.status).toBe(201);
-    // Drizzle returns camelCase property names in serialized output.
-    const data = await res.json() as { comment: { id: string; body: string; authorType: string; taskId: string; createdAt: string } };
+    // API returns snake_case keys.
+    const data = await res.json() as { comment: { id: string; body: string; author_type: string; task_id: string; created_at: string } };
     expect(data.comment.body).toBe('First owner comment');
-    expect(data.comment.authorType).toBe('user');
-    expect(data.comment.taskId).toBe(ownedTaskId);
+    expect(data.comment.author_type).toBe('user');
+    expect(data.comment.task_id).toBe(ownedTaskId);
     expect(data.comment.id).toMatch(/^cmt_/);
     // Timestamps should be ISO strings.
-    expect(typeof data.comment.createdAt).toBe('string');
+    expect(typeof data.comment.created_at).toBe('string');
   });
 
   it('agent can comment on own task → 201 with correct author', async () => {
     const res = await req('POST', `/v1/tasks/${ownedTaskId}/comments`, agentKey, { body: 'Agent says hi' });
     expect(res.status).toBe(201);
-    // Drizzle returns camelCase keys.
-    const data = await res.json() as { comment: { authorType: string; authorId: string } };
-    expect(data.comment.authorType).toBe('agent');
-    expect(data.comment.authorId).toBe(agentId);
+    // API returns snake_case keys.
+    const data = await res.json() as { comment: { author_type: string; author_id: string } };
+    expect(data.comment.author_type).toBe('agent');
+    expect(data.comment.author_id).toBe(agentId);
   });
 
   it('agent 2 gets 403 on task owned by agent 1', async () => {
@@ -225,9 +225,9 @@ describe('POST /v1/tasks/:taskId/comments', () => {
   it('connector can comment on any task → 201', async () => {
     const res = await req('POST', `/v1/tasks/${ownedTaskId}/comments`, connectorKey, { body: 'Connector comment' });
     expect(res.status).toBe(201);
-    // Drizzle returns camelCase keys.
-    const data = await res.json() as { comment: { authorType: string } };
-    expect(data.comment.authorType).toBe('connector');
+    // API returns snake_case keys.
+    const data = await res.json() as { comment: { author_type: string } };
+    expect(data.comment.author_type).toBe('connector');
   });
 
   it('multi-tenant isolation: org A token cannot comment on org B task', async () => {
@@ -277,15 +277,15 @@ describe('GET /v1/tasks/:taskId/comments', () => {
   it('returns comments oldest-first (ASC order)', async () => {
     const res = await req('GET', `/v1/tasks/${taskForList}/comments`, pat);
     expect(res.status).toBe(200);
-    // Drizzle returns camelCase keys.
-    const data = await res.json() as { comments: Array<{ body: string; createdAt: string }>; next_cursor: string | null };
+    // API returns snake_case keys.
+    const data = await res.json() as { comments: Array<{ body: string; created_at: string }>; next_cursor: string | null };
     expect(data.comments.length).toBe(5);
     // First comment should be "Comment 1" (oldest).
     expect(data.comments[0]!.body).toBe('Comment 1');
     // Last should be "Comment 5".
     expect(data.comments[4]!.body).toBe('Comment 5');
     // Timestamps should be ISO strings.
-    expect(data.comments[0]!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(data.comments[0]!.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // next_cursor should be null (only 5 comments, limit=50).
     expect(data.next_cursor).toBeNull();
   });

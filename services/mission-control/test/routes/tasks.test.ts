@@ -218,9 +218,9 @@ describe('POST /v1/tasks', () => {
       agent_id: agentId,
     });
     expect(res.status).toBe(201);
-    const body = await res.json() as { task: { status: string; agentId: string } };
+    const body = await res.json() as { task: { status: string; agent_id: string } };
     expect(body.task.status).toBe('ready');
-    expect(body.task.agentId).toBe(agentId);
+    expect(body.task.agent_id).toBe(agentId);
   });
 
   it('emits task.created event on create', async () => {
@@ -269,9 +269,9 @@ describe('POST /v1/tasks', () => {
   it('createdByUserId is set when using PAT (owner)', async () => {
     const res = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Created By Test' });
     expect(res.status).toBe(201);
-    const { task } = await res.json() as { task: { createdByUserId?: string } };
-    expect(typeof task.createdByUserId).toBe('string');
-    expect(task.createdByUserId!.length).toBeGreaterThan(0);
+    const { task } = await res.json() as { task: { created_by_user_id?: string } };
+    expect(typeof task.created_by_user_id).toBe('string');
+    expect(task.created_by_user_id!.length).toBeGreaterThan(0);
   });
 
   it('member role can create tasks', async () => {
@@ -476,30 +476,30 @@ describe('GET /v1/tasks', () => {
   it('returns paginated task list scoped to caller org', async () => {
     const res = await req('GET', '/v1/tasks', pat);
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: { orgId: string }[]; next_cursor: string | null };
+    const body = await res.json() as { tasks: { org_id: string }[]; next_cursor: string | null };
     expect(Array.isArray(body.tasks)).toBe(true);
     for (const t of body.tasks) {
-      expect(t.orgId).toBe(orgId);
+      expect(t.org_id).toBe(orgId);
     }
   });
 
   it('filters by project_id', async () => {
     const res = await req('GET', `/v1/tasks?project_id=${projectId}`, pat);
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: { projectId: string }[] };
+    const body = await res.json() as { tasks: { project_id: string }[] };
     for (const t of body.tasks) {
-      expect(t.projectId).toBe(projectId);
+      expect(t.project_id).toBe(projectId);
     }
   });
 
   it('filters by agent_id', async () => {
     const res = await req('GET', `/v1/tasks?agent_id=${agentId}`, pat);
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: { agentId: string; id: string }[] };
+    const body = await res.json() as { tasks: { agent_id: string; id: string }[] };
     const ids = body.tasks.map((t) => t.id);
     expect(ids).toContain(taskId2);
     for (const t of body.tasks) {
-      expect(t.agentId).toBe(agentId);
+      expect(t.agent_id).toBe(agentId);
     }
   });
 
@@ -542,10 +542,10 @@ describe('GET /v1/tasks', () => {
 
     const res = await req('GET', '/v1/tasks', agentKey);
     expect(res.status).toBe(200);
-    const body = await res.json() as { tasks: { agentId: string }[] };
+    const body = await res.json() as { tasks: { agent_id: string }[] };
     // All returned tasks must be assigned to agentId.
     for (const t of body.tasks) {
-      expect(t.agentId).toBe(agentId);
+      expect(t.agent_id).toBe(agentId);
     }
   });
 
@@ -772,15 +772,15 @@ describe('PATCH /v1/tasks/:id', () => {
         title: 'SM ready-ip',
         agent_id: agentId,
       });
-      const { task: t } = await cr.json() as { task: { id: string; startedAt?: string | null } };
-      expect(t.startedAt).toBeNull();
+      const { task: t } = await cr.json() as { task: { id: string; started_at?: string | null } };
+      expect(t.started_at).toBeNull();
 
       const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
       expect(res.status).toBe(200);
-      const body = await res.json() as { task: { status: string; startedAt?: string | null } };
+      const body = await res.json() as { task: { status: string; started_at?: string | null } };
       expect(body.task.status).toBe('in_progress');
-      // startedAt should now be set to an ISO string.
-      expect(typeof body.task.startedAt).toBe('string');
+      // started_at should now be set to an ISO string.
+      expect(typeof body.task.started_at).toBe('string');
     });
 
     it('in_progress → blocked → in_progress: allowed', async () => {
@@ -802,9 +802,9 @@ describe('PATCH /v1/tasks/:id', () => {
       await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
       const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'completed' });
       expect(res.status).toBe(200);
-      const body = await res.json() as { task: { status: string; completedAt?: string | null } };
+      const body = await res.json() as { task: { status: string; completed_at?: string | null } };
       expect(body.task.status).toBe('completed');
-      expect(typeof body.task.completedAt).toBe('string');
+      expect(typeof body.task.completed_at).toBe('string');
     });
 
     it('completed → pending: rejected (terminal state)', async () => {
@@ -835,8 +835,8 @@ describe('PATCH /v1/tasks/:id', () => {
 
       const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'cancelled' });
       expect(res.status).toBe(200);
-      const body = await res.json() as { task: { completedAt?: string | null } };
-      expect(typeof body.task.completedAt).toBe('string');
+      const body = await res.json() as { task: { completed_at?: string | null } };
+      expect(typeof body.task.completed_at).toBe('string');
     });
 
     it('emits task.status_changed event on transition', async () => {
@@ -881,8 +881,8 @@ describe('PATCH /v1/tasks/:id', () => {
 
       const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: null });
       expect(res.status).toBe(200);
-      const body = await res.json() as { task: { agentId?: string | null } };
-      expect(body.task.agentId).toBeNull();
+      const body = await res.json() as { task: { agent_id?: string | null } };
+      expect(body.task.agent_id).toBeNull();
     });
 
     it('returns 422 when agent_id references non-existent agent', async () => {
@@ -893,6 +893,35 @@ describe('PATCH /v1/tasks/:id', () => {
       expect(res.status).toBe(422);
       const body = await res.json() as { error: { code: string } };
       expect(body.error.code).toBe('task.invalid_agent');
+    });
+
+    it('auto-promotes pending → ready when agent_id set and no explicit status', async () => {
+      // Create a pending task (no agent).
+      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Auto Promote Task' });
+      const { task: t } = await cr.json() as { task: { id: string; status: string } };
+      expect(t.status).toBe('pending');
+
+      // PATCH with agent_id only (no status field).
+      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: agentId });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { task: { status: string; agent_id: string } };
+      // Status must be auto-promoted to 'ready'.
+      expect(body.task.status).toBe('ready');
+      expect(body.task.agent_id).toBe(agentId);
+
+      // Both task.assigned AND task.status_changed events must be emitted.
+      const assigned = await env.DB.prepare(
+        `SELECT kind FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.assigned' ORDER BY id DESC LIMIT 1`
+      ).bind(orgId, t.id).first() as { kind: string } | null;
+      expect(assigned).not.toBeNull();
+
+      const statusChanged = await env.DB.prepare(
+        `SELECT kind, payload FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.status_changed' ORDER BY id DESC LIMIT 1`
+      ).bind(orgId, t.id).first() as { kind: string; payload: string } | null;
+      expect(statusChanged).not.toBeNull();
+      const payload = JSON.parse(statusChanged!.payload) as { from: string; to: string };
+      expect(payload.from).toBe('pending');
+      expect(payload.to).toBe('ready');
     });
   });
 

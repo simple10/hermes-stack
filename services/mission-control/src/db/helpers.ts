@@ -1,9 +1,10 @@
 /**
  * DB query helpers — shared predicates and row serialisers.
  *
- * active()             — Drizzle predicate for `WHERE deleted_at IS NULL`
- * isoOrNull()          — convert an integer ms timestamp to an ISO 8601 string
- * serializeTimestamps() — walk a DB row and convert known timestamp columns to ISO strings
+ * active()    — Drizzle predicate for `WHERE deleted_at IS NULL`
+ * isoOrNull() — convert an integer ms timestamp to an ISO 8601 string
+ * serializeRow()    — deep camelCase→snake_case + ISO timestamps + JSON column parsing
+ * serializeTimestamps() — alias for serializeRow (backward compat)
  *
  * Convention: every read of a soft-deletable table passes the table object
  * through `active()` so the `WHERE deleted_at IS NULL` guard is impossible to
@@ -42,11 +43,14 @@ export function isoOrNull(ms: number | null | undefined): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// serializeTimestamps()
+// serializeRow() — deep camelCase→snake_case transformer
 // ---------------------------------------------------------------------------
 
-/** Timestamp column names present in pool-DB rows. */
-const TIMESTAMP_COLS = new Set([
+/**
+ * Known timestamp column names (camelCase, as returned by Drizzle).
+ * Values are INTEGER ms and must be converted to ISO strings.
+ */
+const TS_KEYS = new Set([
   'createdAt',
   'updatedAt',
   'deletedAt',
@@ -54,39 +58,70 @@ const TIMESTAMP_COLS = new Set([
   'completedAt',
   'lastSeenAt',
   'expiresAt',
+  'lastUsedAt',
+  'revokedAt',
 ]);
 
-/** JSON column names whose values should be parsed from a string to an object. */
-const JSON_COLS = new Set(['metadata', 'payload']);
+/**
+ * Known JSON column names whose string values should be parsed into objects.
+ */
+const JSON_KEYS = new Set(['metadata', 'payload', 'permissions']);
 
 /**
- * Convert a raw DB row into an API-ready shape.
- *
- * - Known timestamp columns (INTEGER ms) are converted to ISO 8601 strings.
- * - Known JSON columns (`metadata`, `payload`) that hold a JSON string are
- *   parsed into objects.  If parsing fails the raw string is left unchanged.
- *
- * The function is generic so TypeScript propagates the row type through the
- * call site — callers don't need to re-annotate the return value.
+ * Convert a camelCase JavaScript identifier to snake_case.
+ * e.g. "orgId" → "org_id", "createdAt" → "created_at"
  */
-export function serializeTimestamps<T extends Record<string, unknown>>(row: T): T {
-  const out: Record<string, unknown> = { ...row };
+function camelToSnake(k: string): string {
+  return k.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
+}
 
-  for (const k of TIMESTAMP_COLS) {
-    if (k in out && typeof out[k] === 'number') {
-      out[k] = isoOrNull(out[k] as number);
+/**
+ * Recursively convert a DB row (or array of rows) into an API-ready shape:
+ *
+ *  1. All object keys are converted from camelCase to snake_case.
+ *  2. Known timestamp columns (INTEGER ms) are converted to ISO 8601 strings.
+ *  3. Known JSON columns (`metadata`, `payload`, `permissions`) that hold a
+ *     JSON string are parsed into objects.  Parsing failures leave the value
+ *     as-is.
+ *
+ * Handles nested objects and arrays so that embedded sub-objects (e.g. the
+ * `task` nested inside a task.created event payload) are also normalised.
+ */
+export function serializeRow<T>(row: T): any {
+  if (row == null) return row;
+  if (Array.isArray(row)) return row.map(serializeRow);
+  if (typeof row !== 'object') return row;
+  // Skip Date instances — they are not plain row objects.
+  if (row instanceof Date) return row;
+
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row as Record<string, unknown>)) {
+    const newK = camelToSnake(k);
+    let newV = v;
+
+    // Convert timestamp integers to ISO strings.
+    if (TS_KEYS.has(k) && typeof v === 'number') {
+      newV = new Date(v).toISOString();
     }
-  }
-
-  for (const k of JSON_COLS) {
-    if (k in out && typeof out[k] === 'string') {
+    // Parse JSON string columns into objects.
+    if (JSON_KEYS.has(k) && typeof v === 'string') {
       try {
-        out[k] = JSON.parse(out[k] as string);
+        newV = JSON.parse(v);
       } catch {
-        // leave as-is; the string might be non-JSON in edge cases
+        // Leave as string if unparseable.
       }
     }
+    // Recurse into nested objects/arrays (but not Dates).
+    if (newV !== null && typeof newV === 'object' && !(newV instanceof Date)) {
+      newV = serializeRow(newV);
+    }
+    out[newK] = newV;
   }
-
-  return out as T;
+  return out;
 }
+
+/**
+ * Alias kept for call-site backward compatibility.
+ * All existing `serializeTimestamps(row)` calls now also get camelCase→snake_case.
+ */
+export const serializeTimestamps = serializeRow;

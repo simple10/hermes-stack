@@ -137,9 +137,9 @@ describe('POST /v1/projects', () => {
     expect(body.project.description).toBe('A test project');
     expect(typeof body.project.id).toBe('string');
     expect((body.project.id as string).startsWith('prj_')).toBe(true);
-    // Timestamps should be ISO strings (serializeTimestamps converts camelCase keys).
-    expect(typeof (body.project as any).createdAt).toBe('string');
-    expect(typeof (body.project as any).updatedAt).toBe('string');
+    // Timestamps should be ISO strings (serializeRow converts camelCase→snake_case).
+    expect(typeof (body.project as any).created_at).toBe('string');
+    expect(typeof (body.project as any).updated_at).toBe('string');
   });
 
   it('returns 201 with member role', async () => {

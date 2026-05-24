@@ -388,3 +388,48 @@ describe('POST /v1/agents/:id/rotate-key', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// POST /v1/agents — saga compensation when mintApiKey fails
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/agents — saga compensation (mintApiKey failure)', () => {
+  it('returns 500 agent.key_mint_failed and leaves agent soft-deleted', async () => {
+    const agentName = `saga-fail-agent-${Date.now()}`;
+
+    // Simulate mintApiKey failure by installing a BEFORE INSERT trigger that
+    // raises an error on the apiKey table.  This allows SELECTs (used by the
+    // auth middleware's verifyApiKey) to pass through while INSERT (used by
+    // mintApiKey inside the route handler) is blocked.
+    await env.DB.prepare(
+      `CREATE TRIGGER block_apikey_insert BEFORE INSERT ON apiKey BEGIN SELECT RAISE(FAIL, 'blocked for saga test'); END`
+    ).run();
+
+    let res: Response;
+    try {
+      res = await req('POST', '/v1/agents', pat, { name: agentName, kind: 'hermes' });
+    } finally {
+      // Always remove the trigger to restore normal behaviour.
+      await env.DB.prepare(`DROP TRIGGER IF EXISTS block_apikey_insert`).run();
+    }
+
+    expect(res!.status).toBe(500);
+    const body = await res!.json() as { error: { code: string } };
+    expect(body.error.code).toBe('agent.key_mint_failed');
+
+    // The agent row should exist with deleted_at set (compensating soft-delete).
+    const row = await env.DB.prepare(
+      `SELECT id, deleted_at, deleted_by_type FROM agents WHERE name = ? AND org_id = ? ORDER BY rowid DESC LIMIT 1`
+    ).bind(agentName, orgId).first() as { id: string; deleted_at: number | null; deleted_by_type: string } | null;
+    expect(row).not.toBeNull();
+    expect(row!.deleted_at).not.toBeNull();
+    expect(row!.deleted_by_type).toBe('system');
+
+    // A subsequent POST with the same name must succeed (partial unique index allows reuse
+    // because the existing row has deleted_at set).
+    const res2 = await req('POST', '/v1/agents', pat, { name: agentName, kind: 'hermes' });
+    expect(res2.status).toBe(201);
+    const body2 = await res2.json() as { agent: { id: string }; key: string };
+    expect(body2.key.startsWith('mcagt_')).toBe(true);
+  });
+});

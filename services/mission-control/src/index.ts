@@ -10,6 +10,7 @@ import { projectsRouter } from './routes/projects.ts';
 import { tasksRouter } from './routes/tasks.ts';
 import { commentsRouter } from './routes/comments.ts';
 import { externalRefsRouter } from './routes/external-refs.ts';
+import { eventsRouter } from './routes/events.ts';
 import { createAuth } from './auth/config.ts';
 import { loggingMiddleware } from './logging.ts';
 import { rateLimitMiddleware } from './rate-limit.ts';
@@ -71,6 +72,7 @@ app.route('/v1/projects', projectsRouter);
 app.route('/v1/tasks', tasksRouter);
 app.route('/v1/tasks', commentsRouter);
 app.route('/v1/external_refs', externalRefsRouter);
+app.route('/v1/events', eventsRouter);
 
 // Workers Module Worker shape: fetch handler + scheduled (cron) handler.
 export default {

@@ -1,14 +1,16 @@
 /**
  * eventsRepo — Drizzle facade over the `events` table.
  *
- * Append-only.  No list, no update, no softDelete.
- * (v1.1 will add list(filter) when the /v1/events route ships.)
+ * Append-only.  No update, no softDelete.
  *
  * emit() takes only kind-specific args.  orgId and actor come from ctx.
+ * list() backs the GET /v1/events route — single-pool integer cursor since
+ * events.id is monotonic per pool DB.
  *
  * This replaces the standalone emitEvent() function that previously lived in
  * src/events/emit.ts (deleted in Task 4 of the DAL refactor).
  */
+import { and, asc, eq, gt, inArray } from 'drizzle-orm';
 import { events } from '../pool.ts';
 import type { AuthContext } from '../../auth/types.ts';
 
@@ -72,6 +74,42 @@ export function eventsRepo(ctx: AuthContext) {
         payload: args.payload !== undefined ? JSON.stringify(args.payload) : null,
         createdAt: Date.now(),
       });
+    },
+
+    /**
+     * List events for this org with id > since, optionally filtered by
+     * resource_type. Returns up to `limit` rows ordered by id ASC.
+     *
+     * events.id is monotonic per pool DB; v1 has one pool so a single
+     * integer `since` cursor suffices. `cursor` (opaque — currently the
+     * Number-as-string of the last seen id) is used for within-window
+     * paging when a single since-window has more than `limit` events.
+     */
+    async list(args: {
+      since: number;
+      kinds?: string[]; // resource_type values
+      limit: number;
+      cursor?: string | null;
+    }): Promise<{ rows: typeof events.$inferSelect[]; nextCursorId: number | null }> {
+      const lower = args.cursor ? Number(args.cursor) : args.since;
+      const conditions = [
+        eq(events.orgId, ctx.orgId),
+        gt(events.id, lower),
+      ];
+      if (args.kinds && args.kinds.length > 0) {
+        conditions.push(inArray(events.resourceType, args.kinds));
+      }
+      const rows = await ctx.pool
+        .select()
+        .from(events)
+        .where(and(...conditions))
+        .orderBy(asc(events.id))
+        .limit(args.limit + 1);
+
+      const hasMore = rows.length > args.limit;
+      const trimmed = hasMore ? rows.slice(0, args.limit) : rows;
+      const nextCursorId = hasMore ? trimmed[trimmed.length - 1]!.id : null;
+      return { rows: trimmed, nextCursorId };
     },
 
     // table exposed for system.purgeOlderThan and future analytics

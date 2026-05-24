@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { health } from './routes/health.ts';
+import { createAuth } from './auth/config.ts';
 
 type Env = {
   DB?: D1Database;
@@ -15,5 +16,11 @@ type Env = {
 const app = new Hono<{ Bindings: Env }>();
 
 app.route('/v1/health', health);
+
+// Mount better-auth handler — handles all auth flows (signup, signin, orgs, api-keys, …)
+app.on(['POST', 'GET'], '/v1/auth/*', async (c) => {
+  const auth = createAuth(c.env);
+  return auth.handler(c.req.raw);
+});
 
 export default app;

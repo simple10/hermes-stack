@@ -15,7 +15,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
-    "auth:generate": "better-auth generate"
+    "auth:generate": "better-auth generate",
+    "db:combine": "node scripts/build-combined-migrations.mjs"
   },
   "dependencies": {
     "better-auth": "1.2.0",

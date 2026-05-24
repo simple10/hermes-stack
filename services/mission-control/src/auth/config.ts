@@ -1,0 +1,39 @@
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { organization, apiKey } from 'better-auth/plugins';
+import { drizzle } from 'drizzle-orm/d1';
+import type { D1Database } from '@cloudflare/workers-types';
+import * as schema from '../db/master.ts';
+
+export type AuthEnv = {
+  DB?: D1Database;
+  MASTER_DB?: D1Database;
+  DB_MODE: string;
+  BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_URL: string;
+};
+
+export function createAuth(env: AuthEnv) {
+  // Defer drizzle() into the factory so the schema import stays CLI-safe.
+  const binding = env.DB_MODE === 'split' ? env.MASTER_DB : env.DB;
+  if (!binding) throw new Error('master DB binding not found');
+  const db = drizzle(binding, { schema });
+
+  return betterAuth({
+    database: drizzleAdapter(db, { provider: 'sqlite', schema }),
+    secret: env.BETTER_AUTH_SECRET,
+    baseURL: env.BETTER_AUTH_URL,
+    basePath: '/v1/auth',
+    emailAndPassword: { enabled: true },
+    plugins: [
+      organization(),
+      // The apiKey plugin uses the table name "apikey" internally. Our extra
+      // columns (org_id, principal_type) are in the Drizzle schema and will be
+      // written/read by application code; better-auth doesn't need to know about
+      // them for its own flows.
+      apiKey(),
+    ],
+  });
+}
+
+export type Auth = ReturnType<typeof createAuth>;

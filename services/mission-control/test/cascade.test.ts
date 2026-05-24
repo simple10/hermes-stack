@@ -8,14 +8,14 @@
  *   - Unrelated rows in other orgs / other resources are not touched.
  *   - The partial unique index allows re-using a name after soft-delete.
  *
- * These tests work directly on env.DB (the pool DB binding in single-DB mode)
+ * These tests work directly on (env.DB as D1Database) (the pool DB binding in single-DB mode)
  * using raw SQL to insert and inspect rows, bypassing app-level helpers so we
  * verify the DB-level triggers rather than the application cascade logic.
  */
 
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../src/index.ts';
 import { createOrgFixture } from './helpers/orgs.ts';
 
@@ -33,7 +33,7 @@ let pat = '';
 async function insertAgent(name: string): Promise<string> {
   const id = `agt_csc${Math.random().toString(36).slice(2, 10)}`;
   const now = Date.now();
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `INSERT INTO agents (id, org_id, name, kind, created_at, updated_at) VALUES (?, ?, ?, 'hermes', ?, ?)`
   ).bind(id, orgId, name, now, now).run();
   return id;
@@ -43,7 +43,7 @@ async function insertAgent(name: string): Promise<string> {
 async function insertConnector(name: string): Promise<string> {
   const id = `cnn_csc${Math.random().toString(36).slice(2, 10)}`;
   const now = Date.now();
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `INSERT INTO connectors (id, org_id, name, kind, created_at, updated_at) VALUES (?, ?, ?, 'notion', ?, ?)`
   ).bind(id, orgId, name, now, now).run();
   return id;
@@ -53,7 +53,7 @@ async function insertConnector(name: string): Promise<string> {
 async function insertProject(slug: string): Promise<string> {
   const id = `prj_csc${Math.random().toString(36).slice(2, 10)}`;
   const now = Date.now();
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `INSERT INTO projects (id, org_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(id, orgId, `Project ${slug}`, slug, now, now).run();
   return id;
@@ -63,7 +63,7 @@ async function insertProject(slug: string): Promise<string> {
 async function insertTask(projectId: string): Promise<string> {
   const id = `t_csc${Math.random().toString(36).slice(2, 10)}`;
   const now = Date.now();
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `INSERT INTO tasks (id, org_id, project_id, title, status, priority, created_at, updated_at) VALUES (?, ?, ?, 'Cascade Test Task', 'pending', 0, ?, ?)`
   ).bind(id, orgId, projectId, now, now).run();
   return id;
@@ -73,7 +73,7 @@ async function insertTask(projectId: string): Promise<string> {
 async function insertComment(taskId: string, index: number = 0): Promise<string> {
   const id = `cmt_csc${Math.random().toString(36).slice(2, 10)}`;
   const now = Date.now() + index;
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `INSERT INTO task_comments (id, org_id, task_id, author_type, author_id, body, created_at, updated_at)
      VALUES (?, ?, ?, 'user', 'usr_test', ?, ?, ?)`
   ).bind(id, orgId, taskId, `Comment body ${index}`, now, now).run();
@@ -88,7 +88,7 @@ async function insertExternalRef(
 ): Promise<string> {
   const id = `xrf_csc${Math.random().toString(36).slice(2, 10)}`;
   const now = Date.now();
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `INSERT INTO external_refs (id, org_id, resource_type, resource_id, source_kind, source_id, external_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'cascade-test', ?, ?, ?, ?)`
   ).bind(id, orgId, resourceType, resourceId, `src-${suffix}`, `ext-${suffix}`, now, now).run();
@@ -103,21 +103,21 @@ async function rawSoftDelete(
   deletedByType: string = 'user',
   deletedById: string = 'usr_test',
 ): Promise<void> {
-  await env.DB.prepare(
+  await (env.DB as D1Database).prepare(
     `UPDATE ${table} SET deleted_at = ?, deleted_by_type = ?, deleted_by_id = ? WHERE id = ?`
   ).bind(deletedAt, deletedByType, deletedById, id).run();
 }
 
 /** Fetch deleted_at and deleted_by_type from a task_comments row. */
 async function getCommentDelete(commentId: string): Promise<{ deleted_at: number | null; deleted_by_type: string | null } | null> {
-  return env.DB.prepare(
+  return (env.DB as D1Database).prepare(
     `SELECT deleted_at, deleted_by_type FROM task_comments WHERE id = ?`
   ).bind(commentId).first() as Promise<{ deleted_at: number | null; deleted_by_type: string | null } | null>;
 }
 
 /** Fetch deleted_at and deleted_by_type from an external_refs row. */
 async function getRefDelete(refId: string): Promise<{ deleted_at: number | null; deleted_by_type: string | null } | null> {
-  return env.DB.prepare(
+  return (env.DB as D1Database).prepare(
     `SELECT deleted_at, deleted_by_type FROM external_refs WHERE id = ?`
   ).bind(refId).first() as Promise<{ deleted_at: number | null; deleted_by_type: string | null } | null>;
 }
@@ -139,7 +139,7 @@ function req(method: string, path: string, token: string, body?: unknown) {
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Bootstrap the org.
   const res = await app.fetch(
@@ -266,7 +266,7 @@ describe('cascade: project soft-delete → external_refs only (tasks untouched)'
     expect(refAfter?.deleted_by_type).toBe('system');
 
     // Tasks (and their comments) under the project are NOT cascaded.
-    const taskRow = await env.DB.prepare(`SELECT deleted_at FROM tasks WHERE id = ?`).bind(taskId).first() as { deleted_at: number | null } | null;
+    const taskRow = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM tasks WHERE id = ?`).bind(taskId).first() as { deleted_at: number | null } | null;
     expect(taskRow?.deleted_at).toBeNull();
 
     const commentAfter = await getCommentDelete(taskComment);
@@ -359,12 +359,12 @@ describe('cascade: trigger fires even on raw SQL UPDATE (bypasses ORM)', () => {
 
     // Bypass Drizzle entirely: raw D1 prepare().bind().run()
     const deletedAt = Date.now();
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `UPDATE tasks SET deleted_at = ?, deleted_by_type = ?, deleted_by_id = ? WHERE id = ?`
     ).bind(deletedAt, 'user', 'usr_raw_test', taskId).run();
 
     // Verify task itself is deleted.
-    const taskRow = await env.DB.prepare(`SELECT deleted_at FROM tasks WHERE id = ?`).bind(taskId).first() as { deleted_at: number | null } | null;
+    const taskRow = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM tasks WHERE id = ?`).bind(taskId).first() as { deleted_at: number | null } | null;
     expect(taskRow?.deleted_at).not.toBeNull();
 
     // Verify the trigger cascaded to comments.
@@ -386,7 +386,7 @@ describe('cascade: trigger fires even on raw SQL UPDATE (bypasses ORM)', () => {
     const r1 = await insertExternalRef('project', projId, `raw-proj-xrf-${Date.now()}`);
 
     // Raw SQL on projects table.
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `UPDATE projects SET deleted_at = ?, deleted_by_type = ?, deleted_by_id = ? WHERE id = ?`
     ).bind(Date.now(), 'user', 'usr_raw_test', projId).run();
 
@@ -396,7 +396,7 @@ describe('cascade: trigger fires even on raw SQL UPDATE (bypasses ORM)', () => {
     expect(refRow?.deleted_by_type).toBe('system');
 
     // Task under that project is NOT cascaded.
-    const taskRow = await env.DB.prepare(`SELECT deleted_at FROM tasks WHERE id = ?`).bind(taskId).first() as { deleted_at: number | null } | null;
+    const taskRow = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM tasks WHERE id = ?`).bind(taskId).first() as { deleted_at: number | null } | null;
     expect(taskRow?.deleted_at).toBeNull();
   });
 });
@@ -471,7 +471,7 @@ describe('cascade: already-deleted children are not re-cascaded', () => {
 
     // Manually soft-delete the comment first (simulate prior deletion).
     const earlyTs = Date.now() - 10000;
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `UPDATE task_comments SET deleted_at = ?, deleted_by_type = ?, deleted_by_id = ? WHERE id = ?`
     ).bind(earlyTs, 'user', 'usr_early', comment.id).run();
 

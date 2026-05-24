@@ -8,14 +8,14 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 
 const TEST_ENV = { ...env, MC_ADMIN_TOKEN: 'ct-guard-test-token' } as any;
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 });
 
 describe('requireJsonOnWrites middleware', () => {

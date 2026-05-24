@@ -25,7 +25,7 @@
 
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture } from '../helpers/orgs.ts';
 
@@ -58,7 +58,7 @@ let ownedTaskId = '';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Bootstrap org A.
   const res = await app.fetch(
@@ -116,7 +116,7 @@ beforeAll(async () => {
   ownedTaskId = taskData.task.id;
 
   // Org B setup.
-  const orgB = await createOrgFixture(env.DB, 'Org B Comments', 'org-b-comments');
+  const orgB = await createOrgFixture((env.DB as D1Database), 'Org B Comments', 'org-b-comments');
   orgBPat = orgB.pat;
 
   const orgBProjRes = await req('POST', '/v1/projects', orgBPat, { name: 'OrgB Project', slug: 'orgb-project-comments' });

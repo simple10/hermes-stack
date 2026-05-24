@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts';
 
@@ -27,7 +27,7 @@ let orgBPat = '';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Org A via bootstrap.
   const res = await app.fetch(
@@ -50,7 +50,7 @@ beforeAll(async () => {
   pat = data.pat;
   orgId = data.organization.id;
 
-  const orgB = await createOrgFixture(env.DB, 'Org B Connectors', 'org-b-connectors');
+  const orgB = await createOrgFixture((env.DB as D1Database), 'Org B Connectors', 'org-b-connectors');
   orgBPat = orgB.pat;
 });
 
@@ -88,7 +88,7 @@ describe('POST /v1/connectors', () => {
   });
 
   it('returns 403 for member role (connectors require owner|admin)', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'cnn-member-create', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-create', 'member');
     const res = await req('POST', '/v1/connectors', memberPat, { name: 'notion-1', kind: 'notion' });
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
@@ -106,7 +106,7 @@ describe('POST /v1/connectors', () => {
   });
 
   it('returns 201 with admin role', async () => {
-    const { pat: adminPat } = await createMemberFixture(env.DB, orgId, 'cnn-admin-create', 'admin');
+    const { pat: adminPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-admin-create', 'admin');
     const res = await req('POST', '/v1/connectors', adminPat, { name: 'linear-admin', kind: 'linear' });
     expect(res.status).toBe(201);
   });
@@ -157,7 +157,7 @@ describe('GET /v1/connectors', () => {
   });
 
   it('member can list connectors (GET is open to all roles)', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'cnn-member-list', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-list', 'member');
     const res = await req('GET', '/v1/connectors', memberPat);
     expect(res.status).toBe(200);
   });
@@ -233,7 +233,7 @@ describe('PATCH /v1/connectors/:id', () => {
   });
 
   it('returns 403 when member role tries to patch (connectors require owner|admin)', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'cnn-member-patch', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-patch', 'member');
     const res = await req('PATCH', `/v1/connectors/${connectorId}`, memberPat, { name: 'hacked' });
     expect(res.status).toBe(403);
   });
@@ -263,7 +263,7 @@ describe('DELETE /v1/connectors/:id', () => {
   });
 
   it('returns 403 when member role tries to delete', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'cnn-member-del', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-del', 'member');
     const res = await req('DELETE', `/v1/connectors/${connectorId}`, memberPat);
     expect(res.status).toBe(403);
   });
@@ -309,7 +309,7 @@ describe('DELETE /v1/connectors/:id active external_refs gate', () => {
     // Insert an external_ref that points source_id → connector.id.
     const refId = `xrf_${Math.random().toString(36).slice(2)}`;
     const now = Date.now();
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `INSERT INTO external_refs (id, org_id, resource_type, resource_id, source_kind, source_id, external_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(refId, orgId, 'connector', connector.id, 'notion', connector.id, 'ext-abc', now, now).run();
@@ -371,7 +371,7 @@ describe('POST /v1/connectors/:id/rotate-key', () => {
   });
 
   it('403 when member role tries rotate-key', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'cnn-member-rot', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-rot', 'member');
     const res = await req('POST', `/v1/connectors/${connectorId}/rotate-key`, memberPat);
     expect(res.status).toBe(403);
   });

@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts';
 
@@ -35,7 +35,7 @@ let agentKey = '';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Org A via bootstrap (one-shot per DB).
   const res = await app.fetch(
@@ -59,7 +59,7 @@ beforeAll(async () => {
   orgId = data.organization.id;
 
   // Org B via fixture helper.
-  const orgB = await createOrgFixture(env.DB, 'Org B Projects', 'org-b-projects');
+  const orgB = await createOrgFixture((env.DB as D1Database), 'Org B Projects', 'org-b-projects');
   orgBPat = orgB.pat;
 
   // Create an agent in Org A so we have an agent-role key for 403 tests.
@@ -143,7 +143,7 @@ describe('POST /v1/projects', () => {
   });
 
   it('returns 201 with member role', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'prj-member-create', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'prj-member-create', 'member');
     const res = await req('POST', '/v1/projects', memberPat, { name: 'Member Project', slug: 'member-project' });
     expect(res.status).toBe(201);
   });
@@ -184,7 +184,7 @@ describe('POST /v1/projects', () => {
     const { project } = await createRes.json() as { project: { id: string } };
 
     // Verify event in DB.
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT kind, resource_id FROM events WHERE org_id = ? AND resource_type = 'project' AND resource_id = ? ORDER BY id DESC LIMIT 1`
     ).bind(orgId, project.id).first() as { kind: string; resource_id: string } | null;
     expect(row).not.toBeNull();
@@ -233,7 +233,7 @@ describe('GET /v1/projects', () => {
   it('cursor pagination returns all ~150 rows exactly once', async () => {
     // Create an isolated org to have a clean slate for counting.
     const { pat: freshPat, orgId: freshOrgId } = await createOrgFixture(
-      env.DB,
+      (env.DB as D1Database),
       'Pagination Org',
       'pagination-org-prj',
     );
@@ -246,12 +246,12 @@ describe('GET /v1/projects', () => {
       // Stagger updatedAt so ordering is deterministic.
       const ts = now + i;
       stmts.push(
-        env.DB.prepare(
+        (env.DB as D1Database).prepare(
           `INSERT INTO projects (id, org_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
         ).bind(id, freshOrgId, `Pag Project ${i}`, `pag-project-${i}`, ts, ts),
       );
     }
-    await env.DB.batch(stmts as any);
+    await (env.DB as D1Database).batch(stmts as any);
 
     // Page through with limit=50.
     const seenIds = new Set<string>();
@@ -368,7 +368,7 @@ describe('PATCH /v1/projects/:id', () => {
   });
 
   it('member role can patch projects', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'prj-member-patch', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'prj-member-patch', 'member');
     const res = await req('PATCH', `/v1/projects/${projectId}`, memberPat, { description: 'by member' });
     expect(res.status).toBe(200);
   });
@@ -388,7 +388,7 @@ describe('DELETE /v1/projects/:id', () => {
   });
 
   it('returns 403 when member role tries to delete (member cannot delete)', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'prj-member-del', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'prj-member-del', 'member');
     const res = await req('DELETE', `/v1/projects/${projectId}`, memberPat);
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
@@ -437,13 +437,13 @@ describe('DELETE /v1/projects/:id', () => {
     // Insert an external_ref pointing to this project.
     const refId = `xrf_casctest${Math.random().toString(36).slice(2)}`;
     const now = Date.now();
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `INSERT INTO external_refs (id, org_id, resource_type, resource_id, source_kind, source_id, external_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(refId, orgId, 'project', project.id, 'notion', 'notion-ws-test', 'ext-casc-1', now, now).run();
 
     // Verify ref exists.
-    const before = await env.DB.prepare(
+    const before = await (env.DB as D1Database).prepare(
       `SELECT deleted_at FROM external_refs WHERE id = ?`
     ).bind(refId).first() as { deleted_at: number | null } | null;
     expect(before).not.toBeNull();
@@ -454,7 +454,7 @@ describe('DELETE /v1/projects/:id', () => {
     expect(delRes.status).toBe(200);
 
     // The trigger should have soft-deleted the external_ref.
-    const after = await env.DB.prepare(
+    const after = await (env.DB as D1Database).prepare(
       `SELECT deleted_at FROM external_refs WHERE id = ?`
     ).bind(refId).first() as { deleted_at: number | null } | null;
     expect(after).not.toBeNull();
@@ -468,7 +468,7 @@ describe('DELETE /v1/projects/:id', () => {
 
     await req('DELETE', `/v1/projects/${project.id}`, pat);
 
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'project' AND resource_id = ? AND kind = 'project.deleted' ORDER BY id DESC LIMIT 1`
     ).bind(orgId, project.id).first() as { kind: string } | null;
     expect(row).not.toBeNull();

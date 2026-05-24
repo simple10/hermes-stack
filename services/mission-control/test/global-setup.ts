@@ -5,8 +5,8 @@
  * Reads SQL migrations from the combined dir and provides them to tests via
  * vitest's inject/provide mechanism.
  */
-import { readD1Migrations } from '@cloudflare/vitest-pool-workers/config';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import { readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

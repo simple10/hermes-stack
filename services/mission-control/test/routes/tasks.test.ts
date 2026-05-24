@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts';
 
@@ -50,7 +50,7 @@ let agentId2 = '';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Bootstrap org A.
   const res = await app.fetch(
@@ -80,7 +80,7 @@ beforeAll(async () => {
   projectId = projData.project.id;
 
   // Org B via fixture.
-  const orgB = await createOrgFixture(env.DB, 'Org B Tasks', 'org-b-tasks');
+  const orgB = await createOrgFixture((env.DB as D1Database), 'Org B Tasks', 'org-b-tasks');
   orgBPat = orgB.pat;
 
   // Create a project in org B.
@@ -103,7 +103,7 @@ beforeAll(async () => {
   agentId2 = agentData2.agent.id;
 
   // Create a member PAT.
-  const mf = await createMemberFixture(env.DB, orgId, 'task-member', 'member');
+  const mf = await createMemberFixture((env.DB as D1Database), orgId, 'task-member', 'member');
   memberPat = mf.pat;
 });
 
@@ -228,7 +228,7 @@ describe('POST /v1/tasks', () => {
     expect(res.status).toBe(201);
     const { task } = await res.json() as { task: { id: string } };
 
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'task' AND resource_id = ? AND kind = 'task.created' ORDER BY id DESC LIMIT 1`
     ).bind(orgId, task.id).first() as { kind: string } | null;
     expect(row).not.toBeNull();
@@ -244,7 +244,7 @@ describe('POST /v1/tasks', () => {
     expect(res.status).toBe(201);
     const { task } = await res.json() as { task: { id: string } };
 
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'task' AND resource_id = ? AND kind = 'task.assigned' ORDER BY id DESC LIMIT 1`
     ).bind(orgId, task.id).first() as { kind: string } | null;
     expect(row).not.toBeNull();
@@ -323,7 +323,7 @@ describe('POST /v1/tasks', () => {
     expect(data2.task.id).toBe(data1.task.id);
 
     // Only one task row with this title.
-    const rows = await env.DB.prepare(
+    const rows = await (env.DB as D1Database).prepare(
       `SELECT COUNT(*) as cnt FROM tasks WHERE org_id = ? AND title = 'Idempotent Task Layer1' AND deleted_at IS NULL`
     ).bind(orgId).first() as { cnt: number };
     expect(rows.cnt).toBe(1);
@@ -571,7 +571,7 @@ describe('GET /v1/tasks', () => {
   it('cursor pagination returns all tasks exactly once', async () => {
     // Create isolated org for count-stable pagination test.
     const { pat: freshPat, orgId: freshOrgId } = await createOrgFixture(
-      env.DB,
+      (env.DB as D1Database),
       'Pagination Tasks Org',
       'pagination-tasks-org',
     );
@@ -585,12 +585,12 @@ describe('GET /v1/tasks', () => {
       const id = `t_pagtest${i.toString().padStart(4, '0')}`;
       const ts = now + i;
       stmts.push(
-        env.DB.prepare(
+        (env.DB as D1Database).prepare(
           `INSERT INTO tasks (id, org_id, project_id, title, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)`
         ).bind(id, freshOrgId, pagProj.id, `Pag Task ${i}`, ts, ts),
       );
     }
-    await env.DB.batch(stmts as any);
+    await (env.DB as D1Database).batch(stmts as any);
 
     const seenIds = new Set<string>();
     let cursor: string | null = null;
@@ -722,7 +722,7 @@ describe('PATCH /v1/tasks/:id', () => {
     const res = await req('PATCH', `/v1/tasks/${taskId}`, pat, { title: 'Event Update' });
     expect(res.status).toBe(200);
 
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'task' AND resource_id = ? AND kind = 'task.updated' ORDER BY id DESC LIMIT 1`
     ).bind(orgId, taskId).first() as { kind: string } | null;
     expect(row).not.toBeNull();
@@ -845,7 +845,7 @@ describe('PATCH /v1/tasks/:id', () => {
 
       await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
 
-      const row = await env.DB.prepare(
+      const row = await (env.DB as D1Database).prepare(
         `SELECT kind, payload FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.status_changed' ORDER BY id DESC LIMIT 1`
       ).bind(orgId, t.id).first() as { kind: string; payload: string } | null;
       expect(row).not.toBeNull();
@@ -867,7 +867,7 @@ describe('PATCH /v1/tasks/:id', () => {
       const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: agentId });
       expect(res.status).toBe(200);
 
-      const row = await env.DB.prepare(
+      const row = await (env.DB as D1Database).prepare(
         `SELECT kind, payload FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.assigned' ORDER BY id DESC LIMIT 1`
       ).bind(orgId, t.id).first() as { kind: string; payload: string } | null;
       expect(row).not.toBeNull();
@@ -910,12 +910,12 @@ describe('PATCH /v1/tasks/:id', () => {
       expect(body.task.agent_id).toBe(agentId);
 
       // Both task.assigned AND task.status_changed events must be emitted.
-      const assigned = await env.DB.prepare(
+      const assigned = await (env.DB as D1Database).prepare(
         `SELECT kind FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.assigned' ORDER BY id DESC LIMIT 1`
       ).bind(orgId, t.id).first() as { kind: string } | null;
       expect(assigned).not.toBeNull();
 
-      const statusChanged = await env.DB.prepare(
+      const statusChanged = await (env.DB as D1Database).prepare(
         `SELECT kind, payload FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.status_changed' ORDER BY id DESC LIMIT 1`
       ).bind(orgId, t.id).first() as { kind: string; payload: string } | null;
       expect(statusChanged).not.toBeNull();
@@ -1039,7 +1039,7 @@ describe('DELETE /v1/tasks/:id', () => {
 
     await req('DELETE', `/v1/tasks/${t.id}`, pat);
 
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'task' AND resource_id = ? AND kind = 'task.deleted' ORDER BY id DESC LIMIT 1`
     ).bind(orgId, t.id).first() as { kind: string } | null;
     expect(row).not.toBeNull();
@@ -1053,20 +1053,20 @@ describe('DELETE /v1/tasks/:id', () => {
     // Insert a comment directly.
     const cmtId = `cmt_casctest${Math.random().toString(36).slice(2)}`;
     const now = Date.now();
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `INSERT INTO task_comments (id, org_id, task_id, author_type, author_id, body, created_at, updated_at)
        VALUES (?, ?, ?, 'user', ?, 'test comment', ?, ?)`
     ).bind(cmtId, orgId, t.id, 'usr_test', now, now).run();
 
     // Verify comment exists.
-    const before = await env.DB.prepare(`SELECT deleted_at FROM task_comments WHERE id = ?`).bind(cmtId).first() as { deleted_at: number | null } | null;
+    const before = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM task_comments WHERE id = ?`).bind(cmtId).first() as { deleted_at: number | null } | null;
     expect(before?.deleted_at).toBeNull();
 
     // Delete task.
     await req('DELETE', `/v1/tasks/${t.id}`, pat);
 
     // Comment should be soft-deleted by the trigger.
-    const after = await env.DB.prepare(`SELECT deleted_at FROM task_comments WHERE id = ?`).bind(cmtId).first() as { deleted_at: number | null } | null;
+    const after = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM task_comments WHERE id = ?`).bind(cmtId).first() as { deleted_at: number | null } | null;
     expect(after?.deleted_at).not.toBeNull();
   });
 });

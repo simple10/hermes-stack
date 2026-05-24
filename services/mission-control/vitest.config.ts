@@ -1,4 +1,4 @@
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers';
 
 export default defineWorkersConfig({
   test: {

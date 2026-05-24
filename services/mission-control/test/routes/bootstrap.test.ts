@@ -7,24 +7,24 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 });
 
 /** Helper: clear all auth tables so bootstrap can run again. */
 async function clearUsers() {
   // Delete in FK order (session → user).
-  await env.DB.prepare('DELETE FROM apiKey').run();
-  await env.DB.prepare('DELETE FROM member').run();
-  await env.DB.prepare('DELETE FROM organization').run();
-  await env.DB.prepare('DELETE FROM session').run();
-  await env.DB.prepare('DELETE FROM account').run();
-  await env.DB.prepare('DELETE FROM verification').run();
-  await env.DB.prepare('DELETE FROM user').run();
+  await (env.DB as D1Database).prepare('DELETE FROM apiKey').run();
+  await (env.DB as D1Database).prepare('DELETE FROM member').run();
+  await (env.DB as D1Database).prepare('DELETE FROM organization').run();
+  await (env.DB as D1Database).prepare('DELETE FROM session').run();
+  await (env.DB as D1Database).prepare('DELETE FROM account').run();
+  await (env.DB as D1Database).prepare('DELETE FROM verification').run();
+  await (env.DB as D1Database).prepare('DELETE FROM user').run();
 }
 
 /** Build a fetch call against the Hono app. */

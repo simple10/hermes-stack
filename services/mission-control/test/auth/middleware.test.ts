@@ -9,12 +9,12 @@
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { Hono } from 'hono';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { authMiddleware } from '../../src/auth/middleware.ts';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 });
 
 function makeApp() {

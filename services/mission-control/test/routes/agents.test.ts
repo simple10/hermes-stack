@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts';
 
@@ -33,7 +33,7 @@ let orgBId = '';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Org A via bootstrap (only done once per DB).
   const res = await app.fetch(
@@ -58,7 +58,7 @@ beforeAll(async () => {
   userId = data.user.id;
 
   // Org B via fixture helper.
-  const orgB = await createOrgFixture(env.DB, 'Org B', 'org-b-agents');
+  const orgB = await createOrgFixture((env.DB as D1Database), 'Org B', 'org-b-agents');
   orgBPat = orgB.pat;
   orgBId = orgB.orgId;
 });
@@ -128,7 +128,7 @@ describe('POST /v1/agents', () => {
   });
 
   it('member role can create agents', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'agents-member-create', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'agents-member-create', 'member');
     const res = await req('POST', '/v1/agents', memberPat, { name: 'member-created-agent', kind: 'hermes' });
     expect(res.status).toBe(201);
   });
@@ -241,7 +241,7 @@ describe('PATCH /v1/agents/:id', () => {
   });
 
   it('member role can patch agents', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'agents-member-patch', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'agents-member-patch', 'member');
     const res = await req('PATCH', `/v1/agents/${agentId}`, memberPat, { description: 'by member' });
     expect(res.status).toBe(200);
   });
@@ -261,7 +261,7 @@ describe('DELETE /v1/agents/:id', () => {
   });
 
   it('returns 403 when member role tries to delete', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'agents-member-del', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'agents-member-del', 'member');
     const res = await req('DELETE', `/v1/agents/${agentId}`, memberPat);
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
@@ -313,11 +313,11 @@ describe('DELETE /v1/agents/:id active-task gate', () => {
     const now = Date.now();
     // We need a project row first. Insert minimally.
     const projId = `prj_${Math.random().toString(36).slice(2)}`;
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `INSERT INTO projects (id, org_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
     ).bind(projId, orgId, 'gate-proj', `gate-proj-${projId}`, now, now).run();
 
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `INSERT INTO tasks (id, org_id, project_id, agent_id, title, status, priority, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(taskId, orgId, projId, agent.id, 'Active Task', 'in_progress', 0, now, now).run();
 
@@ -378,7 +378,7 @@ describe('POST /v1/agents/:id/rotate-key', () => {
   });
 
   it('403 when member role tries rotate-key', async () => {
-    const { pat: memberPat } = await createMemberFixture(env.DB, orgId, 'agents-member-rot', 'member');
+    const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'agents-member-rot', 'member');
     const res = await req('POST', `/v1/agents/${agentId}/rotate-key`, memberPat);
     expect(res.status).toBe(403);
   });
@@ -401,7 +401,7 @@ describe('POST /v1/agents — saga compensation (mintApiKey failure)', () => {
     // raises an error on the apiKey table.  This allows SELECTs (used by the
     // auth middleware's verifyApiKey) to pass through while INSERT (used by
     // mintApiKey inside the route handler) is blocked.
-    await env.DB.prepare(
+    await (env.DB as D1Database).prepare(
       `CREATE TRIGGER block_apikey_insert BEFORE INSERT ON apiKey BEGIN SELECT RAISE(FAIL, 'blocked for saga test'); END`
     ).run();
 
@@ -410,7 +410,7 @@ describe('POST /v1/agents — saga compensation (mintApiKey failure)', () => {
       res = await req('POST', '/v1/agents', pat, { name: agentName, kind: 'hermes' });
     } finally {
       // Always remove the trigger to restore normal behaviour.
-      await env.DB.prepare(`DROP TRIGGER IF EXISTS block_apikey_insert`).run();
+      await (env.DB as D1Database).prepare(`DROP TRIGGER IF EXISTS block_apikey_insert`).run();
     }
 
     expect(res!.status).toBe(500);
@@ -418,7 +418,7 @@ describe('POST /v1/agents — saga compensation (mintApiKey failure)', () => {
     expect(body.error.code).toBe('agent.key_mint_failed');
 
     // The agent row should exist with deleted_at set (compensating soft-delete).
-    const row = await env.DB.prepare(
+    const row = await (env.DB as D1Database).prepare(
       `SELECT id, deleted_at, deleted_by_type FROM agents WHERE name = ? AND org_id = ? ORDER BY rowid DESC LIMIT 1`
     ).bind(agentName, orgId).first() as { id: string; deleted_at: number | null; deleted_by_type: string } | null;
     expect(row).not.toBeNull();

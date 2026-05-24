@@ -23,7 +23,7 @@
 
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../src/index.ts';
 import { createOrgFixture } from './helpers/orgs.ts';
 import { encodeCursor } from '../src/pagination.ts';
@@ -60,7 +60,7 @@ function req(method: string, path: string, token: string, body?: unknown) {
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 
   // Bootstrap Org A.
   const res = await app.fetch(
@@ -84,7 +84,7 @@ beforeAll(async () => {
   orgAId = data.organization.id;
 
   // Org B via fixture.
-  const orgB = await createOrgFixture(env.DB, 'Isolation Org B', 'isolation-org-b');
+  const orgB = await createOrgFixture((env.DB as D1Database), 'Isolation Org B', 'isolation-org-b');
   orgBPat = orgB.pat;
   orgBId = orgB.orgId;
 });

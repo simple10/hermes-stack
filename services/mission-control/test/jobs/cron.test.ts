@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { env, applyD1Migrations } from 'cloudflare:test';
 import { inject } from 'vitest';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers/config';
+import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { handleScheduled } from '../../src/jobs/cron.ts';
 import { masterClient, poolClient } from '../../src/db/client.ts';
 import { events, idempotencyKeys } from '../../src/db/pool.ts';
@@ -34,7 +34,7 @@ const ORG = 'org_cron_test';
 
 beforeAll(async () => {
   const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations(env.DB, migrations);
+  await applyD1Migrations((env.DB as D1Database), migrations);
 });
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ beforeAll(async () => {
 
 describe('cron', () => {
   it('purges events older than retention period and keeps recent ones', async () => {
-    const pool = poolClient(env.DB as D1Database);
+    const pool = poolClient((env.DB as D1Database) as D1Database);
     const now = Date.now();
     const ancient = now - 400 * 86_400_000; // 400 days ago (> default 365d)
     const recent  = now - 100 * 86_400_000; // 100 days ago (< 365d)
@@ -84,7 +84,7 @@ describe('cron', () => {
   });
 
   it('purges expired idempotency keys and keeps non-expired ones', async () => {
-    const pool = poolClient(env.DB as D1Database);
+    const pool = poolClient((env.DB as D1Database) as D1Database);
     const now = Date.now();
     const expired  = now - 1000;           // 1 second in the past
     const notYet   = now + 3_600_000;     // 1 hour in the future

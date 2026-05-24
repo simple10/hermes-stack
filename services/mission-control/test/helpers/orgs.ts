@@ -23,7 +23,7 @@ export interface OrgFixture {
 /**
  * Create a test org fixture with a user, organization, member row, and PAT.
  *
- * @param db     - D1Database binding (the `env.DB` from cloudflare:test)
+ * @param db     - D1Database binding (the `(env.DB as D1Database)` from cloudflare:test)
  * @param name   - Human-readable org name (also used for user name)
  * @param slug   - Org slug — must be unique across the test run
  */

@@ -19,8 +19,14 @@ export function createAuth(env: AuthEnv) {
   if (!binding) throw new Error('master DB binding not found');
   const db = drizzle(binding, { schema });
 
+  // better-auth's Drizzle adapter looks up tables by their better-auth model
+  // name.  The apiKey plugin uses the lowercase key "apikey" to resolve the
+  // table in the Drizzle ORM schema, but our master.ts exports the table as
+  // `apiKey` (camelCase).  Provide an explicit mapping so both resolve.
+  const drizzleSchema = { ...schema, apikey: schema.apiKey };
+
   return betterAuth({
-    database: drizzleAdapter(db, { provider: 'sqlite', schema }),
+    database: drizzleAdapter(db, { provider: 'sqlite', schema: drizzleSchema }),
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     basePath: '/v1/auth',

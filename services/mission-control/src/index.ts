@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { health } from './routes/health.ts';
+import { bootstrap } from './routes/bootstrap.ts';
+import { me } from './routes/me.ts';
 import { createAuth } from './auth/config.ts';
 
 type Env = {
@@ -15,6 +18,21 @@ type Env = {
 
 const app = new Hono<{ Bindings: Env }>();
 
+// CORS — applied to all /v1/* routes before any route handler runs.
+app.use('/v1/*', cors({
+  origin: (origin, c) => {
+    const env = c.env as Env;
+    const allowed =
+      env.CORS_ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
+    // Dev exception: allow any localhost origin in single-DB mode.
+    if (env.DB_MODE === 'single' && origin?.startsWith('http://localhost:')) return origin;
+    return allowed.includes(origin ?? '') ? origin : null;
+  },
+  credentials: true,
+  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['authorization', 'content-type', 'idempotency-key', 'x-mc-admin-token'],
+}));
+
 app.route('/v1/health', health);
 
 // Mount better-auth handler — handles all auth flows (signup, signin, orgs, api-keys, …)
@@ -22,5 +40,8 @@ app.on(['POST', 'GET'], '/v1/auth/*', async (c) => {
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
+
+app.route('/v1/bootstrap', bootstrap);
+app.route('/v1/me', me);
 
 export default app;

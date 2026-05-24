@@ -1,6 +1,7 @@
 // Tell @cloudflare/vitest-pool-workers what bindings exist on env. Mirrors
-// the wrangler.toml [vars] and [[d1_databases]] blocks for the dev/test env.
+// the wrangler.jsonc [vars] and [d1_databases] blocks for the dev/test env.
 // Index signature matches src Env so pool-resolver can be called with env directly.
+// (D1Database itself comes from worker-configuration.d.ts via the tsconfig types array.)
 declare module 'cloudflare:test' {
   interface ProvidedEnv {
     DB: D1Database;

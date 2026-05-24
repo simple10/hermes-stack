@@ -10,6 +10,13 @@
 
 **Workspace:** All work inside `services/mission-control/`. The hermes-stack glue (`service.env`, `compose.yaml`, `build.sh`) lives at the top of that dir; the standalone-ready content (everything else) is what gets extracted to its own repo later.
 
+**Conventions (post-implementation amendments — see `chore(mission-control)` commits):**
+- Package manager is **pnpm** (Corepack-managed via `packageManager` in package.json).
+- `wrangler` is **globally installed**, never a dev-dep. Scripts call bare `wrangler`.
+- Cloudflare runtime types come from `pnpm cf:types` (which runs `wrangler types`) — NOT `@cloudflare/workers-types` (deprecated).
+- Config is `wrangler.jsonc` (not `wrangler.toml`).
+- The task descriptions below still reference the old shapes; later commits standardized them.
+
 ---
 
 ## Conventions

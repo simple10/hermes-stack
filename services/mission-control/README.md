@@ -10,16 +10,23 @@ See [`docs/specs/2026-05-22-master-api-design.md`](docs/specs/2026-05-22-master-
 ## Quick start — contributor dev (Cloudflare Workers)
 
 This project uses **pnpm** (pinned via `packageManager` in `package.json`).
-If you don't have pnpm, run `corepack enable` once — Node ships with Corepack
-which will manage the right version automatically.
+If you don't have pnpm, run `corepack enable` once — Node's Corepack will
+install the right version automatically.
+
+**Wrangler is NOT a project dep** — install it globally once:
+`npm install -g wrangler` (or `pnpm add -g wrangler`).
 
 ```sh
-pnpm install
-cp .env.example .dev.vars   # then edit: set BETTER_AUTH_SECRET, MC_ADMIN_TOKEN
+pnpm install                 # installs deps (wrangler stays global)
+pnpm cf:types                # generate worker-configuration.d.ts from wrangler.jsonc
+cp .env.example .dev.vars    # then edit: set BETTER_AUTH_SECRET, MC_ADMIN_TOKEN
 pnpm db:migrate:local        # apply migrations to local D1
 pnpm dev                     # wrangler dev → http://localhost:8787
 pnpm test                    # run vitest suite (requires wrangler D1 + miniflare)
 ```
+
+Re-run `pnpm cf:types` any time you change bindings in `wrangler.jsonc`
+(new D1 binding, new env var, new compatibility flag, etc.).
 
 ### Bootstrap first user (dev)
 
@@ -65,13 +72,14 @@ See [`docs/self-hosting.md`](docs/self-hosting.md) for the full guide, including
 ## Production deploy — Cloudflare Workers
 
 1. Create D1 databases in the Cloudflare dashboard (or via `wrangler d1 create`).
-2. Update `wrangler.toml` with the real `database_id` values.
-3. Set secrets:
+2. Update `wrangler.jsonc` with the real `database_id` values.
+3. Regenerate types after editing wrangler.jsonc: `pnpm cf:types`.
+4. Set secrets:
    ```sh
    wrangler secret put BETTER_AUTH_SECRET
    wrangler secret put MC_ADMIN_TOKEN
    ```
-4. Apply migrations and deploy:
+5. Apply migrations and deploy:
    ```sh
    pnpm db:migrate:remote
    pnpm deploy

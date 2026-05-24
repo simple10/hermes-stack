@@ -1,0 +1,59 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mission-control",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-06",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // wrangler types writes the binding type defs here; tsconfig.json references it.
+  "types": "worker-configuration.d.ts",
+
+  // Single DB in dev (single-DB mode); SaaS prod overrides via env-specific blocks.
+  // TODO: Run `wrangler login && wrangler d1 create mission-control-dev` and
+  // replace the placeholder database_id below.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mission-control-dev",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations/combined"
+    }
+  ],
+
+  "vars": {
+    "DB_MODE": "single",
+    "BETTER_AUTH_URL": "http://localhost:8787"
+  },
+
+  // ── Production SaaS environment (`wrangler deploy --env production`) ─────
+  // Split-DB mode with separate master + pool bindings, plus cron triggers
+  // for events / idempotency / verification purges.
+  "env": {
+    "production": {
+      "vars": {
+        "DB_MODE": "split"
+      },
+      "d1_databases": [
+        {
+          "binding": "MASTER_DB",
+          "database_name": "mc-master-prod",
+          "database_id": "REPLACE_WITH_PROD_MASTER_ID",
+          "migrations_dir": "migrations/master"
+        },
+        {
+          "binding": "POOL_DEFAULT",
+          "database_name": "mc-pool-default-prod",
+          "database_id": "REPLACE_WITH_PROD_POOL_DEFAULT_ID",
+          "migrations_dir": "migrations/pool"
+        }
+      ],
+      "triggers": {
+        "crons": [
+          "0 3 * * *",      // events purge — see src/jobs/cron.ts
+          "0 4 * * *",      // idempotency purge
+          "*/15 * * * *"    // verification purge
+        ]
+      }
+    }
+  }
+}

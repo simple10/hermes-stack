@@ -70,6 +70,13 @@ const STATUS_VALUES = [
   'cancelled',
 ] as const;
 
+// Idempotency key format: <source>:<payload>. <source> is 1-32 lowercase
+// chars (a-z, 0-9, _, -) starting with a letter; <payload> is 1-200 chars
+// of anything. Catches the footgun of passing a raw external id without a
+// source-kind prefix (which would silently collide across callers).
+// Examples: "notion:ws_abc:page_xyz:v3", "hermes:t_abc123", "mc:t_xyz".
+const IDEMPOTENCY_KEY_RE = /^[a-z][a-z0-9_-]{0,31}:.{1,200}$/;
+
 const createBody = z.object({
   project_id: z.string().min(1),
   title: z.string().min(1).max(500),
@@ -77,7 +84,10 @@ const createBody = z.object({
   agent_id: z.string().optional(),
   priority: z.number().int().min(0).max(100).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-  idempotency_key: z.string().max(200).optional(),
+  idempotency_key: z.string().regex(IDEMPOTENCY_KEY_RE, {
+    message:
+      'idempotency_key must match <source>:<payload> where <source> is 1-32 lowercase chars (a-z, 0-9, _, -) starting with a letter',
+  }).optional(),
 });
 
 const patchBody = z.object({

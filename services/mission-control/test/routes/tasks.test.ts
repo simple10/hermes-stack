@@ -393,7 +393,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('Layer-2: allows same idempotency_key in different orgs (org isolation)', async () => {
-    const ikey = `shared-key-different-orgs-${Date.now()}`;
+    const ikey = `mc:shared-key-different-orgs-${Date.now()}`;
 
     const resA = await req('POST', '/v1/tasks', pat, {
       project_id: projectId,
@@ -411,7 +411,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('Layer-2: allows reuse of idempotency_key after task is soft-deleted', async () => {
-    const ikey = `reusable-after-delete-${Date.now()}`;
+    const ikey = `mc:reusable-after-delete-${Date.now()}`;
 
     const res1 = await req('POST', '/v1/tasks', pat, {
       project_id: projectId,
@@ -1069,5 +1069,38 @@ describe('DELETE /v1/tasks/:id', () => {
     // Comment should be soft-deleted by the trigger.
     const after = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM task_comments WHERE id = ?`).bind(cmtId).first() as { deleted_at: number | null } | null;
     expect(after?.deleted_at).not.toBeNull();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// idempotency_key regex validation (added when MC bumped the regex to v1)
+// ---------------------------------------------------------------------------
+
+describe('POST /v1/tasks — idempotency_key regex validation', () => {
+  it.each([
+    ['no-prefix-no-colon', 400],
+    [':no-source-prefix', 400],
+    ['UpperCaseSource:bad', 400],
+    ['hermes:t_valid_id_123', 201],
+    ['notion:ws_abc:page_xyz:v3', 201],
+    ['mc:t_xyz', 201],
+  ] as const)('idempotency_key %s → %d', async (key, expectedStatus) => {
+    // Use a unique title each call so we don't collide with each other on
+    // the same body — the Layer-1 header dedup would otherwise catch the
+    // retried request.
+    const res = await app.fetch(
+      new Request('http://x/v1/tasks', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          title: `regex test ${key}`,
+          idempotency_key: key,
+        }),
+      }),
+      TEST_ENV,
+    );
+    expect(res.status).toBe(expectedStatus);
   });
 });

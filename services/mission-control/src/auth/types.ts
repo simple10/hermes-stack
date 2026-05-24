@@ -6,7 +6,7 @@
  * the request came in via session cookie, PAT, agent key, or connector key —
  * so handlers never need to branch on auth path.
  */
-import type { PoolClient } from '../db/client.ts';
+import type { Env, PoolClient } from '../db/client.ts';
 
 // ---------------------------------------------------------------------------
 // Branded OrgId
@@ -42,6 +42,7 @@ export type Principal =
  * role        — 'owner'|'admin'|'member' for human principals; 'agent'|'connector' for M2M
  * principal   — the acting entity (user/agent/connector)
  * pool        — Drizzle pool client for this org's pool DB (pre-resolved)
+ * env         — Cloudflare env bindings (needed by master-DB repos to call masterClient)
  * viaUserId   — user that owns the credential (for audit; same as principal.id for PATs)
  * viaKeyId    — better-auth apiKey.id if request used a bearer token (for audit)
  */
@@ -50,6 +51,7 @@ export type AuthContext = {
   role: 'owner' | 'admin' | 'member' | 'agent' | 'connector';
   principal: Principal;
   pool: PoolClient;
+  env: Env;
   viaUserId?: string;
   viaKeyId?: string;
 };

@@ -1,5 +1,5 @@
 // Facade — exports `db.<table>(ctx)` factories.
-// Filled in as each repo is added (Tasks 3-5).
+// Tasks 3-5: pool repos + master repos.
 
 import { tasksRepo } from './tasks.ts';
 import { projectsRepo } from './projects.ts';
@@ -8,6 +8,10 @@ import { connectorsRepo } from './connectors.ts';
 import { commentsRepo } from './comments.ts';
 import { externalRefsRepo } from './external-refs.ts';
 import { eventsRepo } from './events.ts';
+import { usersRepo } from './users.ts';
+import { orgsRepo } from './orgs.ts';
+import { membersRepo } from './members.ts';
+import { apiKeysRepo } from './api-keys.ts';
 
 export const db = {
   // pool repos (Tasks 3-4)
@@ -18,6 +22,11 @@ export const db = {
   comments: commentsRepo,
   externalRefs: externalRefsRepo,
   events: eventsRepo,
+  // master repos (Task 5)
+  users: usersRepo,
+  orgs: orgsRepo,
+  members: membersRepo,
+  apiKeys: apiKeysRepo,
 };
 
 export type DB = typeof db;

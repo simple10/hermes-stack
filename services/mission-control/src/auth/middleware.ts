@@ -160,6 +160,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
       role: role!,
       principal: principal!,
       pool,
+      env,
       viaUserId,
       viaKeyId,
     };

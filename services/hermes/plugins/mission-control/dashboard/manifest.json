@@ -1,0 +1,12 @@
+{
+  "name": "mission-control",
+  "label": "MissionControl",
+  "description": "Sync status with MissionControl",
+  "icon": "Cloud",
+  "version": "1.0.0",
+  "widget": {
+    "host": "settings",
+    "position": "after:plugins"
+  },
+  "api": "plugin_api.py"
+}

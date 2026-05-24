@@ -1,6 +1,6 @@
 # MissionControl
 
-MissionControl is a multi-tenant kanban API for coordinating work across agent instances. It provides a single REST surface for creating projects, tasks, agents, and connectors; tracking state transitions; and streaming an audit log of every mutation. It ships as a Cloudflare Workers + D1 deployment for SaaS use and as a Docker image backed by SQLite for self-hosted teams.
+MissionControl is a multi-tenant kanban API for coordinating work across agent instances. It provides a single REST surface for creating projects, tasks, agents, and connectors; tracking state transitions; and streaming an audit log of every mutation. It ships as a Cloudflare Workers + D1 deployment for SaaS use and as a Docker image running `wrangler dev` against a local SQLite-backed D1 for self-hosted teams.
 
 **Status:** v1 draft — feature-complete, production-hardened for single-pool deployments.
 See [`docs/specs/2026-05-22-master-api-design.md`](docs/specs/2026-05-22-master-api-design.md) for the full design spec.
@@ -40,9 +40,18 @@ curl -X POST http://localhost:8787/v1/bootstrap \
 
 ---
 
-## Quick start — self-host via Docker
+## Quick start — self-host via Docker (wrangler dev)
+
+The container runs `wrangler dev` against a local SQLite-backed D1 — no
+Cloudflare account required. State is persisted to `/data` on the volume.
 
 ```sh
+# Build from source
+git clone <repo-url>
+cd services/mission-control
+docker build -t mission-control:local .
+
+# Run
 docker run -d \
   --name mission-control \
   -p 8787:8787 \
@@ -63,6 +72,16 @@ Or with Docker Compose (hermes-stack users):
 just build mission-control   # builds the image
 just enable mission-control  # adds to docker compose profile
 just start                   # brings up all enabled services
+```
+
+**No-Docker self-host** (clone + run locally):
+
+```sh
+pnpm install
+pnpm cf:types
+cp .env.example .dev.vars     # set BETTER_AUTH_SECRET, MC_ADMIN_TOKEN
+pnpm db:migrate:local         # apply migrations to local D1
+pnpm dev                      # wrangler dev → http://localhost:8787
 ```
 
 See [`docs/self-hosting.md`](docs/self-hosting.md) for the full guide, including backup/restore and upgrade workflow.
@@ -90,7 +109,7 @@ See [`docs/self-hosting.md`](docs/self-hosting.md) for the full guide, including
 
 ## Architecture
 
-MissionControl is a Hono application on Cloudflare Workers (Module Worker format) backed by two tiers of D1 — a master DB for identity (users, orgs, API keys via better-auth) and per-org pool DBs for work data (projects, tasks, agents, connectors, events). In self-host / single-DB mode both tiers collapse into a single SQLite file. See the [spec](docs/specs/2026-05-22-master-api-design.md) for the full two-tier sharding design, auth flows, and event model.
+MissionControl is a Hono application on Cloudflare Workers (Module Worker format) backed by two tiers of D1 — a master DB for identity (users, orgs, API keys via better-auth) and per-org pool DBs for work data (projects, tasks, agents, connectors, events). In self-host / single-DB mode both tiers collapse into a single local SQLite file managed by `wrangler dev`. See the [spec](docs/specs/2026-05-22-master-api-design.md) for the full two-tier sharding design, auth flows, and event model.
 
 ---
 

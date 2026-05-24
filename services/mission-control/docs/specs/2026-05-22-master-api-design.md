@@ -32,12 +32,12 @@ The user's mental model: *"I'm creating a task in Notion (or our UI) and assigni
 
 | | Production (SaaS) | Self-hosted (OSS) | Contributor dev |
 |---|---|---|---|
-| Runtime | Cloudflare Workers | Node + Hono (via `unenv`) | `wrangler dev` directly |
-| Database | D1 (sharded — see below) | Single SQLite file via `better-sqlite3` | Local SQLite via wrangler |
-| Cron | Cloudflare Cron Triggers | `node-cron` | n/a v1 |
+| Runtime | Cloudflare Workers | `wrangler dev` (Docker container) | `wrangler dev` directly |
+| Database | D1 (sharded — see below) | Local SQLite via D1 (`wrangler dev --persist-to /data`) | Local SQLite via wrangler |
+| Cron | Cloudflare Cron Triggers | Wrangler cron simulation | n/a v1 |
 | Push (v1.1) | Streaming Response (SSE) | Same | Same |
 
-One Hono codebase, two build targets. Driver selection lives in `db/client.ts`; everything above it is agnostic.
+One Hono codebase, one runtime (Cloudflare Workers / wrangler). Driver selection removed; all paths use `drizzle-orm/d1`.
 
 ---
 
@@ -89,7 +89,7 @@ Future:
 For OSS self-hosters and local contributors, **DB_MODE is always `single`**. SaaS production is always `split`. We do not support a self-hoster running split-mode or a SaaS deployment running single-mode — that drift gets messy fast.
 
 In `single` mode:
-- One D1 (or better-sqlite3) binding named `DB`.
+- One D1 binding named `DB` (local SQLite file managed by `wrangler dev`).
 - Both `migrations/master/*` and `migrations/pool/*` apply to the same `DB`, in numeric order interleaved per source. Since table names don't collide (no `tasks` in master, no `organization` in pool), they coexist cleanly.
 - `POOL_BINDING_MAP['default']` resolves to `env.DB` — same binding the master client uses. Pool resolver returns the same Drizzle client. Zero branching in handlers.
 - `tenant_pools` registry table still exists; it's seeded with a single row `('default', 'DB')` and isn't user-extensible self-host. No-op for OSS but keeps schema parity with SaaS.
@@ -108,8 +108,8 @@ The `db/client.ts` resolver returns `{ master, pool }` Drizzle clients per reque
 | Concern | Choice |
 |---|---|
 | HTTP framework | Hono — runs on Workers, Node, Bun, Deno |
-| Database | D1 (Workers) / better-sqlite3 (Node) — same SQL |
-| ORM | Drizzle — first-class for both drivers |
+| Database | D1 (Workers) — local SQLite via wrangler for self-host |
+| ORM | Drizzle (`drizzle-orm/d1`) |
 | Migrations | SQL files via `wrangler d1 migrations` + Drizzle's migrator |
 | Validation | Zod (on every request body and query param) |
 | Auth | **better-auth** with `organization` + `apiKey` plugins (Drizzle adapter, master DB only) |
@@ -989,8 +989,8 @@ Every response carries `X-Request-Id: <cf-request-id>` so callers can quote it i
 
 ### Self-host (SQLite)
 
+- Copy `.wrangler/state/v3/d1/` directory from the `/data` volume (see `docs/self-hosting.md`).
 - `wrangler d1 export DB --output=backup-$(date +%F).sql` from a Cron-triggered Worker, or
-- For Node-build self-host: SQLite file backup via `cp` while WAL checkpointed (better-sqlite3 supports `db.backup()`).
 - Documented in `docs/self-hosting.md` (separate doc, written alongside the v1 implementation).
 
 ### Cron-triggered tasks (Cloudflare Cron Triggers)
@@ -1001,7 +1001,7 @@ Every response carries `X-Request-Id: <cf-request-id>` so callers can quote it i
 | `0 4 * * *` | Purge `idempotency_keys` past `expires_at` | Daily 04:00 UTC |
 | `*/15 * * * *` | Purge expired `verification` rows (better-auth) | Every 15min |
 
-For self-host, equivalent cron jobs run via `node-cron` inside the long-running Node process.
+For self-host, wrangler dev simulates cron triggers via `--test-scheduled`. Crons run on the same Workers schedule as prod.
 
 ---
 
@@ -1045,7 +1045,7 @@ services/mission-control/
     db/
       master.ts           # Drizzle schema (incl. better-auth tables + tenant_pools)
       pool.ts             # Drizzle schema (agents, tasks, …)
-      client.ts           # D1 / better-sqlite3 selector
+      client.ts           # D1 client factory (drizzle-orm/d1)
       pool-resolver.ts    # orgId → pool binding (with TTL cache)
       helpers.ts          # active(), withOrg(), …
       cascade.ts          # deleteResource helpers
@@ -1072,8 +1072,7 @@ services/mission-control/
   wrangler.toml           # compatibility_flags = ["nodejs_compat"]
                           # required by better-auth on Workers (AsyncLocalStorage).
                           # multiple [[d1_databases]] entries for master + each pool.
-  Dockerfile              # Node build for self-hosters (uses unenv to run Hono Worker
-                          # on Node + better-sqlite3 — same source, two targets)
+  Dockerfile              # wrangler dev container for self-hosters (local SQLite-backed D1)
   .env.example            # documented env vars (see "Environment variables" section)
   package.json
   tsconfig.json
@@ -1089,14 +1088,11 @@ services/mission-control/
 
 ### Local OSS Docker target
 
-The OSS Docker image is the **Node build**, not `wrangler dev`. Reasoning:
-- Faster startup (~500ms vs ~3s for wrangler).
-- No dependency on wrangler's CLI lifecycle (parent process, dev server).
-- Deployable to any Node host (Fly, Render, Hetzner) — same image.
-- Hot-reload during contributor development is via `wrangler dev` on the host (not in Docker), which gives parity with prod Workers.
+The OSS Docker image runs **`wrangler dev`** (not a separate Node server). This keeps
+self-host and prod on identical code paths — the same Workers bundle runs everywhere.
 
 Two clear personas:
-- **OSS self-hoster:** `docker run mc-image` → Node + Hono + better-sqlite3 + SQLite file mounted at `/data/mc.sqlite`.
+- **OSS self-hoster:** `docker run mc-image` → wrangler dev + local SQLite-backed D1 persisted to `/data`.
 - **Contributor / SaaS dev:** `wrangler dev` on the dev machine → workerd + local D1 + hot reload.
 
 ---
@@ -1104,7 +1100,7 @@ Two clear personas:
 ## What v1 ships
 
 - ✅ Worker deployable to Cloudflare with master + 1 pool D1
-- ✅ Self-host as a Docker image (Node + SQLite)
+- ✅ Self-host as a Docker image (wrangler dev + local SQLite-backed D1)
 - ✅ Bootstrap script that mints an org + owner key
 - ✅ All v1 routes listed above, with auth + role enforcement + soft-delete + cascade
 - ✅ Events table populated by every mutating handler

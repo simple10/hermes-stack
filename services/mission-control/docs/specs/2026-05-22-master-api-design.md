@@ -711,12 +711,45 @@ GET    /v1/external_refs            — query with filters (any role)
 DELETE /v1/external_refs/:id        — soft delete (owner|admin|connector or owning agent)
 ```
 
+### Events
+
+```
+GET    /v1/events                   — change log read API (owner|admin|member|connector)
+                                       query: since (integer event id, exclusive lower
+                                              bound; default 0)
+                                              kinds (comma-separated resource_type
+                                                values to include; default all)
+                                              limit (1-200; default 100)
+                                              cursor (opaque; for forward-paging
+                                                within a single since-window when
+                                                more than `limit` events accumulated)
+                                       response: {
+                                         events: [{ id, org_id, resource_type,
+                                                    resource_id, kind, actor_type,
+                                                    actor_id, payload, created_at }],
+                                         next_cursor: <opaque|null>
+                                       }
+                                       agent role excluded: events carry resource
+                                       data across the whole org, and agent-role
+                                       visibility is per-row (agent_id == self).
+                                       Per-row event visibility would require joining
+                                       events to the underlying resource on every
+                                       read — expensive. Connector role (full org
+                                       read access) is the appropriate consumer.
+                                       Plugins / connectors using events stream:
+                                       authenticate with their connector key and
+                                       filter client-side by the payload.
+```
+
+The `events.id` cursor is **integer-monotonic per pool**. v1 has one pool, so a single integer cursor is sufficient. Consumers save the highest `id` seen and pass it back as `since` on the next poll. `next_cursor` is used only when a since-window itself spans more than `limit` events — set `since = highest event id seen` on the next call and `cursor` returns to null. For the v1.1+ sharded-pool case, a composite cursor `(pool_id, event_id)` will be introduced (documented at the v1.1 rollout).
+
+Event kinds and payload shapes are documented in §"Sync model" below. Polling consumers should be tolerant of unknown kinds (skip them) so MC can add new kinds without breaking older consumer versions.
+
 ### Deferred (v1.1+)
 
 ```
-GET    /v1/events?since=&limit=&resource_type=     — the change log API
 POST   /v1/tasks/:id/heartbeat                     — long-running keep-alive
-GET    /v1/stream/events                           — SSE push
+GET    /v1/stream/events                           — SSE push (events stream over EventSource)
 POST   /v1/users                                   — direct user CRUD (UI work)
 ```
 
@@ -806,7 +839,8 @@ Two layers, each serving a distinct purpose:
 
 **Layer 2 — Semantic dedup via `tasks.idempotency_key`:**
 - Caller sets `idempotency_key: "<source_kind>:<source_id>:<external_id>:<version>"` in the request body (e.g. `"notion:ws_abc:page_xyz:v3"`).
-- **Caller is responsible for namespacing.** The unique index is `(org_id, idempotency_key)` only — no `source_kind` column. Two different Notion workspaces in the same org both using `"notion:<page_id>"` would collide. Document this requirement in the API reference and validate format in v1.1 (regex check on the key).
+- **Caller is responsible for namespacing.** The unique index is `(org_id, idempotency_key)` only — no `source_kind` column. Two different Notion workspaces in the same org both using `"notion:<page_id>"` would collide.
+- **Format validation (v1):** keys must match `^[a-z][a-z0-9_-]{0,31}:.{1,200}$` — a lowercase source-kind prefix (1-32 chars, starts with a letter), a colon, then up to 200 chars of namespace/id payload. Examples: `"notion:ws_abc:page_xyz:v3"`, `"hermes:t_abc123"`, `"mc:t_xyz"`. The Zod validator returns `400 idempotency.format` on mismatch. This catches the common footgun of passing a raw external id without a source prefix, which would silently share the namespace with every other caller that did the same.
 - Partial unique index `(org_id, idempotency_key) WHERE deleted_at IS NULL AND idempotency_key IS NOT NULL` enforces uniqueness for active rows.
 - Insert collision → `409 idempotency.conflict` with the existing task id in `details.existing_task_id`.
 - Survives expiration of the Layer 1 cache. Recreatable after soft-delete (the partial index excludes deleted rows).
@@ -843,7 +877,7 @@ The `events` table is an append-only ordered change log. Every mutating handler 
 - `comment.created`, `comment.deleted`
 - `external_ref.added`, `external_ref.removed`
 
-Consumers (Notion connector, hermes adapter, …) poll `GET /v1/events?since=<last_id>&limit=100` (**v1.1 endpoint** — the table is populated v1, but the read API is deferred until the first consumer ships, since exposing it has no value before then) and store their cursor client-side. Server-side cursors deferred to v1.1 — if/when admin visibility into consumer lag becomes a need.
+Consumers (Notion connector, hermes adapter, …) poll `GET /v1/events?since=<last_id>&kinds=<...>&limit=100` and store their cursor client-side. The endpoint is documented in §"Events" above. Server-side cursors (admin visibility into consumer lag) deferred to v1.1.
 
 **"Has this row been synced by me?"** answered by `external_refs` presence:
 
@@ -1147,9 +1181,8 @@ This validates the whole architecture before any agent or connector integration 
 |---|---|
 | `task_links` (parent/child) | Subtask graphs stay in agents' local kanbans per the design principle. |
 | `task_runs` | Master tracks final outcome; agents track retries locally. |
-| `GET /v1/events` endpoint | First consumer (Notion connector) is v1.1; expose API at the same time. |
-| Heartbeat endpoint | `tasks.updated_at` is a sufficient proxy for v1 cadences. |
-| SSE / WebSockets | Polling at 30s is free and dead-simple to debug; add streaming when latency matters. |
+| Heartbeat endpoint | `tasks.updated_at` is a sufficient proxy for v1 cadences; middleware also bumps `agents.last_seen_at` / `connectors.last_seen_at` on every authed request. |
+| SSE / WebSockets (`GET /v1/stream/events`) | Polling `GET /v1/events` at 10-30s is free and dead-simple to debug; add streaming when latency matters. |
 | Server-side cursors | Client-side is sufficient until multi-instance consumers or admin lag visibility need it. |
 | Fine-grained scopes | Coarse roles cover v1; add scope strings when an integration genuinely needs less than `connector`. |
 | User CRUD via API | Bootstrap script + direct DB v1; user-API arrives with the custom UI work. |

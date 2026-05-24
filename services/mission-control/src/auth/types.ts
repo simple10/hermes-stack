@@ -8,6 +8,27 @@
  */
 import type { PoolClient } from '../db/client.ts';
 
+// ---------------------------------------------------------------------------
+// Branded OrgId
+// ---------------------------------------------------------------------------
+
+declare const orgIdBrand: unique symbol;
+
+/**
+ * A string that has been verified to originate from a trusted auth boundary
+ * (session or bearer token).  Use `asOrgId` ONLY at the two auth boundary
+ * sites in `src/auth/middleware.ts` — nowhere else.
+ */
+export type OrgId = string & { readonly [orgIdBrand]: never };
+
+/**
+ * Cast a raw string to OrgId.  Use ONLY at the auth boundary after verifying
+ * the value comes from a trusted source (verified bearer / session).
+ */
+export function asOrgId(s: string): OrgId { return s as OrgId; }
+
+// ---------------------------------------------------------------------------
+
 /** The acting entity for this request. */
 export type Principal =
   | { type: 'user'; id: string }
@@ -25,7 +46,7 @@ export type Principal =
  * viaKeyId    — better-auth apiKey.id if request used a bearer token (for audit)
  */
 export type AuthContext = {
-  orgId: string;
+  orgId: OrgId;
   role: 'owner' | 'admin' | 'member' | 'agent' | 'connector';
   principal: Principal;
   pool: PoolClient;

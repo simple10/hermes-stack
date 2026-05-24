@@ -22,7 +22,8 @@ import { resolvePoolForOrg } from '../db/pool-resolver.ts';
 import { masterClient } from '../db/client.ts';
 import { member, apiKey as apiKeyTable } from '../db/master.ts';
 import { HttpError, errorResponse } from '../errors.ts';
-import type { AuthContext } from './types.ts';
+import type { AuthContext, OrgId } from './types.ts';
+import { asOrgId } from './types.ts';
 
 // ---------------------------------------------------------------------------
 // Auth middleware
@@ -34,7 +35,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
     const auth = createAuth(env);
     const request = c.req.raw;
 
-    let orgId: string | undefined;
+    let orgId: OrgId | undefined;
     let principal: AuthContext['principal'] | undefined;
     let role: AuthContext['role'] | undefined;
     let viaUserId: string | undefined;
@@ -57,7 +58,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
           'Session has no active organization. Call setActiveOrganization first.',
         );
       }
-      orgId = activeOrgId;
+      orgId = asOrgId(activeOrgId);
       principal = { type: 'user', id: session.user.id };
       viaUserId = session.user.id;
 
@@ -108,7 +109,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
         throw new HttpError(401, 'auth.invalid_token', 'API key not found after verification');
       }
 
-      orgId = keyRow.orgId;
+      orgId = asOrgId(keyRow.orgId);
       viaUserId = keyRow.userId ?? undefined;
       const ptype = keyRow.principalType as 'pat' | 'agent' | 'connector';
 

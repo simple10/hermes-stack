@@ -23,6 +23,13 @@ HERMES_GATEWAY_API_KEY=             # minted by setup when ALLOW_ACCESS=true
 HERMES_MOUNT_ENABLED=true          # bind-mount ~/.hermes/ from Mac path below
 HERMES_MOUNT_DIR=.stack/hermes/.hermes  # Mac-side source for the mount
 HERMES_LOGTAIL_DASHBOARD=false     # also mirror hermes-dashboard journal to OrbStack Logs tab
+HERMES_MC_URL=                     # MissionControl deployment URL — enables the
+                                   # mission-control plugin (see services/hermes/
+                                   # plugins/mission-control/README.md for full
+                                   # setup including HERMES_MC_USER_PAT,
+                                   # HERMES_MC_AGENT_NAME, HERMES_MC_BOARD,
+                                   # HERMES_MC_POLL_INTERVAL,
+                                   # HERMES_MC_DEFAULT_PROJECT_SLUG, HERMES_MC_DEBUG)
 ```
 
 All keys carry the `HERMES_` prefix to avoid collisions with other
@@ -110,6 +117,7 @@ logic simple.
 | `firecrawl` | `FIRECRAWL_API_URL` + placeholder `FIRECRAWL_API_KEY` in `~/.hermes/.env` |
 | `camofox-browser` | `CAMOFOX_URL` in `~/.hermes/.env` |
 | `searxng` | `SEARXNG_URL` in `~/.hermes/.env` + `hermes config set web.search_backend searxng` |
+| `HERMES_MC_URL` set | `HERMES_MC_*` env vars in managed block; plugin synced to `~/.hermes/plugins/mission-control/`; enabled in `plugins.enabled` |
 
 ## Telegram
 

@@ -1,120 +1,97 @@
-# Hermes ↔ MissionControl Plugin Implementation Plan
+# Hermes ↔ MissionControl Plugin Implementation Plan (rev 4)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the stack-side `mission-control` Hermes plugin so a Hermes VM bidirectionally syncs tasks/comments with a MissionControl deployment.
+**Goal:** Ship the events-driven `mission-control` Hermes plugin (and the small MC bits it depends on).
 
-**Architecture:** One daemon thread inside the gateway runs two asyncio loops (pull + push reactor) against the MC HTTP API. Pulled tasks land in a dedicated kanban board (`HERMES_MC_BOARD`, default `mc`); a separate `links.db` SQLite tracks MC↔local mappings and an `mc_apply_log` anti-feedback table. Stack-side `build.sh` wires env vars and syncs the plugin into the OrbStack VM.
+**Architecture:** One daemon thread inside the gateway runs two asyncio loops: a **pull loop** that subscribes to MC's `GET /v1/events` and dispatches each event via `apply.py`, and a **push reactor** that tails local kanban `task_events` on a dedicated board (`HERMES_MC_BOARD`, default `mc`) and PATCHes/POSTs back to MC. A plugin-owned `links.db` (separate SQLite) tracks MC↔local mappings + an `mc_apply_log` anti-feedback table + cursors.
 
-**Tech Stack:** Python 3.11+, httpx, pytest, respx, sqlite3 (WAL), Hermes plugin loader (`PluginContext`).
+**Tech Stack:** Python 3.11+, httpx, pytest, respx, sqlite3 (WAL), Hermes plugin loader.
 
-**Spec:** `docs/specs/2026-05-23-mission-control-plugin-design.md` (rev 3).
+**Spec:** `docs/specs/2026-05-23-mission-control-plugin-design.md` (rev 4).
+
+**Companion:** `docs/plans/2026-05-23-mission-control-plugin-part2.md` (Tasks 4-23 in TDD detail — most of those task bodies still apply unchanged; deltas called out below).
 
 ---
 
+## What's already done
+
+- **Task 1** (commit `add8ecb`): MC spec connector annotation corrected from v1.1 to v1.
+- **MC spec changes** (commit `841f6e8`): `GET /v1/events` promoted to v1; idempotency-key regex added; deferred-features table updated.
+- **Plugin spec rev 4** (commit `b801cd1`): events-driven architecture.
+
 ## File map
+
+### MC side (Phase 0)
 
 | File | Purpose |
 |---|---|
-| `services/mission-control/docs/specs/2026-05-22-master-api-design.md` (modify) | Two-line fix: connector v1 annotation; `next_cursor` always-returned semantics |
-| `services/mission-control/src/db/helpers.ts` (modify) | Cursor builder returns a tip-cursor on empty/final page |
-| `services/mission-control/src/routes/*` (modify, ~5 files) | Use the tip-cursor helper for every paginated response |
-| `services/mission-control/test/db/repos/_cursor.ts` (new) | Tip-cursor unit test added to the consolidated repo-tests file |
-| `services/hermes/_source/hermes_cli/kanban_db.py` (modify) | Add `list_events_since(conn, last_id, limit)` helper |
-| `services/hermes/plugins/mission-control/plugin.yaml` (new) | Manifest |
-| `services/hermes/plugins/mission-control/__init__.py` (new) | `register(ctx)` entry; gateway detection; loop startup |
-| `services/hermes/plugins/mission-control/config.py` (new) | Env loading; `~/.hermes/auth.json` read+cache |
-| `services/hermes/plugins/mission-control/client.py` (new) | httpx wrapper for MC API |
-| `services/hermes/plugins/mission-control/registrar.py` (new) | PAT → agent + connector keys; project cache |
-| `services/hermes/plugins/mission-control/links_db.py` (new) | `links.db` schema + helpers |
-| `services/hermes/plugins/mission-control/status_map.py` (new) | local↔MC status mapping (pure functions) |
-| `services/hermes/plugins/mission-control/apply.py` (new) | MC→local writes via kanban_db; mc_apply_log capture |
-| `services/hermes/plugins/mission-control/pull.py` (new) | Pull loop |
-| `services/hermes/plugins/mission-control/push.py` (new) | Push reactor |
-| `services/hermes/plugins/mission-control/runtime.py` (new) | Daemon thread that owns asyncio loop |
-| `services/hermes/plugins/mission-control/tools.py` (new) | `mc_promote_task` tool |
-| `services/hermes/plugins/mission-control/cli.py` (new) | `hermes mc <subcommand>` |
-| `services/hermes/plugins/mission-control/dashboard/manifest.json` (new) | Widget manifest |
-| `services/hermes/plugins/mission-control/dashboard/plugin_api.py` (new) | `GET /api/plugins/mission-control/status` |
-| `services/hermes/plugins/mission-control/README.md` (new) | Operator docs |
-| `services/hermes/plugins/mission-control/pyproject.toml` (new) | Dev deps + pytest config |
-| `services/hermes/plugins/mission-control/tests/conftest.py` (new) | sys.path bridge to `_source/`; env scrub |
-| `services/hermes/plugins/mission-control/tests/test_*.py` (10 files, new) | Per-module unit tests |
-| `services/hermes/plugins/mission-control/tests/integration/test_end_to_end.py` (new, marker-gated) | wrangler-dev e2e |
-| `services/hermes/build.sh` (modify) | Add `hermes_sync_plugin`, `hermes_enable_plugin` helpers + MC lever section |
-| `services/hermes/build.test.sh` (modify) | New test cases for MC managed-block injection |
+| `services/mission-control/src/db/repos/events.ts` (modify) | Add `list({since, kinds?, limit, cursor?})` method to the events repo |
+| `services/mission-control/src/routes/events.ts` (new) | `GET /v1/events` route handler |
+| `services/mission-control/src/index.ts` (modify) | Mount the events router |
+| `services/mission-control/src/routes/tasks.ts` (modify) | Add idempotency-key regex validation to the POST body schema |
+| `services/mission-control/src/routes/external-refs.ts` (modify) | Same regex validation if external-refs accept idempotency keys |
+| `services/mission-control/test/routes/events.test.ts` (new) | Route tests |
+| `services/mission-control/test/routes/tasks.test.ts` (modify) | Add tests for regex rejection |
+
+### Hermes plugin (Phases 1-10)
+
+| File | Purpose |
+|---|---|
+| `services/hermes/plugins/mission-control/plugin.yaml` | Manifest |
+| `.../mission-control/__init__.py` | `register(ctx)` entry |
+| `.../mission-control/config.py` | Env + auth.json with mtime cache |
+| `.../mission-control/client.py` | MC HTTP client (events_list, tasks_*, comments_*, external_refs, agents/connectors, projects) |
+| `.../mission-control/registrar.py` | PAT → keys + cursor init + project cache |
+| `.../mission-control/links_db.py` | Plugin-owned SQLite schema + helpers |
+| `.../mission-control/status_map.py` | Pure mapping (local↔MC + kanban event-kind→MC PATCH) |
+| `.../mission-control/apply.py` | MC event-kind dispatch (writes to kanban via helpers + mc_apply_log capture) |
+| `.../mission-control/pull.py` | Events-poll loop |
+| `.../mission-control/push.py` | Kanban task_events reactor |
+| `.../mission-control/runtime.py` | Daemon thread + lifecycle |
+| `.../mission-control/tools.py` | `mc_promote_task` |
+| `.../mission-control/cli.py` | `hermes mc` subcommands |
+| `.../mission-control/dashboard/{manifest.json,plugin_api.py}` | Status endpoint (no React UI in v1) |
+| `.../mission-control/README.md` | Operator docs |
+| `.../mission-control/pyproject.toml` | Dev deps |
+| `.../mission-control/tests/conftest.py` | sys.path bridge + env scrub |
+| `.../mission-control/tests/test_*.py` | Per-module unit tests |
+| `.../mission-control/tests/integration/test_end_to_end.py` | Marker-gated wrangler-dev e2e |
+| `services/hermes/build.sh` (modify) | `hermes_sync_plugin` + `hermes_enable_plugin` helpers + MC lever section |
+| `services/hermes/build.test.sh` (modify) | New cases for MC managed-block injection |
 | `services/hermes/README.md` (modify) | Document the lever |
 
 ---
 
-## Phase 0 — Prerequisites
+## Phase 0 — MC prerequisites
 
-### Task 1: MC spec — fix connector v1 annotation
+### Task 2: MC `GET /v1/events` endpoint
 
 **Files:**
-- Modify: `services/mission-control/docs/specs/2026-05-22-master-api-design.md`
+- Modify: `services/mission-control/src/db/repos/events.ts`
+- Create: `services/mission-control/src/routes/events.ts`
+- Modify: `services/mission-control/src/index.ts`
+- Create: `services/mission-control/test/routes/events.test.ts`
 
-- [ ] **Step 1: Read the contradicting lines**
-
-Open the file. Find the principal-type table (around line 155). It includes a row tagging connectors as "(v1.1)". Also find the v1 routes section (around line 626) which lists `POST /v1/connectors — register a connector (owner|admin)` as a v1 route.
-
-- [ ] **Step 2: Edit the principal-type table**
-
-Replace the parenthetical "(v1.1)" annotation on the connector row with no version annotation (connectors are v1).
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 1: Read the existing events repo + a sibling route for shape**
 
 ```bash
-git add services/mission-control/docs/specs/2026-05-22-master-api-design.md
-git commit -m "docs(mc spec): clarify connectors are v1 (not v1.1)
-
-The principal-type table tagged connectors with (v1.1) but the v1
-routes section lists POST /v1/connectors as a v1 route. The Hermes
-MC plugin spec (rev 3) depends on connector minting being v1 for its
-PAT-driven registration flow."
+cat services/mission-control/src/db/repos/events.ts
+sed -n '1,80p' services/mission-control/src/routes/projects.ts
+grep -n "app\.route\|router" services/mission-control/src/index.ts | head -10
 ```
 
----
+Confirm: `eventsRepo(ctx)` has only `emit()` + `table` today; sibling routes use `requireAnyRole`, query parsing via Zod, `db.X(ctx).list(...)`, `serializeTimestamps`; `index.ts` mounts via `app.route('/v1/X', xRouter)`.
 
-### Task 2: MC implementation — `{data, next_cursor}` envelope + always-return tip cursor
+- [ ] **Step 2: Write the failing route test**
 
-**Background.** The MC spec consistently shows list responses as `{ "data": [...], "next_cursor": "..." }` (see spec lines 694, 825). The current MC implementation diverged: every route returns its resource name as the key (`{tasks, next_cursor}`, `{projects, next_cursor}`, `{comments, next_cursor}`, etc.) and emits `next_cursor: null` on the last page. The plugin's pull loop (and the entire plan that follows) assumes the spec — `{data, next_cursor}` with a tip cursor on the last page. This task brings the MC implementation back into line with its own spec.
-
-**Files (verified against the real tree — note hyphenated paths):**
-- Modify: `services/mission-control/src/pagination.ts` — add `paginated()` async helper (`encodeCursor` is async and takes `(payload, secret)`)
-- Modify: `services/mission-control/src/routes/tasks.ts` (around line 320-352 — replaces the `let nextCursor: string | null = null; if (hasMore) ...` block + the `{tasks: ..., next_cursor: nextCursor}` envelope)
-- Modify: `services/mission-control/src/routes/projects.ts`
-- Modify: `services/mission-control/src/routes/agents.ts`
-- Modify: `services/mission-control/src/routes/connectors.ts`
-- Modify: `services/mission-control/src/routes/comments.ts`
-- Modify: `services/mission-control/src/routes/external-refs.ts` (hyphenated)
-- Modify: every existing test under `services/mission-control/test/routes/` and `test/isolation.test.ts` that asserts on `response.tasks` / `response.projects` / `response.comments` / etc. (find with: `grep -nR "body\.\(tasks\|projects\|comments\|agents\|connectors\|external_refs\)" services/mission-control/test/`)
-- Modify: `services/mission-control/docs/specs/2026-05-22-master-api-design.md` pagination section (the spec already documents `{data, ...}` correctly — just update the "`null` next_cursor" sentence)
-- Test: `services/mission-control/test/routes/pagination-envelope.test.ts` (new) — uses the existing route-test pattern (`import app from '../../src/index.ts'` + `app.fetch(req, TEST_ENV)`). NOT to be confused with the existing `test/pagination.test.ts` which tests the cursor primitives.
-
-- [ ] **Step 1: Confirm shape of the existing code**
-
-```bash
-grep -n "encodeCursor\|next_cursor" services/mission-control/src/pagination.ts
-sed -n '320,355p' services/mission-control/src/routes/tasks.ts
-head -30 services/mission-control/test/routes/tasks.test.ts
-```
-
-Confirm (already verified in prior review):
-- `encodeCursor` is `async (payload, secret) => Promise<string>`.
-- Each route does: `let nextCursor: string | null = null; if (hasMore) nextCursor = await encodeCursor({updatedAt, id, orgId}, secret); return c.json({tasks: rows..., next_cursor: nextCursor})`.
-- Test pattern: `import app from '../../src/index.ts'`, `import { createOrgFixture, createMemberFixture } from '../helpers/orgs.ts'`, `const TEST_ENV = { ...env, MC_ADMIN_TOKEN: '...' }`, then `app.fetch(new Request(url, init), TEST_ENV)`.
-
-- [ ] **Step 2: Write the failing test (new file)**
-
-Create `services/mission-control/test/routes/pagination-envelope.test.ts`:
+Create `services/mission-control/test/routes/events.test.ts`:
 
 ```ts
 /**
- * Verifies the {data, next_cursor} envelope and tip-cursor behavior the
- * Hermes MC plugin's pull loop depends on.
- *
- * Distinct from test/pagination.test.ts (which tests cursor primitives).
+ * Integration tests for GET /v1/events.
+ * Coverage: envelope shape, since (exclusive), kinds filter, agent role
+ * 403, owner allowed, cross-org isolation.
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
 import { env } from 'cloudflare:workers';
@@ -123,828 +100,440 @@ import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import app from '../../src/index.ts';
 import { createOrgFixture } from '../helpers/orgs.ts';
 
-const ADMIN_TOKEN = 'pagination-envelope-test-token';
+const ADMIN_TOKEN = 'events-route-test-token';
 const TEST_ENV = { ...env, MC_ADMIN_TOKEN: ADMIN_TOKEN } as any;
 
-let pat = '';
-let orgId = '';
-let projectId = '';
+let pat = '', orgId = '', projectId = '', agentKey = '';
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB as D1Database, inject('d1Migrations') as D1Migration[]);
 
-  const fix = await createOrgFixture(env.DB as D1Database, 'Envelope Test Org', 'env-test');
-  pat = fix.pat;
-  orgId = fix.orgId;
+  const fix = await createOrgFixture(env.DB as D1Database, 'Events Test', 'events-test');
+  pat = fix.pat; orgId = fix.orgId;
 
-  // Create one project to use across tests.
-  const r = await app.fetch(new Request('http://x/v1/projects', {
+  const p = await app.fetch(new Request('http://x/v1/projects', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'P', slug: 'p-env-test' }),
+    headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'P', slug: 'events-p' }),
   }), TEST_ENV);
-  const body = await r.json() as { project: { id: string } };
-  projectId = body.project.id;
+  projectId = (await p.json() as { project: { id: string } }).project.id;
 
-  // And one task so list endpoints have content.
+  const a = await app.fetch(new Request('http://x/v1/agents', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'a1', kind: 'hermes' }),
+  }), TEST_ENV);
+  agentKey = (await a.json() as { key: string }).key;
+
   await app.fetch(new Request('http://x/v1/tasks', {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ project_id: projectId, title: 't' }),
   }), TEST_ENV);
 });
 
-describe('pagination envelope + tip cursor', () => {
-  it('GET /v1/tasks returns {data, next_cursor} with non-null cursor even on the last page', async () => {
-    const res = await app.fetch(new Request('http://x/v1/tasks?limit=100', {
-      headers: { 'Authorization': `Bearer ${pat}` },
+describe('GET /v1/events', () => {
+  it('returns {events, next_cursor} envelope with rows after setup', async () => {
+    const res = await app.fetch(new Request('http://x/v1/events?since=0&limit=100', {
+      headers: { Authorization: `Bearer ${pat}` },
     }), TEST_ENV);
     expect(res.status).toBe(200);
-    const body = await res.json() as { data: unknown[]; next_cursor: string | null };
-    expect(body).toHaveProperty('data');
-    expect(Array.isArray(body.data)).toBe(true);
-    expect(body.data.length).toBe(1);
-    expect(body.next_cursor).not.toBeNull();
-    expect(body.next_cursor).not.toBe('');
-    expect((body as any).tasks).toBeUndefined();  // envelope normalized away
+    const body = await res.json() as { events: any[]; next_cursor: string | null };
+    expect(Array.isArray(body.events)).toBe(true);
+    expect(body.events.length).toBeGreaterThan(0);
+    expect('next_cursor' in body).toBe(true);
+    expect(body.events[0]).toHaveProperty('id');
+    expect(body.events[0]).toHaveProperty('resource_type');
+    expect(body.events[0]).toHaveProperty('kind');
   });
 
-  it('reusing the tip cursor returns empty data with a still-valid cursor', async () => {
-    const page1res = await app.fetch(new Request('http://x/v1/tasks?limit=100', {
-      headers: { 'Authorization': `Bearer ${pat}` },
-    }), TEST_ENV);
-    const page1 = await page1res.json() as any;
-
-    const page2res = await app.fetch(new Request(
-      `http://x/v1/tasks?limit=100&cursor=${encodeURIComponent(page1.next_cursor)}`,
-      { headers: { 'Authorization': `Bearer ${pat}` } },
-    ), TEST_ENV);
-    const page2 = await page2res.json() as any;
-    expect(page2.data.length).toBe(0);
-    expect(page2.next_cursor).not.toBeNull();
+  it('respects since as exclusive lower bound', async () => {
+    const all = await (await app.fetch(new Request('http://x/v1/events?since=0&limit=100', {
+      headers: { Authorization: `Bearer ${pat}` },
+    }), TEST_ENV)).json() as { events: any[] };
+    const mid = all.events[Math.floor(all.events.length / 2)].id;
+    const after = await (await app.fetch(new Request(`http://x/v1/events?since=${mid}&limit=100`, {
+      headers: { Authorization: `Bearer ${pat}` },
+    }), TEST_ENV)).json() as { events: any[] };
+    expect(after.events.every((e: any) => e.id > mid)).toBe(true);
   });
 
-  it.each([
-    '/v1/projects',
-    '/v1/agents',
-    '/v1/connectors',
-  ])('GET %s returns {data, next_cursor} envelope', async (path) => {
-    const res = await app.fetch(new Request(`http://x${path}?limit=100`, {
-      headers: { 'Authorization': `Bearer ${pat}` },
-    }), TEST_ENV);
-    expect(res.status).toBe(200);
-    const body = await res.json() as Record<string, unknown>;
-    expect(body).toHaveProperty('data');
-    expect(body).toHaveProperty('next_cursor');
-    expect(Array.isArray(body.data)).toBe(true);
-    expect(body.next_cursor).not.toBeNull();
+  it('filters by kinds (resource_type)', async () => {
+    const tasksOnly = await (await app.fetch(new Request('http://x/v1/events?since=0&kinds=task&limit=100', {
+      headers: { Authorization: `Bearer ${pat}` },
+    }), TEST_ENV)).json() as { events: any[] };
+    expect(tasksOnly.events.every((e: any) => e.resource_type === 'task')).toBe(true);
+    expect(tasksOnly.events.length).toBeGreaterThan(0);
   });
 
-  it('GET /v1/tasks/:id/comments returns {data, next_cursor} with tip cursor even on empty', async () => {
-    // Fresh task with zero comments.
-    const c = await app.fetch(new Request('http://x/v1/tasks', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${pat}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId, title: 't-no-comments' }),
+  it('rejects agent role with 403', async () => {
+    const res = await app.fetch(new Request('http://x/v1/events?since=0&limit=10', {
+      headers: { Authorization: `Bearer ${agentKey}` },
     }), TEST_ENV);
-    const task = await c.json() as { task: { id: string } };
+    expect(res.status).toBe(403);
+  });
 
-    const res = await app.fetch(new Request(`http://x/v1/tasks/${task.task.id}/comments?limit=100`, {
-      headers: { 'Authorization': `Bearer ${pat}` },
+  it('isolation: org B sees only its own events', async () => {
+    const orgB = await createOrgFixture(env.DB as D1Database, 'Org B', 'org-b');
+    const res = await app.fetch(new Request('http://x/v1/events?since=0&limit=100', {
+      headers: { Authorization: `Bearer ${orgB.pat}` },
     }), TEST_ENV);
-    expect(res.status).toBe(200);
-    const body = await res.json() as Record<string, unknown>;
-    expect(body).toHaveProperty('data');
-    expect(body.data).toEqual([]);
-    expect(body.next_cursor).not.toBeNull();
+    const body = await res.json() as { events: any[] };
+    expect(body.events.length).toBe(0);  // Org B has no activity yet.
   });
 });
 ```
 
-(If `POST /v1/projects` returns a different shape than `{project: {id}}`, check the route's response and adapt — the shape pattern follows tasks.ts.)
-
-- [ ] **Step 3: Run the new test — verify it fails**
+- [ ] **Step 3: Run — verify failures**
 
 ```bash
-cd services/mission-control && pnpm test -- test/routes/pagination-envelope.test.ts
+cd services/mission-control && pnpm test -- test/routes/events.test.ts
 ```
 
-Expected: all assertions fail — current envelopes use `tasks`/`projects`/`comments`/etc. keys and `next_cursor: null` on last page.
+Expected: 404s / route-not-found.
 
-- [ ] **Step 4: Add a shared envelope helper**
+- [ ] **Step 4: Extend the events repo with `list`**
 
-Append to `services/mission-control/src/pagination.ts` (next to the existing `encodeCursor` / `decodeCursor`):
+In `services/mission-control/src/db/repos/events.ts`, after `emit()`, add:
+
+```ts
+    /**
+     * List events for this org with id > since, optionally filtered by
+     * resource_type. Returns up to `limit` rows ordered by id ASC.
+     * events.id is monotonic per pool DB; v1 has one pool so a single
+     * integer `since` cursor suffices. `cursor` (opaque, currently the
+     * Number-as-string of the last seen id) is used for within-window
+     * paging when a single since-window has more than `limit` events.
+     */
+    async list(args: {
+      since: number;
+      kinds?: string[];
+      limit: number;
+      cursor?: string | null;
+    }): Promise<{ rows: any[]; nextCursorId: number | null }> {
+      const lower = args.cursor ? Number(args.cursor) : args.since;
+      const conditions = [
+        eq(events.orgId, ctx.orgId),
+        gt(events.id, lower),
+      ];
+      if (args.kinds && args.kinds.length > 0) {
+        conditions.push(inArray(events.resourceType, args.kinds));
+      }
+      const rows = await ctx.pool
+        .select()
+        .from(events)
+        .where(and(...conditions))
+        .orderBy(asc(events.id))
+        .limit(args.limit + 1);
+      const hasMore = rows.length > args.limit;
+      const trimmed = hasMore ? rows.slice(0, args.limit) : rows;
+      const nextCursorId = hasMore ? (trimmed[trimmed.length - 1] as any).id : null;
+      return { rows: trimmed, nextCursorId };
+    },
+```
+
+Add the missing imports at the top of the file: `import { and, asc, eq, gt, inArray } from 'drizzle-orm';` (extend the existing imports — don't duplicate).
+
+- [ ] **Step 5: Create the route handler**
+
+Create `services/mission-control/src/routes/events.ts`:
 
 ```ts
 /**
- * Build a paginated response envelope from a list of rows.
+ * GET /v1/events — change log read API.
  *
- * Rows are the result of `repo.list({ limit, cursor })`. The envelope key
- * is always `data` (per spec). `next_cursor` is always populated — when
- * the rows fit in one page, the cursor is a "tip" pointing at the last
- * row's position, so future polls resume cleanly. When `rows` is empty,
- * returns a zero-position tip cursor so first polls also have something
- * to save.
+ * Role: owner | admin | member | connector (NOT agent — events carry
+ * resource data across the whole org; per-row visibility would require
+ * joining events to underlying resources on every read; connector role's
+ * whole-org read is the right consumer surface).
  *
- * Callers must pre-trim `rows` to `limit` items (do NOT pass `limit + 1`
- * here — this helper just emits whatever you give it).
+ * Query:
+ *   since   integer event id, exclusive lower bound (default 0)
+ *   kinds   comma-separated resource_type (default all)
+ *   limit   1-200 (default 100)
+ *   cursor  opaque; when present overrides `since` for within-window paging
+ *
+ * Response: { events: [...], next_cursor: <opaque>|null }
  */
-export async function paginated<T extends { id: string; updatedAt: number }>(
-  rows: T[],
-  orgId: string,
-  secret: string,
-): Promise<{ data: T[]; next_cursor: string }> {
-  const cursorRow = rows.length > 0
-    ? { updatedAt: rows[rows.length - 1]!.updatedAt, id: rows[rows.length - 1]!.id }
-    : { updatedAt: 0, id: '' };
-  const next_cursor = await encodeCursor(
-    { updatedAt: cursorRow.updatedAt, id: cursorRow.id, orgId },
-    secret,
-  );
-  return { data: rows, next_cursor };
-}
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { db } from '../db/repos/index.ts';
+import { requireAnyRole } from '../auth/middleware.ts';
+import { errorResponse } from '../errors.ts';
+import { serializeTimestamps } from '../db/helpers.ts';
+import type { AppEnv } from '../types.ts';
+
+const eventsRouter = new Hono<AppEnv>();
+
+const VALID_KINDS = ['task', 'project', 'agent', 'connector', 'comment', 'external_ref'] as const;
+
+const querySchema = z.object({
+  since: z.coerce.number().int().nonnegative().default(0),
+  kinds: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  cursor: z.string().optional(),
+});
+
+eventsRouter.get(
+  '/',
+  requireAnyRole('owner', 'admin', 'member', 'connector'),
+  async (c) => {
+    try {
+      const ctx = c.get('auth');
+      const parsed = querySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams));
+      if (!parsed.success) {
+        return c.json({ error: { code: 'request.invalid', message: parsed.error.message } }, 400);
+      }
+      const { since, kinds, limit, cursor } = parsed.data;
+
+      let kindsList: string[] | undefined;
+      if (kinds) {
+        kindsList = kinds.split(',').map(s => s.trim()).filter(Boolean);
+        for (const k of kindsList) {
+          if (!(VALID_KINDS as readonly string[]).includes(k)) {
+            return c.json({
+              error: {
+                code: 'request.invalid',
+                message: `invalid kind '${k}'; valid: ${VALID_KINDS.join(',')}`,
+              },
+            }, 400);
+          }
+        }
+      }
+
+      const { rows, nextCursorId } = await db.events(ctx).list({
+        since, kinds: kindsList, limit, cursor: cursor ?? null,
+      });
+
+      return c.json({
+        events: rows.map(serializeTimestamps),
+        next_cursor: nextCursorId !== null ? String(nextCursorId) : null,
+      });
+    } catch (e) {
+      return errorResponse(c, e);
+    }
+  },
+);
+
+export default eventsRouter;
 ```
 
-- [ ] **Step 5: Update each list route to use the helper**
+Verify the imports match real names: `requireAnyRole` is at `src/auth/middleware.ts`; `errorResponse` at `src/errors.ts`; `serializeTimestamps` at `src/db/helpers.ts`; `AppEnv` is whatever the existing routes import as their Hono env type. Adapt by reading one existing route (e.g. `projects.ts`).
 
-Pattern, applied to every list handler in `src/routes/*.ts`. The handler keeps requesting `limit + 1` rows so it can detect "has more", but for `next_cursor` it just calls the helper unconditionally with the trimmed `rows`. The old `let nextCursor: string | null = null; if (hasMore) ...` block goes away.
+- [ ] **Step 6: Mount the router**
 
-Before:
+Edit `services/mission-control/src/index.ts`. Find existing route mounts (`app.route('/v1/X', xRouter)`) and add:
+
 ```ts
-let rows = await db.tasks(ctx).list({ /* ... */ limit: limit + 1, cursor });
-const hasMore = rows.length > limit;
-if (hasMore) rows = rows.slice(0, limit);
-
-let nextCursor: string | null = null;
-if (hasMore) {
-  const last = rows[rows.length - 1]!;
-  nextCursor = await encodeCursor({ updatedAt: last.updatedAt, id: last.id, orgId: ctx.orgId }, secret);
-}
-return c.json({ tasks: rows.map(serializeTimestamps), next_cursor: nextCursor });
-```
-
-After:
-```ts
-import { paginated } from '../pagination.ts';
+import eventsRouter from './routes/events.ts';
 // ...
-let rows = await db.tasks(ctx).list({ /* ... */ limit: limit + 1, cursor });
-if (rows.length > limit) rows = rows.slice(0, limit);
-
-return c.json(await paginated(rows.map(serializeTimestamps), ctx.orgId, secret));
+app.route('/v1/events', eventsRouter);
 ```
 
-Apply to: `tasks.ts`, `projects.ts`, `agents.ts`, `connectors.ts`, `comments.ts`, `external-refs.ts`. For each file, also re-check that the response envelope key is now uniformly `data` (no `tasks:` / `projects:` / `comments:` / etc.). Note for `routes/comments.ts`: the helper takes `secret` — the same `BETTER_AUTH_SECRET ?? ''` the route already passes to `encodeCursor`.
-
-If `serializeTimestamps` strips the `updatedAt` numeric (replacing it with an ISO string), keep a parallel `rowsForCursor` reference with the numeric value, or split: compute the cursor BEFORE serialization (since the helper reads `rows[last].updatedAt`). Concrete pattern:
-
-```ts
-const trimmed = rows.length > limit ? rows.slice(0, limit) : rows;
-const envelope = await paginated(trimmed, ctx.orgId, secret);
-return c.json({ data: envelope.data.map(serializeTimestamps), next_cursor: envelope.next_cursor });
-```
-
-- [ ] **Step 6: Update existing tests that assert on the old envelope keys**
+- [ ] **Step 7: Run — verify pass**
 
 ```bash
-cd services/mission-control && grep -nE "body\.(tasks|projects|comments|agents|connectors|external_refs)\b" test/ | head -50
+cd services/mission-control && pnpm test -- test/routes/events.test.ts
 ```
 
-For each hit where the access is on a parsed-JSON response (e.g. `body.tasks.length`), rename to `body.data.length`. Don't change repo-internal references (`db.tasks(ctx)...`) — those stay. Be careful in `test/isolation.test.ts` and `test/cascade.test.ts` — both touch list endpoints.
+Expected: 5/5 pass.
 
-- [ ] **Step 7: Update the spec prose**
-
-Edit `services/mission-control/docs/specs/2026-05-22-master-api-design.md` pagination section. Replace "`null` next_cursor means end of results" with: "`next_cursor` is always populated. An empty `data` array means no items past the cursor — callers can re-save the cursor and re-poll later to pick up new items."
-
-(The spec already documents the `{data, ...}` envelope correctly — no change needed there.)
-
-- [ ] **Step 8: Run the full MC suite — verify everything green**
+- [ ] **Step 8: Run the full MC suite**
 
 ```bash
 cd services/mission-control && pnpm test
 ```
 
-Expected: ~456 + new pagination tests, all green. If any pre-existing test fails because it still references the old envelope key, fix it in this commit.
+Expected: existing suite + new tests, all green.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add services/mission-control/src/pagination.ts \
-        services/mission-control/src/routes/ \
-        services/mission-control/test/routes/ \
-        services/mission-control/test/isolation.test.ts \
-        services/mission-control/test/cascade.test.ts \
-        services/mission-control/docs/specs/2026-05-22-master-api-design.md
-git commit -m "feat(mc): {data, next_cursor} envelope + tip cursor on last page
+git add services/mission-control/src/db/repos/events.ts \
+        services/mission-control/src/routes/events.ts \
+        services/mission-control/src/index.ts \
+        services/mission-control/test/routes/events.test.ts
+git commit -m "feat(mc): GET /v1/events change-log read endpoint
 
-Brings the implementation back into line with its own spec (which has
-documented {data, next_cursor} since rev 1). Two related changes:
+First consumer is the Hermes mission-control plugin. Endpoint promoted
+from v1.1 to v1 per the spec change in 841f6e8.
 
-- Every list response is wrapped via paginated() helper so the envelope
-  key is uniformly 'data' (was: 'tasks'/'projects'/'comments'/etc).
-- next_cursor is always populated — on the last page it's a tip cursor
-  encoding the last row's position (or position zero if no rows). Lets
-  pollers save the cursor unconditionally for resume-from-here semantics.
-
-Required by the upcoming Hermes MC plugin's pull-loop comment paging."
+- Adds eventsRepo.list({since, kinds?, limit, cursor?}) — single-pool
+  integer cursor (events.id monotonic per pool).
+- Adds GET /v1/events route — accepts since/kinds/limit/cursor; returns
+  {events, next_cursor}. Rejects agent role with 403.
+- Tests cover envelope, since semantics, kinds filter, role rejection,
+  cross-org isolation."
 ```
 
 ---
 
-### Task 3: SKIPPED — folded into the plugin's push.py
-
-**Why:** `services/hermes/_source/` is gitignored (it's a separately-cloned upstream `hermes-agent` repo pinned by build scripts). Adding a function to that tree means submitting a real upstream PR and waiting for the stack's pinned commit to bump — out of scope for this plugin's first ship.
-
-Per the spec's documented fallback path: the plugin's push reactor runs the raw SQL directly against `kanban_db.connect(board=...)`'s `sqlite3.Connection`. Specifically, in `services/hermes/plugins/mission-control/push.py` (Task 12), the events-tail query is:
-
-```python
-rows = conn.execute(
-    "SELECT id, task_id, kind, payload, run_id, created_at FROM task_events "
-    "WHERE id > ? ORDER BY id ASC LIMIT ?",
-    (last_id, limit),
-).fetchall()
-events = [Event(...same shape as kanban_db.Event...) for r in rows]
-```
-
-The Event dataclass (`id, task_id, kind, payload, created_at, run_id`) is re-used from `hermes_cli.kanban_db.Event` via `from hermes_cli.kanban_db import Event`. The JSON payload-decode follows the same `try/except → None` pattern as `kanban_db.list_events`.
-
-This task is closed — no action required. Tasks renumber down by one in spirit; for traceability the existing numbering stands.
-
-**Below tasks (4+) reference "Task 3" only in the prerequisites mention; that reference becomes a no-op.**
-
-(Original Step 1-6 content omitted; the helper-addition path is deferred to a future upstream PR.)
-
-**Original signatures preserved here for documentation:**
-
-```python
-# In services/hermes/_source/hermes_cli/kanban_db.py (DEFERRED — upstream PR):
-def list_events_since(conn: sqlite3.Connection, last_id: int, limit: int = 100) -> list[Event]:
-    """Return task_events rows with id > last_id, in strict id-ascending order."""
-    # body mirrors list_events with WHERE id > ? ORDER BY id ASC LIMIT ?
-```
-
----
-
-## Phase 1 — Plugin scaffold
-
-### Task 4: Create plugin skeleton
+### Task 3: Idempotency-key regex validation
 
 **Files:**
-- Create: `services/hermes/plugins/mission-control/plugin.yaml`
-- Create: `services/hermes/plugins/mission-control/__init__.py` (stub)
-- Create: `services/hermes/plugins/mission-control/README.md` (placeholder)
-- Create: `services/hermes/plugins/mission-control/pyproject.toml`
+- Modify: `services/mission-control/src/routes/tasks.ts` (the `idempotency_key` Zod schema)
+- Modify: `services/mission-control/src/routes/external-refs.ts` (if it accepts `idempotency_key` in body)
+- Test: extend `services/mission-control/test/routes/tasks.test.ts`
 
-- [ ] **Step 1: Verify parent dir exists**
-
-```bash
-ls services/hermes/plugins/
-```
-
-Expected: `agents-observe` is the only existing entry. Confirm parent dir exists.
-
-- [ ] **Step 2: Create plugin.yaml**
+- [ ] **Step 1: Find current validation**
 
 ```bash
-mkdir -p services/hermes/plugins/mission-control
+grep -n "idempotency_key" services/mission-control/src/routes/tasks.ts services/mission-control/src/routes/external-refs.ts
 ```
 
-Then write `services/hermes/plugins/mission-control/plugin.yaml`:
+Current: `idempotency_key: z.string().max(200).optional()` (no regex).
 
-```yaml
-name: mission-control
-version: "0.1.0"
-description: "Bidirectional sync between this Hermes VM and a MissionControl deployment. Pulls assigned tasks into a dedicated local kanban board, mirrors status + comments back, auto-unblocks tasks when a human comments via MC."
-author: hermes-stack
-kind: standalone
-requires_env:
-  - HERMES_MC_URL
-provides_tools:
-  - mc_promote_task
+- [ ] **Step 2: Write failing tests**
+
+Append to `test/routes/tasks.test.ts`:
+
+```ts
+describe('POST /v1/tasks — idempotency_key regex validation', () => {
+  it.each([
+    ['no-prefix-no-colon', 400],
+    [':no-source-prefix', 400],
+    ['UpperCaseSource:bad', 400],
+    ['hermes:t_valid_id_123', 201],
+    ['notion:ws_abc:page_xyz:v3', 201],
+    ['mc:t_xyz', 201],
+  ])('idempotency_key %s → %d', async (key, expectedStatus) => {
+    const res = await app.fetch(new Request('http://x/v1/tasks', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId, title: `regex test ${key}`, idempotency_key: key }),
+    }), TEST_ENV);
+    expect(res.status).toBe(expectedStatus);
+  });
+});
 ```
 
-- [ ] **Step 3: Stub `__init__.py`**
+- [ ] **Step 3: Run — verify failures**
 
-Write `services/hermes/plugins/mission-control/__init__.py`:
+Invalid-key cases will return 201 because regex isn't enforced yet.
 
-```python
-"""mission-control plugin entry point (stub).
+- [ ] **Step 4: Add the regex**
 
-Real implementation lands in later tasks. This stub exists so the
-plugin loader recognises the directory and the pytest harness can
-import the package.
-"""
-from __future__ import annotations
+In `src/routes/tasks.ts`:
 
+```ts
+const IDEMPOTENCY_KEY_RE = /^[a-z][a-z0-9_-]{0,31}:.{1,200}$/;
 
-def register(ctx) -> None:  # noqa: D401
-    """Plugin loader entry. Filled in in Task 20."""
-    return None
+// In the body schema, replace:
+idempotency_key: z.string().regex(IDEMPOTENCY_KEY_RE, {
+  message: "idempotency_key must match <source_prefix>:<payload> where source_prefix is 1-32 lowercase chars (a-z, 0-9, _, -) starting with a letter",
+}).optional(),
 ```
 
-- [ ] **Step 4: Stub README**
+Same in `external-refs.ts` if applicable.
 
-Write `services/hermes/plugins/mission-control/README.md`:
+- [ ] **Step 5: Run — verify pass**
 
-```markdown
-# mission-control (Hermes plugin)
+All 6 cases pass.
 
-Bidirectional sync between this Hermes VM and a MissionControl deployment.
+- [ ] **Step 6: Run full MC suite**
 
-See `docs/specs/2026-05-23-mission-control-plugin-design.md` (in the repo
-root) for the design. Operator-facing docs land in Task 26.
-```
+If any pre-existing test passes an invalid key (e.g. `"simple-string"`), update it to the prefix format.
 
-- [ ] **Step 5: pyproject.toml**
-
-Write `services/hermes/plugins/mission-control/pyproject.toml`:
-
-```toml
-[project]
-name = "hermes-plugin-mission-control"
-version = "0.1.0"
-description = "Hermes ↔ MissionControl bidirectional sync plugin"
-requires-python = ">=3.11"
-
-[project.optional-dependencies]
-dev = [
-  "pytest>=8.0",
-  "pytest-asyncio>=0.23",
-  "respx>=0.21",
-  "httpx>=0.27",
-]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-markers = [
-  "integration: requires a running MC deployment (skipped unless MC_INTEGRATION_TEST_URL set)",
-]
-```
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add services/hermes/plugins/mission-control/
-git commit -m "feat(mc plugin): scaffold
+git add services/mission-control/src/routes/tasks.ts \
+        services/mission-control/src/routes/external-refs.ts \
+        services/mission-control/test/routes/tasks.test.ts
+git commit -m "feat(mc): idempotency_key format validation
 
-plugin.yaml + stub register() + pyproject + placeholder README.
-Real wiring lands in later tasks."
+Regex ^[a-z][a-z0-9_-]{0,31}:.{1,200}$ — catches the common footgun
+of passing a raw external id without source-kind prefix. Returns
+400 on mismatch."
 ```
 
 ---
 
-### Task 5: Test harness (conftest + first passing test)
+## Phases 1-10 — see part 2
 
-**Files:**
-- Create: `services/hermes/plugins/mission-control/tests/__init__.py`
-- Create: `services/hermes/plugins/mission-control/tests/conftest.py`
-- Create: `services/hermes/plugins/mission-control/tests/test_scaffold.py`
+Tasks 4-23 follow the patterns documented in `docs/plans/2026-05-23-mission-control-plugin-part2.md` with the following **deltas vs. that file**:
 
-- [ ] **Step 1: Create empty __init__.py**
+### Δ vs part-2 Task 7 (`links_db.py`)
+- Drop the `last_comment_cursor` column from `mc_links`.
+- Replace `mc_pull_cursor` table with `mc_cursors` table (keys: `events`, `kanban_events`).
+- Drop the `set_link_comment_cursor` helper.
+- Rename `get_pull_cursor` / `set_pull_cursor` → `get_cursor` / `set_cursor`.
+- Tests for cursor roundtrip use the new key names.
 
-```bash
-mkdir -p services/hermes/plugins/mission-control/tests
-touch services/hermes/plugins/mission-control/tests/__init__.py
-```
+### Δ vs part-2 Task 9 (`client.py`)
+- Add `async events_list(connector_key, since, kinds=None, limit=100, cursor=None) -> dict` returning `{"events": [...], "next_cursor": str|None}`.
+- `task_comments_list` no longer used by the hot path (keep the method for one-shot reads via promote/admin paths, but its tests can be lighter).
+- New respx tests for `events_list`: success, since/kinds/cursor passthrough, 401 (AuthFailed), 403 (AuthFailed for agent key).
 
-- [ ] **Step 2: conftest.py**
+### Δ vs part-2 Task 10 (`apply.py`)
+The summary-style behavior in part-2 Task 10 is replaced by the event-kind dispatch from spec rev 4 §"Local kanban ↔ MC data model → Status mapping" event table. One entry point `async def handle_one_event(ev, env, auth, client)` dispatches on `ev['kind']`. The `_apply_with_log` helper (pre/post-MAX range capture) is unchanged in pattern.
 
-Write `services/hermes/plugins/mission-control/tests/conftest.py`:
+Per-kind handlers:
+- `task.created`: if `ev.payload.task.agent_id == auth.agent_id` and no link → create local task + link + external_ref.
+- `task.assigned`: if `ev.payload.to == auth.agent_id` and no link → `client.tasks_get(...)` then create-flow.
+- `task.status_changed`: if link → status_map.mc_to_local() → appropriate kanban_db helper → record apply.
+- `task.deleted`: if link → archive_task + last_terminal_state.
+- `comment.created`: if link AND not already in mc_comment_links → add_comment + insert_comment_link + (if blocked) auto-unblock.
+- Other kinds: log DEBUG + skip.
 
-```python
-"""Test harness for the mission-control plugin.
+Tests: one happy-path test per kind + the same dedup/auto-unblock tests as part-2.
 
-Two responsibilities:
+### Δ vs part-2 Task 11 (`pull.py`)
+Replace the "two-phase tasks-then-comments" pull from part-2 with the single-loop events pull from spec rev 4 §"Pull loop". One cursor (`'events'`), one endpoint (`client.events_list`), one dispatch (`apply.handle_one_event`). Drain within-window pagination via `next_cursor`; advance `since` for subsequent poll cycles. Purge mc_apply_log >24h on idle.
 
-1. Make ``hermes_cli.*`` / ``gateway.*`` imports work without installing
-   them — the plugin imports from the vendored hermes source tree at
-   ``services/hermes/_source/``. We prepend that path to ``sys.path``
-   at session start.
+Tests: cursor advance, kind dispatch, AuthFailed propagation, 5xx backoff, drain-window-then-advance.
 
-2. Scrub the ``_HERMES_GATEWAY`` and ``HERMES_KANBAN_TASK`` env markers
-   from every test. The former is set at module-import of
-   ``gateway.run`` (so any test that imports gateway code would falsely
-   look like the gateway). The latter is set by the dispatcher when
-   spawning workers.
-"""
-from __future__ import annotations
+### Δ vs part-2 Task 14 (`registrar.py`)
+Add a final step: `client.events_list(connector_key, since=0, limit=1)` to get current head id; `links_db.set_cursor(ldb, 'events', head_id)`. Empty stream → cursor stays 0.
 
-import sys
-from pathlib import Path
+Test: cursor initialization happy path + empty-stream path.
 
-# Plugin lives at <repo>/services/hermes/plugins/mission-control/.
-# Vendored hermes source lives at <repo>/services/hermes/_source/.
-HERMES_SOURCE = Path(__file__).resolve().parents[2] / "_source"
-if str(HERMES_SOURCE) not in sys.path:
-    sys.path.insert(0, str(HERMES_SOURCE))
+### Δ vs part-2 Task 16 (`cli.py`)
+- `hermes mc status` includes `events_cursor` field.
+- `hermes mc test` calls `client.events_list(connector_key, since=0, limit=1)` (not `tasks_list`).
 
-import pytest
+### Δ vs part-2 Task 18 (`dashboard/plugin_api.py`)
+Response shape includes `events_cursor: int` (the MC-side cursor). Remove `last_comment_cursor` references.
 
+### Δ vs part-2 Tasks 19-20 (`build.sh`)
+Env var list in the managed block omits `bootstrap_since` and `conflict_slop_ms` (no longer needed in the events architecture). Include only `HERMES_MC_URL`, `HERMES_MC_AGENT_NAME`, `HERMES_MC_BOARD`, `HERMES_MC_POLL_INTERVAL`, `HERMES_MC_DEFAULT_PROJECT_SLUG`, `HERMES_MC_DEBUG`, plus `HERMES_MC_USER_PAT` conditionally.
 
-@pytest.fixture(autouse=True)
-def _scrub_runtime_markers(monkeypatch):
-    monkeypatch.delenv("_HERMES_GATEWAY", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
-```
+### Δ vs part-2 Task 23 (integration tests)
+Scenarios re-stated against the events stream:
+1. Operator POSTs task → events delivers `task.created` → local row appears.
+2. Local dispatcher `ready → running` → MC PATCH lands; next pull no-ops (echo via mc_apply_log).
+3. Operator POSTs comment → events delivers `comment.created` → kanban comment appears.
+4. Operator POSTs comment on `blocked` task → local auto-unblocks.
+5. Agent (worker) calls `mc_promote_task` → MC POST → link inserted.
+6. MC `cancelled` → events delivers `task.deleted` (or `task.status_changed` to `cancelled`) → local archived.
+7. Worker `kanban_comment` → push reactor mirrors to MC → next pull no-ops (dedup).
 
-- [ ] **Step 3: Write a smoke test**
-
-Write `services/hermes/plugins/mission-control/tests/test_scaffold.py`:
-
-```python
-"""Smoke test for the test harness — imports work end-to-end."""
-from __future__ import annotations
-
-
-def test_plugin_package_imports():
-    import mission_control  # noqa: F401 — the plugin's package name
-
-
-def test_hermes_source_imports():
-    """conftest.py wires sys.path so hermes_cli is importable."""
-    from hermes_cli import kanban_db  # noqa: F401
-
-
-def test_register_is_callable():
-    import mission_control as mc
-    assert callable(mc.register)
-    # Stub returns None; later we'll add real behaviour.
-    assert mc.register(ctx=None) is None
-```
-
-The package name is `mission_control` (Python identifier — underscore) but the directory is `mission-control` (Hermes convention — hyphen). Hermes' plugin loader handles the rename via its dynamic-module-name registration. For our pytest harness, we need either (a) to teach pytest about the rename, or (b) symlink the directory at test time.
-
-Actually the simplest: use the `mission-control` directory name and add a tiny `tests/conftest.py` step that registers the plugin as `mission_control` via importlib. Update conftest.py to do so:
-
-Append to `conftest.py`:
-
-```python
-import importlib.util
-
-PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _register_plugin_as_package():
-    """Make ``import mission_control`` work in tests despite the hyphenated
-    directory name. The plugin's directory is ``mission-control/`` per
-    Hermes convention; Python module names can't contain hyphens, so we
-    install a synthetic ``mission_control`` package pointing at it."""
-    if "mission_control" in sys.modules:
-        return
-    spec = importlib.util.spec_from_file_location(
-        "mission_control",
-        PLUGIN_ROOT / "__init__.py",
-        submodule_search_locations=[str(PLUGIN_ROOT)],
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError("could not load mission-control plugin package")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["mission_control"] = mod
-    spec.loader.exec_module(mod)
-
-
-_register_plugin_as_package()
-```
-
-- [ ] **Step 4: Install dev deps + run the smoke test**
-
-Ask the user to install dev deps so the plugin's tests can run (no end-running pmg):
-
-```
-Please run: cd services/hermes/plugins/mission-control && pip install -e ".[dev]"
-```
-
-(Document this in the README for new contributors; the install step is one-time per plugin checkout.)
-
-Once installed, run:
-
-```bash
-cd services/hermes/plugins/mission-control && pytest tests/test_scaffold.py -v
-```
-
-Expected: 3/3 pass.
-
-**If `test_register_is_callable` passes but a later test like `test_status_map.py` fails with `ModuleNotFoundError: No module named 'mission_control.status_map'`**, the importlib synthetic-package trick isn't resolving submodules. Fallback path: instead of the importlib trick, add a symlink `tests/mission_control -> ..` (i.e. the parent directory) so Python sees a normal `mission_control` package by name. On Windows that's a fixture: create the symlink via `subprocess.run(["cmd", "/c", "mklink", "/D", ...])` once in conftest. Use the simpler symlink approach immediately if the importlib trick proves brittle in your environment.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add services/hermes/plugins/mission-control/tests/
-git commit -m "feat(mc plugin): test harness (conftest + scaffold tests)
-
-conftest.py prepends services/hermes/_source/ to sys.path so the
-plugin can import hermes_cli/gateway modules, scrubs the
-_HERMES_GATEWAY and HERMES_KANBAN_TASK env markers per test, and
-registers the hyphenated plugin dir as the 'mission_control' Python
-package."
-```
+All other part-2 task bodies (Tasks 4-6, 8, 12-13, 15, 17, 21-22) apply unchanged.
 
 ---
 
-## Phase 2 — Foundation modules
+## Phase 11 — Wrap-up
 
-### Task 6: `status_map.py`
+After Task 23:
 
-**Files:**
-- Create: `services/hermes/plugins/mission-control/status_map.py`
-- Test: `services/hermes/plugins/mission-control/tests/test_status_map.py`
-
-- [ ] **Step 1: Write the failing test**
-
-Write `tests/test_status_map.py`:
-
-```python
-"""Tests for the local↔MC status mapping (single source of truth)."""
-from __future__ import annotations
-
-import pytest
-
-from mission_control import status_map as sm
-
-
-# ── local → MC ────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("local,expected_mc,expected_meta_keys", [
-    ("ready",     "ready",       []),
-    ("running",   "in_progress", []),
-    ("blocked",   "blocked",     ["block_reason"]),
-    ("review",    "in_progress", ["review_pending"]),
-    ("scheduled", "ready",       ["scheduled_for"]),
-    ("archived",  "cancelled",   []),
-])
-def test_local_to_mc_basic(local, expected_mc, expected_meta_keys):
-    mc_status, meta = sm.local_to_mc(local, terminal_state=None, kanban_task={
-        "status": local,
-        "result": None,
-        "metadata": {"block_reason": "x", "scheduled_for": "2026-01-01T00:00:00Z"},
-    })
-    assert mc_status == expected_mc
-    for k in expected_meta_keys:
-        assert k in meta
-
-def test_local_to_mc_done_uses_link_terminal_state():
-    # done + terminal_state='completed' → MC completed
-    mc_status, _ = sm.local_to_mc("done", terminal_state="completed", kanban_task={
-        "status": "done", "result": "ok", "metadata": {},
-    })
-    assert mc_status == "completed"
-
-    # done + terminal_state='failed' → MC failed
-    mc_status, meta = sm.local_to_mc("done", terminal_state="failed", kanban_task={
-        "status": "done", "result": "boom", "metadata": {},
-    })
-    assert mc_status == "failed"
-    assert "failure_reason" in meta
-
-def test_local_to_mc_skips_unsync_states():
-    # triage / pre-promotion → no push
-    assert sm.local_to_mc("triage", terminal_state=None, kanban_task={"status": "triage"})[0] is None
-
-
-# ── MC → local ────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("mc_status,expected_action", [
-    ("ready",       "create_or_noop"),
-    ("in_progress", "noop"),
-    ("blocked",     "block"),
-    ("completed",   "complete_success"),
-    ("failed",      "complete_failure"),
-    ("cancelled",   "archive"),
-    ("pending",     "skip"),
-])
-def test_mc_to_local_action(mc_status, expected_action):
-    action, _ = sm.mc_to_local({"status": mc_status, "metadata": {}})
-    assert action == expected_action
-
-
-# ── kanban event-kind → MC PATCH ──────────────────────────────────────
-
-@pytest.mark.parametrize("event_kind,run_outcome,expected_mc", [
-    ("claimed",                 None,        "in_progress"),
-    ("blocked",                 None,        "blocked"),
-    ("unblocked",               None,        "ready"),
-    ("archived",                None,        "cancelled"),
-    ("scheduled",               None,        "ready"),
-    ("completed",               "completed", "completed"),
-    ("completed",               "crashed",   "failed"),
-    ("completed",               "timed_out", "failed"),
-    ("completed",               "spawn_failed", "failed"),
-    ("completed",               "gave_up",   "failed"),
-    ("completed",               "reclaimed", "failed"),
-    ("completed",               "blocked",   "failed"),
-    ("completion_blocked_hallucination", None, "failed"),
-])
-def test_event_kind_to_patch(event_kind, run_outcome, expected_mc):
-    result = sm.event_kind_to_patch(event_kind, run_outcome=run_outcome, event_payload={})
-    assert result is not None
-    assert result["status"] == expected_mc
-
-def test_event_kind_to_patch_returns_none_for_unhandled():
-    # assigned/promoted/spawned/commented → no status PATCH
-    for kind in ("assigned", "promoted", "spawned", "commented"):
-        assert sm.event_kind_to_patch(kind, run_outcome=None, event_payload={}) is None
-```
-
-- [ ] **Step 2: Run — verify failure**
-
-```bash
-cd services/hermes/plugins/mission-control && pytest tests/test_status_map.py -v
-```
-
-Expected: `ModuleNotFoundError: No module named 'mission_control.status_map'`.
-
-- [ ] **Step 3: Implement**
-
-Write `services/hermes/plugins/mission-control/status_map.py`:
-
-```python
-"""Local kanban ↔ MissionControl status mapping. Single source of truth.
-
-This module is pure functions — no I/O, no globals (beyond constants).
-All state-shape decisions live here so callers in apply.py / push.py
-can stay narrowly focused on coordination.
-"""
-from __future__ import annotations
-
-from typing import Any, Literal, Optional
-
-LocalStatus = str       # 'triage'|'todo'|'scheduled'|'ready'|'running'|'blocked'|'review'|'done'|'archived'
-McStatus = str          # 'pending'|'ready'|'in_progress'|'blocked'|'completed'|'failed'|'cancelled'
-TerminalState = Literal["completed", "failed", "cancelled"]
-McAction = Literal["create_or_noop", "noop", "block", "complete_success", "complete_failure", "archive", "skip"]
-
-
-# ── local → MC ────────────────────────────────────────────────────────
-
-def local_to_mc(
-    local_status: LocalStatus,
-    *,
-    terminal_state: Optional[TerminalState],
-    kanban_task: dict[str, Any],
-) -> tuple[Optional[McStatus], dict[str, Any]]:
-    """Map a local kanban task's state to (mc_status, metadata_patch).
-
-    Returns (None, {}) when the state shouldn't be pushed at all (e.g.
-    triage, or todo with unfulfilled parents).
-
-    ``terminal_state`` is the link's recorded `last_terminal_state`
-    column — the source of truth for done-success vs done-failure (the
-    local `result` string is too fragile to parse).
-    """
-    md = kanban_task.get("metadata") or {}
-
-    if local_status in ("triage",):
-        return None, {}
-    if local_status == "todo":
-        # We don't track parent-readiness here; caller passes only ready-to-push tasks.
-        return "pending", {}
-    if local_status == "ready":
-        return "ready", {}
-    if local_status == "scheduled":
-        return "ready", {"scheduled_for": md.get("scheduled_for")}
-    if local_status == "running":
-        return "in_progress", {}
-    if local_status == "blocked":
-        return "blocked", {"block_reason": md.get("block_reason")}
-    if local_status == "review":
-        return "in_progress", {"review_pending": True}
-    if local_status == "archived":
-        return "cancelled", _meta_keep(md, ["cancellation_reason"])
-    if local_status == "done":
-        if terminal_state == "failed":
-            return "failed", {"failure_reason": _failure_reason_from(kanban_task)}
-        # default to completed (terminal_state='completed' or None)
-        return "completed", {}
-    return None, {}
-
-
-def _failure_reason_from(task: dict[str, Any]) -> str:
-    md = task.get("metadata") or {}
-    return (
-        md.get("mc_failure_reason")
-        or task.get("last_failure_error")
-        or task.get("result")
-        or "unknown"
-    )
-
-
-def _meta_keep(md: dict[str, Any], keys: list[str]) -> dict[str, Any]:
-    return {k: md[k] for k in keys if k in md and md[k] is not None}
-
-
-# ── MC → local ────────────────────────────────────────────────────────
-
-def mc_to_local(mc_task: dict[str, Any]) -> tuple[McAction, dict[str, Any]]:
-    """Decide what local-side action to take for an incoming MC task state.
-
-    Returns (action, extras) where ``extras`` carries kwargs the caller
-    will forward to the kanban_db helper (e.g. ``reason`` for block,
-    ``result`` for complete).
-    """
-    s = mc_task["status"]
-    md = mc_task.get("metadata") or {}
-    if s == "pending":
-        return "skip", {}
-    if s == "ready":
-        return "create_or_noop", {}
-    if s == "in_progress":
-        return "noop", {}
-    if s == "blocked":
-        return "block", {"reason": md.get("block_reason") or "blocked via mc"}
-    if s == "completed":
-        return "complete_success", {
-            "result": "completed via mc",
-            "summary": "completed via mc",
-            "metadata": {"mc_terminal": "completed"},
-        }
-    if s == "failed":
-        reason = md.get("failure_reason") or "unknown"
-        return "complete_failure", {
-            "result": f"failed via mc: {reason}",
-            "summary": f"failed via mc: {reason}",
-            "metadata": {"mc_terminal": "failed", "mc_failure_reason": reason},
-        }
-    if s == "cancelled":
-        return "archive", {}
-    # Unknown MC status — log + skip upstream
-    return "skip", {}
-
-
-# ── kanban event-kind → MC PATCH body ─────────────────────────────────
-
-# task_runs.outcome enum from kanban_db: completed | blocked | crashed
-# | timed_out | spawn_failed | gave_up | reclaimed | NULL. Only
-# 'completed' maps to MC success; everything else is a failure.
-_SUCCESSFUL_OUTCOMES = {"completed"}
-
-
-def event_kind_to_patch(
-    kind: str,
-    *,
-    run_outcome: Optional[str],
-    event_payload: dict[str, Any],
-) -> Optional[dict[str, Any]]:
-    """Translate a kanban task_events kind into an MC PATCH body.
-
-    Returns None when the event should not produce a PATCH (e.g.
-    'commented' is handled by the comment-push path, not the status
-    path; 'assigned' / 'promoted' / 'spawned' are local-only details).
-    """
-    if kind == "claimed":
-        return {"status": "in_progress"}
-    if kind == "blocked":
-        return {"status": "blocked", "metadata": {"block_reason": event_payload.get("reason")}}
-    if kind == "unblocked":
-        return {"status": "ready"}
-    if kind == "archived":
-        return {"status": "cancelled"}
-    if kind == "scheduled":
-        return {"status": "ready", "metadata": {"scheduled_for": event_payload.get("scheduled_for")}}
-    if kind == "completed":
-        if run_outcome in _SUCCESSFUL_OUTCOMES:
-            return {"status": "completed"}
-        return {
-            "status": "failed",
-            "metadata": {"failure_reason": event_payload.get("error") or f"kanban outcome: {run_outcome}"},
-        }
-    if kind == "completion_blocked_hallucination":
-        return {
-            "status": "failed",
-            "metadata": {"failure_reason": "hallucinated subtask references; see kanban logs"},
-        }
-    return None
-```
-
-- [ ] **Step 4: Run — verify pass**
-
-```bash
-cd services/hermes/plugins/mission-control && pytest tests/test_status_map.py -v
-```
-
-Expected: all tests pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add services/hermes/plugins/mission-control/status_map.py services/hermes/plugins/mission-control/tests/test_status_map.py
-git commit -m "feat(mc plugin): status_map (local↔MC pure mapping)
-
-Single source of truth for state translation. Covers local→MC,
-MC→local, and kanban event-kind→MC PATCH paths, including the
-task_runs.outcome disambiguation for 'completed' events
-(only outcome='completed' → MC success; everything else → failed)."
-```
+1. Run plugin unit suite + MC suite + hermes-side build test; all green.
+2. Move spec + plan(s) into `docs/plans/implemented/`.
+3. Open PR `feat/mc-plugin` → `main`.
 
 ---
 
-The remaining tasks (7–27) follow the same TDD pattern. To keep this plan reviewable and to let implementation proceed task-by-task without me dumping ~2000 more lines in one shot, I'm splitting the plan into two files: this one (Phase 0–2) and a follow-on for Phase 3–11. The follow-on lands in the same commit family as Task 7 begins. See:
+## Self-review checklist
 
-- `docs/plans/2026-05-23-mission-control-plugin-part2.md` (Phase 3–11)
-
-Phase 0–2 IS executable on its own — completing Tasks 1–6 ships:
-- The MC-side prerequisites (cursor fix + spec consistency)
-- The upstream Hermes helper
-- An empty plugin scaffold + test harness
-- The pure-functional status mapping module
-
-After Task 6, the next agent loads the follow-on plan and continues with Task 7 (`links_db.py`).
+- [ ] Every spec rev-4 requirement has a task.
+- [ ] No TODO/FIXME in shipped code.
+- [ ] All idempotency keys match MC's regex (`^[a-z][a-z0-9_-]{0,31}:.{1,200}$`).
+- [ ] All MC writes use agent key OR connector key per spec table.
+- [ ] All kanban writes use `board=env.board` kwarg.
+- [ ] All MC→local kanban writes go through `_apply_with_log`.
+- [ ] No direct `os.environ` reads outside `config.py`.
+- [ ] No direct `httpx` calls outside `client.py`.
+- [ ] No direct `sqlite3` outside `links_db.py` (+ test fixtures).
+- [ ] `register(ctx)` is a no-op when `HERMES_MC_URL` is unset.
+- [ ] All pulled comments authored with `mission-control:` prefix.
+- [ ] `mc_apply_log` is fed by every `_apply_with_log` call.
+- [ ] Plugin unit suite runs in <30s on a laptop.

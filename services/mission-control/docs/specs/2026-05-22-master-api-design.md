@@ -510,7 +510,7 @@ CREATE INDEX events_resource ON events(org_id, resource_type, resource_id);
 CREATE TABLE external_refs (
   id              TEXT PRIMARY KEY,                  -- 'xrf_xxx'
   org_id          TEXT NOT NULL,
-  resource_type   TEXT NOT NULL,                     -- 'task'|'project'|'agent'|'comment'
+  resource_type   TEXT NOT NULL,                     -- 'task'|'project'|'agent'|'connector'|'comment'
   resource_id     TEXT NOT NULL,
   source_kind     TEXT NOT NULL,                     -- 'notion'|'linear'|'hermes'|...
   source_id       TEXT NOT NULL,                     -- 'notion-ws-abc'|'hermes-vm1'|...

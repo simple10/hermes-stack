@@ -1,5 +1,6 @@
 // Tell @cloudflare/vitest-pool-workers what bindings exist on env. Mirrors
 // the wrangler.toml [vars] and [[d1_databases]] blocks for the dev/test env.
+// Index signature matches src Env so pool-resolver can be called with env directly.
 declare module 'cloudflare:test' {
   interface ProvidedEnv {
     DB: D1Database;
@@ -10,5 +11,6 @@ declare module 'cloudflare:test' {
     BETTER_AUTH_URL: string;
     CORS_ALLOWED_ORIGINS?: string;
     MC_ADMIN_TOKEN?: string;
+    [key: string]: unknown;
   }
 }

@@ -777,7 +777,7 @@ Implementation note: the widget bundle is built with the same upstream tooling a
 | MC 422 (semantic — e.g. assigned to deleted agent) | Surface via `hermes mc status`; tasks remain unsynced until operator intervenes. |
 | Kanban DB locked (rare in WAL) | Retry 3× with 50/100/200ms backoff, then log + skip the row. |
 | `auth.json` corrupt / missing keys | Plugin status = `not_registered`; loops not started. |
-| Ping-pong (pull then push then pull within `poll_interval + slop`) | Push reactor defers PATCH by 1 reactor tick; re-evaluates after the window passes. |
+| Pull-then-push echo (we pulled state X, that emitted a local event, reactor would push X back) | Suppressed by `mc_apply_log` event-id skip in the push reactor — no defer needed. See "No ping-pong defer." |
 
 All MC error envelopes are dot-namespaced (`task.invalid_transition`, etc.). The plugin logs the full code + message + details; the dashboard widget shows the last 5.
 

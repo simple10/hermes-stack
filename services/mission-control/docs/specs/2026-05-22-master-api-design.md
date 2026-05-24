@@ -152,7 +152,7 @@ The credential (api key) is **always owned by a user** (better-auth requires `us
 |---|---|---|
 | `'pat'` | The human user themselves (full role from `member.role`) | — |
 | `'agent'` | An agent in the `agents` table | `metadata.agent_id` |
-| `'connector'` | A connector (registered via `POST /v1/connectors`, v1.1) | `metadata.connector_id` |
+| `'connector'` | A connector (registered via `POST /v1/connectors`) | `metadata.connector_id` |
 
 This is the GitHub-Apps / Slack-bots / Notion-integrations pattern: the credential happens to be owned by a user for audit + revocation, but the actor recorded in events / accessible to handlers is the agent or connector. **Agents are not users.** Agent identity lives in the `agents` table (in pool DB); the api key in master is just the credential.
 

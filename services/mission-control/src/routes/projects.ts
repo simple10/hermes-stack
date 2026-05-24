@@ -89,9 +89,12 @@ projectsRouter.post(
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes('UNIQUE') || msg.includes('unique')) {
           // Find the conflicting project to return its id.
-          const existing = await ctx.pool.query.projects.findFirst({
-            where: and(eq(projects.orgId, ctx.orgId), eq(projects.slug, slug), active(projects)),
-          });
+          const conflictRows = await ctx.pool
+            .select()
+            .from(projects)
+            .where(and(eq(projects.orgId, ctx.orgId), eq(projects.slug, slug), active(projects)))
+            .limit(1);
+          const existing = conflictRows[0];
           throw new HttpError(
             409,
             'project.duplicate_slug',
@@ -102,9 +105,12 @@ projectsRouter.post(
         throw e;
       }
 
-      const row = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, projectId), eq(projects.orgId, ctx.orgId)),
-      });
+      const projectInsertRows = await ctx.pool
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, projectId), eq(projects.orgId, ctx.orgId)))
+        .limit(1);
+      const row = projectInsertRows[0];
       if (!row) {
         throw new HttpError(500, 'internal', 'Project row disappeared after insert');
       }
@@ -215,9 +221,12 @@ projectsRouter.get(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const row = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)),
-      });
+      const projectDetailRows = await ctx.pool
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)))
+        .limit(1);
+      const row = projectDetailRows[0];
       if (!row) {
         throw new HttpError(404, 'project.not_found', `Project ${id} not found`);
       }
@@ -254,9 +263,12 @@ projectsRouter.patch(
         );
       }
 
-      const existing = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)),
-      });
+      const patchCheckRows = await ctx.pool
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)))
+        .limit(1);
+      const existing = patchCheckRows[0];
       if (!existing) {
         throw new HttpError(404, 'project.not_found', `Project ${id} not found`);
       }
@@ -276,13 +288,12 @@ projectsRouter.patch(
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes('UNIQUE') || msg.includes('unique')) {
           const conflictSlug = input.data.slug ?? existing.slug;
-          const conflicting = await ctx.pool.query.projects.findFirst({
-            where: and(
-              eq(projects.orgId, ctx.orgId),
-              eq(projects.slug, conflictSlug),
-              active(projects),
-            ),
-          });
+          const patchConflictRows = await ctx.pool
+            .select()
+            .from(projects)
+            .where(and(eq(projects.orgId, ctx.orgId), eq(projects.slug, conflictSlug), active(projects)))
+            .limit(1);
+          const conflicting = patchConflictRows[0];
           throw new HttpError(
             409,
             'project.duplicate_slug',
@@ -293,9 +304,12 @@ projectsRouter.patch(
         throw e;
       }
 
-      const updated = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)),
-      });
+      const patchUpdatedRows = await ctx.pool
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId)))
+        .limit(1);
+      const updated = patchUpdatedRows[0];
 
       await emitEvent(ctx.pool, {
         orgId: ctx.orgId,
@@ -324,9 +338,12 @@ projectsRouter.delete(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const existing = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)),
-      });
+      const deleteCheckRows = await ctx.pool
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, id), eq(projects.orgId, ctx.orgId), active(projects)))
+        .limit(1);
+      const existing = deleteCheckRows[0];
       if (!existing) {
         throw new HttpError(404, 'project.not_found', `Project ${id} not found`);
       }

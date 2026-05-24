@@ -39,10 +39,12 @@ export async function resolvePoolForOrg(env: Env, orgId: string) {
   let entry = cache.get(orgId);
 
   if (!entry || entry.expiresAt < now) {
-    const org = await masterClient(env).query.organization.findFirst({
-      where: eq(organization.id, orgId),
-      columns: { tenantPoolId: true },
-    });
+    const orgRows = await masterClient(env)
+      .select({ tenantPoolId: organization.tenantPoolId })
+      .from(organization)
+      .where(eq(organization.id, orgId))
+      .limit(1);
+    const org = orgRows[0];
     if (!org) {
       throw new HttpError(404, 'auth.org_not_found', `Organization ${orgId} not found`);
     }

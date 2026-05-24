@@ -162,9 +162,12 @@ tasksRouter.post(
       // ---------------------------------------------------------------------------
       // Validate project_id exists and is active.
       // ---------------------------------------------------------------------------
-      const projectRow = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, project_id), eq(projects.orgId, ctx.orgId), active(projects)),
-      });
+      const projectCheckRows = await ctx.pool
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, project_id), eq(projects.orgId, ctx.orgId), active(projects)))
+        .limit(1);
+      const projectRow = projectCheckRows[0];
       if (!projectRow) {
         throw new HttpError(422, 'task.invalid_project', `Project '${project_id}' not found or inactive`);
       }
@@ -173,9 +176,12 @@ tasksRouter.post(
       // Validate agent_id if provided.
       // ---------------------------------------------------------------------------
       if (agent_id) {
-        const agentRow = await ctx.pool.query.agents.findFirst({
-          where: and(eq(agents.id, agent_id), eq(agents.orgId, ctx.orgId), active(agents)),
-        });
+        const agentCheckRows = await ctx.pool
+          .select()
+          .from(agents)
+          .where(and(eq(agents.id, agent_id), eq(agents.orgId, ctx.orgId), active(agents)))
+          .limit(1);
+        const agentRow = agentCheckRows[0];
         if (!agentRow) {
           throw new HttpError(422, 'task.invalid_agent', `Agent '${agent_id}' not found or inactive`);
         }
@@ -209,13 +215,18 @@ tasksRouter.post(
         if (msg.includes('UNIQUE') || msg.includes('unique')) {
           // Layer-2 semantic dedup: find the conflicting active task.
           if (idempotency_key) {
-            const existing = await ctx.pool.query.tasks.findFirst({
-              where: and(
-                eq(tasks.orgId, ctx.orgId),
-                eq(tasks.idempotencyKey, idempotency_key),
-                isNull(tasks.deletedAt),
-              ),
-            });
+            const dedupeRows = await ctx.pool
+              .select()
+              .from(tasks)
+              .where(
+                and(
+                  eq(tasks.orgId, ctx.orgId),
+                  eq(tasks.idempotencyKey, idempotency_key),
+                  isNull(tasks.deletedAt),
+                ),
+              )
+              .limit(1);
+            const existing = dedupeRows[0];
             throw new HttpError(
               409,
               'idempotency.conflict',
@@ -229,9 +240,12 @@ tasksRouter.post(
       }
 
       // Fetch the freshly inserted row.
-      const row = await ctx.pool.query.tasks.findFirst({
-        where: and(eq(tasks.id, taskId), eq(tasks.orgId, ctx.orgId)),
-      });
+      const taskInsertRows = await ctx.pool
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, taskId), eq(tasks.orgId, ctx.orgId)))
+        .limit(1);
+      const row = taskInsertRows[0];
       if (!row) {
         throw new HttpError(500, 'internal', 'Task row disappeared after insert');
       }
@@ -424,9 +438,12 @@ tasksRouter.get(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const row = await ctx.pool.query.tasks.findFirst({
-        where: and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)),
-      });
+      const taskDetailRows = await ctx.pool
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)))
+        .limit(1);
+      const row = taskDetailRows[0];
       if (!row) {
         throw new HttpError(404, 'task.not_found', `Task ${id} not found`);
       }
@@ -488,9 +505,12 @@ tasksRouter.patch(
         );
       }
 
-      const existing = await ctx.pool.query.tasks.findFirst({
-        where: and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)),
-      });
+      const patchCheckRows = await ctx.pool
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)))
+        .limit(1);
+      const existing = patchCheckRows[0];
       if (!existing) {
         throw new HttpError(404, 'task.not_found', `Task ${id} not found`);
       }
@@ -592,9 +612,12 @@ tasksRouter.patch(
         if (newAgentId !== oldAgentId) {
           // Validate new agent if not unassigning.
           if (newAgentId) {
-            const agentRow = await ctx.pool.query.agents.findFirst({
-              where: and(eq(agents.id, newAgentId), eq(agents.orgId, ctx.orgId), active(agents)),
-            });
+            const newAgentRows = await ctx.pool
+              .select()
+              .from(agents)
+              .where(and(eq(agents.id, newAgentId), eq(agents.orgId, ctx.orgId), active(agents)))
+              .limit(1);
+            const agentRow = newAgentRows[0];
             if (!agentRow) {
               throw new HttpError(422, 'task.invalid_agent', `Agent '${newAgentId}' not found or inactive`);
             }
@@ -620,9 +643,12 @@ tasksRouter.patch(
         .set(patch)
         .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)));
 
-      const updated = await ctx.pool.query.tasks.findFirst({
-        where: and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)),
-      });
+      const patchUpdatedRows = await ctx.pool
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId)))
+        .limit(1);
+      const updated = patchUpdatedRows[0];
 
       // ---------------------------------------------------------------------------
       // Emit events.
@@ -693,9 +719,12 @@ tasksRouter.delete(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const existing = await ctx.pool.query.tasks.findFirst({
-        where: and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)),
-      });
+      const deleteCheckRows = await ctx.pool
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.id, id), eq(tasks.orgId, ctx.orgId), active(tasks)))
+        .limit(1);
+      const existing = deleteCheckRows[0];
       if (!existing) {
         throw new HttpError(404, 'task.not_found', `Task ${id} not found`);
       }

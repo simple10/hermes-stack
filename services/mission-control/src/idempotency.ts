@@ -53,13 +53,18 @@ export async function checkIdempotency(
   key: string,
   requestBodyHash: string,
 ): Promise<IdempotencyCheckResult> {
-  const row = await pool.query.idempotencyKeys.findFirst({
-    where: and(
-      eq(idempotencyKeys.orgId, orgId),
-      eq(idempotencyKeys.route, route),
-      eq(idempotencyKeys.key, key),
-    ),
-  });
+  const rows = await pool
+    .select()
+    .from(idempotencyKeys)
+    .where(
+      and(
+        eq(idempotencyKeys.orgId, orgId),
+        eq(idempotencyKeys.route, route),
+        eq(idempotencyKeys.key, key),
+      ),
+    )
+    .limit(1);
+  const row = rows[0];
 
   if (!row) return { hit: false };
 

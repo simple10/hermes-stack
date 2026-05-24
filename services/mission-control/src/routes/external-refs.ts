@@ -89,38 +89,48 @@ async function validateResourceExists(
 
   switch (resource_type) {
     case 'task': {
-      const row = await ctx.pool.query.tasks.findFirst({
-        where: and(eq(tasks.id, resource_id), eq(tasks.orgId, ctx.orgId), active(tasks)),
-      });
-      found = !!row;
+      const taskRows = await ctx.pool
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(and(eq(tasks.id, resource_id), eq(tasks.orgId, ctx.orgId), active(tasks)))
+        .limit(1);
+      found = taskRows.length > 0;
       break;
     }
     case 'project': {
-      const row = await ctx.pool.query.projects.findFirst({
-        where: and(eq(projects.id, resource_id), eq(projects.orgId, ctx.orgId), active(projects)),
-      });
-      found = !!row;
+      const projectRows = await ctx.pool
+        .select({ id: projects.id })
+        .from(projects)
+        .where(and(eq(projects.id, resource_id), eq(projects.orgId, ctx.orgId), active(projects)))
+        .limit(1);
+      found = projectRows.length > 0;
       break;
     }
     case 'agent': {
-      const row = await ctx.pool.query.agents.findFirst({
-        where: and(eq(agents.id, resource_id), eq(agents.orgId, ctx.orgId), active(agents)),
-      });
-      found = !!row;
+      const agentRows = await ctx.pool
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.id, resource_id), eq(agents.orgId, ctx.orgId), active(agents)))
+        .limit(1);
+      found = agentRows.length > 0;
       break;
     }
     case 'connector': {
-      const row = await ctx.pool.query.connectors.findFirst({
-        where: and(eq(connectors.id, resource_id), eq(connectors.orgId, ctx.orgId), active(connectors)),
-      });
-      found = !!row;
+      const connectorRows = await ctx.pool
+        .select({ id: connectors.id })
+        .from(connectors)
+        .where(and(eq(connectors.id, resource_id), eq(connectors.orgId, ctx.orgId), active(connectors)))
+        .limit(1);
+      found = connectorRows.length > 0;
       break;
     }
     case 'comment': {
-      const row = await ctx.pool.query.taskComments.findFirst({
-        where: and(eq(taskComments.id, resource_id), eq(taskComments.orgId, ctx.orgId), active(taskComments)),
-      });
-      found = !!row;
+      const commentRows = await ctx.pool
+        .select({ id: taskComments.id })
+        .from(taskComments)
+        .where(and(eq(taskComments.id, resource_id), eq(taskComments.orgId, ctx.orgId), active(taskComments)))
+        .limit(1);
+      found = commentRows.length > 0;
       break;
     }
   }
@@ -355,9 +365,12 @@ externalRefsRouter.delete(
       const ctx = c.var.auth;
       const id = c.req.param('id');
 
-      const existing = await ctx.pool.query.externalRefs.findFirst({
-        where: and(eq(externalRefs.id, id), eq(externalRefs.orgId, ctx.orgId), active(externalRefs)),
-      });
+      const existingRows = await ctx.pool
+        .select()
+        .from(externalRefs)
+        .where(and(eq(externalRefs.id, id), eq(externalRefs.orgId, ctx.orgId), active(externalRefs)))
+        .limit(1);
+      const existing = existingRows[0];
       if (!existing) {
         throw new HttpError(404, 'external_ref.not_found', `External ref ${id} not found`);
       }

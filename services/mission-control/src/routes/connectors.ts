@@ -128,9 +128,12 @@ connectorsRouter.post('/', requireMember('owner', 'admin'), async (c) => {
     }
 
     // Step 3: Fetch the inserted row for the response.
-    const row = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, connectorId), eq(connectors.orgId, ctx.orgId)),
-    });
+    const connectorInsertRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, connectorId), eq(connectors.orgId, ctx.orgId)))
+      .limit(1);
+    const row = connectorInsertRows[0];
     if (!row) {
       throw new HttpError(500, 'internal', 'Connector row disappeared after insert');
     }
@@ -235,9 +238,12 @@ connectorsRouter.get('/:id', requireMember('owner', 'admin', 'member'), async (c
     const ctx = c.var.auth;
     const id = c.req.param('id');
 
-    const row = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)),
-    });
+    const connectorDetailRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)))
+      .limit(1);
+    const row = connectorDetailRows[0];
     if (!row) {
       throw new HttpError(404, 'connector.not_found', `Connector ${id} not found`);
     }
@@ -270,9 +276,12 @@ connectorsRouter.patch('/:id', requireMember('owner', 'admin'), async (c) => {
       );
     }
 
-    const existing = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)),
-    });
+    const existingRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)))
+      .limit(1);
+    const existing = existingRows[0];
     if (!existing) {
       throw new HttpError(404, 'connector.not_found', `Connector ${id} not found`);
     }
@@ -287,9 +296,12 @@ connectorsRouter.patch('/:id', requireMember('owner', 'admin'), async (c) => {
       .set(patch)
       .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId)));
 
-    const updated = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId)),
-    });
+    const updatedRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId)))
+      .limit(1);
+    const updated = updatedRows[0];
 
     await emitEvent(ctx.pool, {
       orgId: ctx.orgId,
@@ -314,9 +326,12 @@ connectorsRouter.delete('/:id', requireMember('owner', 'admin'), async (c) => {
     const ctx = c.var.auth;
     const id = c.req.param('id');
 
-    const existing = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)),
-    });
+    const deleteCheckRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)))
+      .limit(1);
+    const existing = deleteCheckRows[0];
     if (!existing) {
       throw new HttpError(404, 'connector.not_found', `Connector ${id} not found`);
     }
@@ -378,9 +393,12 @@ connectorsRouter.post('/:id/rotate-key', requireMember('owner', 'admin'), async 
     const env = c.env as any;
     const id = c.req.param('id');
 
-    const existing = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)),
-    });
+    const rotateCheckRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, id), eq(connectors.orgId, ctx.orgId), active(connectors)))
+      .limit(1);
+    const existing = rotateCheckRows[0];
     if (!existing) {
       throw new HttpError(404, 'connector.not_found', `Connector ${id} not found`);
     }

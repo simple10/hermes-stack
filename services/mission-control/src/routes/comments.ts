@@ -112,9 +112,12 @@ async function resolveTask(
   ctx: AuthContext,
   taskId: string,
 ): Promise<typeof tasks.$inferSelect> {
-  const row = await ctx.pool.query.tasks.findFirst({
-    where: and(eq(tasks.id, taskId), eq(tasks.orgId, ctx.orgId), active(tasks)),
-  });
+  const taskRows = await ctx.pool
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.id, taskId), eq(tasks.orgId, ctx.orgId), active(tasks)))
+    .limit(1);
+  const row = taskRows[0];
   if (!row) {
     throw new HttpError(404, 'task.not_found', `Task ${taskId} not found`);
   }

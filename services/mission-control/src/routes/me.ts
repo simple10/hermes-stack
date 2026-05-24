@@ -27,16 +27,22 @@ me.get('/', async (c) => {
   };
 
   if (ctx.principal.type === 'agent') {
-    const a = await ctx.pool.query.agents.findFirst({
-      where: and(eq(agents.id, ctx.principal.id), eq(agents.orgId, ctx.orgId), active(agents)),
-    });
+    const agentRows = await ctx.pool
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, ctx.principal.id), eq(agents.orgId, ctx.orgId), active(agents)))
+      .limit(1);
+    const a = agentRows[0];
     if (a) base.agent = serializeTimestamps(a);
   }
 
   if (ctx.principal.type === 'connector') {
-    const cn = await ctx.pool.query.connectors.findFirst({
-      where: and(eq(connectors.id, ctx.principal.id), eq(connectors.orgId, ctx.orgId), active(connectors)),
-    });
+    const connectorRows = await ctx.pool
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.id, ctx.principal.id), eq(connectors.orgId, ctx.orgId), active(connectors)))
+      .limit(1);
+    const cn = connectorRows[0];
     if (cn) base.connector = serializeTimestamps(cn);
   }
 

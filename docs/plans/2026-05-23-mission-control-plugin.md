@@ -350,141 +350,36 @@ Required by the upcoming Hermes MC plugin's pull-loop comment paging."
 
 ---
 
-### Task 3: Upstream Hermes — add `kanban_db.list_events_since` helper
+### Task 3: SKIPPED — folded into the plugin's push.py
 
-**Files:**
-- Modify: `services/hermes/_source/hermes_cli/kanban_db.py` (add one function)
-- Test: `services/hermes/_source/tests/test_kanban_db.py` (if file exists; else add to nearest existing kanban test module)
+**Why:** `services/hermes/_source/` is gitignored (it's a separately-cloned upstream `hermes-agent` repo pinned by build scripts). Adding a function to that tree means submitting a real upstream PR and waiting for the stack's pinned commit to bump — out of scope for this plugin's first ship.
 
-- [ ] **Step 1: Locate the existing event helpers**
-
-```bash
-grep -n "def list_events\|def _append_event\|task_events" services/hermes/_source/hermes_cli/kanban_db.py | head -20
-```
-
-Confirm there's an existing `list_events(conn, task_id)` (per-task) and no `list_events_since` (global since-cursor).
-
-- [ ] **Step 2: Write the failing test**
-
-Find or create a test file under `services/hermes/_source/tests/` that already imports `hermes_cli.kanban_db`. Append:
+Per the spec's documented fallback path: the plugin's push reactor runs the raw SQL directly against `kanban_db.connect(board=...)`'s `sqlite3.Connection`. Specifically, in `services/hermes/plugins/mission-control/push.py` (Task 12), the events-tail query is:
 
 ```python
-def test_list_events_since_orders_by_id_strictly(tmp_path, monkeypatch):
-    """list_events_since must order by id ASC, not created_at.
-
-    created_at has 1-second granularity in kanban_db so ties are common
-    when many events land in the same second; the cursor caller needs
-    a strict total order, hence id-ordering.
-    """
-    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "k.db"))
-    from hermes_cli import kanban_db as kb
-    conn = kb.connect()
-    tid = kb.create_task(conn, title="t1", assignee="x", initial_status="ready")
-    # Force 3 events within the same epoch second by patching int(time.time()).
-    import time as _t
-    fixed = int(_t.time())
-    monkeypatch.setattr(_t, "time", lambda: fixed)
-    kb.add_comment(conn, tid, "x", "a")
-    kb.add_comment(conn, tid, "x", "b")
-    kb.add_comment(conn, tid, "x", "c")
-    rows = kb.list_events_since(conn, 0, limit=10)
-    ids = [r.id for r in rows]
-    assert ids == sorted(ids), f"events out of id order: {ids}"
-    assert len(rows) >= 3
-
-def test_list_events_since_respects_cursor(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "k.db"))
-    from hermes_cli import kanban_db as kb
-    conn = kb.connect()
-    tid = kb.create_task(conn, title="t1", assignee="x", initial_status="ready")
-    kb.add_comment(conn, tid, "x", "a")
-    kb.add_comment(conn, tid, "x", "b")
-    all_rows = kb.list_events_since(conn, 0, limit=100)
-    mid = all_rows[len(all_rows) // 2].id
-    after = kb.list_events_since(conn, mid, limit=100)
-    assert all(r.id > mid for r in after)
-
-def test_list_events_since_respects_limit(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "k.db"))
-    from hermes_cli import kanban_db as kb
-    conn = kb.connect()
-    tid = kb.create_task(conn, title="t1", assignee="x", initial_status="ready")
-    for i in range(20):
-        kb.add_comment(conn, tid, "x", f"c{i}")
-    rows = kb.list_events_since(conn, 0, limit=5)
-    assert len(rows) == 5
+rows = conn.execute(
+    "SELECT id, task_id, kind, payload, run_id, created_at FROM task_events "
+    "WHERE id > ? ORDER BY id ASC LIMIT ?",
+    (last_id, limit),
+).fetchall()
+events = [Event(...same shape as kanban_db.Event...) for r in rows]
 ```
 
-- [ ] **Step 3: Run — verify failure**
+The Event dataclass (`id, task_id, kind, payload, created_at, run_id`) is re-used from `hermes_cli.kanban_db.Event` via `from hermes_cli.kanban_db import Event`. The JSON payload-decode follows the same `try/except → None` pattern as `kanban_db.list_events`.
 
-```bash
-cd services/hermes/_source && python -m pytest tests/test_kanban_db.py::test_list_events_since_orders_by_id_strictly -v
-```
+This task is closed — no action required. Tasks renumber down by one in spirit; for traceability the existing numbering stands.
 
-Expected: `AttributeError: module 'hermes_cli.kanban_db' has no attribute 'list_events_since'`.
+**Below tasks (4+) reference "Task 3" only in the prerequisites mention; that reference becomes a no-op.**
 
-- [ ] **Step 4: Implement**
+(Original Step 1-6 content omitted; the helper-addition path is deferred to a future upstream PR.)
 
-In `services/hermes/_source/hermes_cli/kanban_db.py`, near the existing `list_events(conn, task_id)` function, add:
+**Original signatures preserved here for documentation:**
 
 ```python
-def list_events_since(
-    conn: sqlite3.Connection,
-    last_id: int,
-    limit: int = 100,
-) -> list[Event]:
-    """Return task_events rows with id > last_id, in strict id-ascending order.
-
-    Ordering is by ``id`` only (not ``created_at``) because ``created_at``
-    has 1-second granularity and ties are common when many events land
-    within the same second. Cursor callers need a strict total order.
-
-    Used by external consumers (e.g. the mission-control plugin's push
-    reactor) that tail the global event stream across all tasks on a
-    board. For per-task event reads, prefer :func:`list_events`.
-    """
-    rows = conn.execute(
-        "SELECT * FROM task_events WHERE id > ? ORDER BY id ASC LIMIT ?",
-        (last_id, limit),
-    ).fetchall()
-    out = []
-    for r in rows:
-        try:
-            payload = json.loads(r["payload"]) if r["payload"] else None
-        except Exception:
-            payload = None
-        out.append(
-            Event(
-                id=r["id"],
-                task_id=r["task_id"],
-                kind=r["kind"],
-                payload=payload,
-                created_at=r["created_at"],
-                run_id=(int(r["run_id"]) if "run_id" in r.keys() and r["run_id"] is not None else None),
-            )
-        )
-    return out
-```
-
-(Mirrors the existing `list_events` body exactly — same payload try/except, same `Event` field order, same `run_id` defensive cast. Verified at `kanban_db.py:1838-1859`.)
-
-- [ ] **Step 5: Run — verify pass**
-
-```bash
-cd services/hermes/_source && python -m pytest tests/test_kanban_db.py -k list_events_since -v
-```
-
-Expected: all 3 new tests pass.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add services/hermes/_source/hermes_cli/kanban_db.py services/hermes/_source/tests/test_kanban_db.py
-git commit -m "feat(kanban_db): add list_events_since global cursor helper
-
-Strict id-ascending order (not created_at — that has tie risk at
-1-second granularity). Required by the mission-control plugin's
-push reactor which tails the global task_events stream on a board."
+# In services/hermes/_source/hermes_cli/kanban_db.py (DEFERRED — upstream PR):
+def list_events_since(conn: sqlite3.Connection, last_id: int, limit: int = 100) -> list[Event]:
+    """Return task_events rows with id > last_id, in strict id-ascending order."""
+    # body mirrors list_events with WHERE id > ? ORDER BY id ASC LIMIT ?
 ```
 
 ---

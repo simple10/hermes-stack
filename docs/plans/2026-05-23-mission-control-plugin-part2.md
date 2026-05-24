@@ -1166,7 +1166,7 @@ intact for retry. Idle housekeeping purges mc_apply_log entries >24h.
 - Test: `services/hermes/plugins/mission-control/tests/test_push.py`
 
 Behavior:
-- `push_once(env, auth, ldb_conn, kanban_conn, client) -> int` (returns events processed): reads `kanban_db.list_events_since(kanban_conn, last_id, limit=200)`, filters via `is_in_apply_log` + author-prefix check, dispatches each event via the kind→handler map, then advances `set_pull_cursor('events', last_id)`.
+- `push_once(env, auth, ldb_conn, kanban_conn, client) -> int` (returns events processed): runs raw SQL `SELECT id, task_id, kind, payload, run_id, created_at FROM task_events WHERE id > ? ORDER BY id ASC LIMIT 200` against `kanban_conn`, constructs `Event` rows in plugin code (re-using `hermes_cli.kanban_db.Event` dataclass; `payload = json.loads(r["payload"]) if r["payload"] else None` with try/except → None), filters via `is_in_apply_log` + author-prefix check, dispatches each event via the kind→handler map, then advances `set_pull_cursor('events', last_id)`. (Task 3 in the prerequisites was originally an upstream helper for this query — `_source/` is gitignored, so we run the SQL inline instead per the spec's documented fallback.)
 - Per-event handlers:
   - status events (claimed/blocked/unblocked/archived/scheduled): build PATCH body via `status_map.event_kind_to_patch`; call `client.tasks_patch`; on success update `link.last_pushed_at = response.updated_at` + `last_terminal_state` if terminal.
   - `completed`: look up `kanban_db.latest_run(conn, ev.task_id)`, pass `run.outcome` into `event_kind_to_patch`, PATCH.

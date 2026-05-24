@@ -1,0 +1,9 @@
+name: mission-control
+version: "0.1.0"
+description: "Bidirectional sync between this Hermes VM and a MissionControl deployment. Subscribes to MC's events stream for tasks/comments assigned to this VM; mirrors local status back; auto-unblocks tasks when a human comments via MC."
+author: hermes-stack
+kind: standalone
+requires_env:
+  - HERMES_MC_URL
+provides_tools:
+  - mc_promote_task

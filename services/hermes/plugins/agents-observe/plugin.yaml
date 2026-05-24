@@ -1,0 +1,25 @@
+name: agents-observe
+version: "0.1.0"
+description: "Fire-and-forget observability — ships every Hermes hook payload to an agents-observe HTTP backend. Pure observation; never mutates payloads, never blocks the agent. Enable with `hermes plugins enable agents-observe`; configure with HERMES_AGENTS_OBSERVE_URL."
+author: hermes-stack
+kind: standalone
+requires_env:
+  - HERMES_AGENTS_OBSERVE_URL
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - transform_terminal_output
+  - transform_tool_result
+  - transform_llm_output
+  - pre_llm_call
+  - post_llm_call
+  - pre_api_request
+  - post_api_request
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+  - on_session_reset
+  - subagent_stop
+  - pre_gateway_dispatch
+  - pre_approval_request
+  - post_approval_response

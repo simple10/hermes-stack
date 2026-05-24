@@ -1,6 +1,6 @@
 # Hermes ↔ MissionControl Plugin — Design
 
-**Status:** Draft for review (rev 3 — second-round review fixes)
+**Status:** Draft for review (rev 4 — events-driven architecture)
 **Date:** 2026-05-23
 **Scope:** v1 of the Hermes stack-side plugin that wires a Hermes VM to a MissionControl (MC) deployment.
 **Sibling spec:** `services/mission-control/docs/specs/2026-05-22-master-api-design.md` (MC API)
@@ -9,45 +9,22 @@ This spec covers the Hermes-side integration only.
 
 ---
 
-## MC version requirements
-
-The plugin assumes the MC v1 API as specified in the sibling doc, with these specific dependencies that should be confirmed before plugin work starts. If the MC implementation deviates, the plugin spec adjusts to match — never the other way around.
-
-| Plugin v1 needs | Status in MC v1 |
-|---|---|
-| `POST /v1/agents` + key minting (PAT-role) | Documented in MC §"Agents". Spec ships v1. |
-| `POST /v1/connectors` + key minting (PAT-role, owner/admin) | Listed under MC v1 routes (`POST /v1/connectors — register a connector (owner|admin)`). NOTE: MC's principal-type table also tags connectors with "(v1.1)". Treat the v1 routes listing as authoritative; the principal-table annotation needs a one-line fix in the MC spec. **Plugin v1 requires MC v1 connector routes.** |
-| `POST /v1/agents/:id/rotate-key` + same for connectors | Documented in MC v1. |
-| `GET /v1/me` (resolves agent + connector identity) | Documented in MC v1. |
-| `GET /v1/tasks?agent_id=…&updated_since=…&cursor=…&limit=…` | Documented in MC v1. |
-| `PATCH /v1/tasks/:id` (status + metadata, agent role for own tasks) | Documented in MC v1. |
-| `POST /v1/tasks` (connector role) | Documented in MC v1. |
-| `POST /v1/tasks/:id/comments` (agent + connector roles for own/all tasks) | Documented in MC v1. |
-| `GET /v1/tasks/:id/comments?cursor=…&limit=…` (cursor pagination, stable under insert) | Documented in MC v1. **Plugin v1 requires MC to ALWAYS return `next_cursor` in the response — never `null`.** On the last page, `next_cursor` is a "tip" cursor that, when re-used, returns an empty page; this preserves "resume from here" semantics across polls. Currently MC's spec says `next_cursor: null` on the last page (line 696, "`null` next_cursor means end of results"). **Plugin v1 requires this changed** — see "Required MC changes" below. Without it, the plugin can't reliably resume comment pagination across poll cycles for tasks whose entire comment list fits in one page. |
-| `POST /v1/external_refs` (agent role: `source_id == principal_id`) | Documented in MC v1. |
-
-### Required MC spec / implementation changes (prerequisites)
-
-The plugin spec depends on two small MC-side changes. Both are tracked as separate items against the MC spec; plugin implementation pauses until they're confirmed.
-
-1. **`POST /v1/connectors` is a v1 route.** The principal-type table at MC spec line 155 annotates connector as "(v1.1)" which contradicts the v1 routes section (line 626). Reconcile to "connectors are v1." A one-line MC-spec fix.
-2. **Pagination response always returns `next_cursor` (never `null`).** On the last page, `next_cursor` is a tip cursor that returns an empty page when re-used. Applies to all list endpoints (tasks, comments, projects, agents, connectors, external_refs). This lets pollers save the cursor unconditionally for resume-from-here semantics. MC spec line 696 currently says "`null` next_cursor means end of results" — change to "the cursor is always returned; an empty `data` array means no new items since last poll." Implementation: the existing HMAC cursor format already encodes a position; the tip cursor for an empty result is "position of the most recent existing row, or 0 if none." One small change to the cursor-construction code.
-
-If either is rejected, the plugin spec needs revisiting — particularly the comment-pull loop in (2).
-
----
-
 ## Goal
 
-Give one Hermes VM a single-paste setup to (a) pull MC-assigned tasks and run them through the existing local kanban dispatcher, (b) push status, comments, and explicitly-promoted local-originated tasks back to MC, and (c) surface human comments left on MC (e.g. via Notion) onto the local task so the next dispatcher invocation sees them — including auto-unblocking `blocked` tasks when a human comments, so the worker re-spawns with the comment in context.
+Give one Hermes VM a single-paste setup to:
 
-User mental model: *"I assign a task to my Hermes VM via Notion (or the MC UI). Hermes picks it up, works on it, comments on it as it goes, asks for clarification when it needs to, and I can talk back to it through the same MC task — without ever SSHing into the VM."*
+1. **Subscribe** to MC's `GET /v1/events` stream and react to task/comment changes for tasks assigned to this VM's agent identity.
+2. **Mirror** local kanban status + comments back to MC so the human can see live progress from MC's UI (or Notion via a connector).
+3. **Promote** local-originated tasks up to MC explicitly via a CLI flag or LLM-callable tool.
+4. **Auto-unblock** a `blocked` local task when the human leaves a new comment via MC, so the dispatcher re-spawns the worker with that comment in context.
+
+User mental model: *"I assign a task to my Hermes VM from Notion / the MC UI. Hermes picks it up, works on it, posts status updates and comments as it goes, asks for clarification when it needs to, and I can talk back through the same MC task — without ever SSHing into the VM."*
 
 ### Process locality
 
-The plugin's `register(ctx)` is called in EVERY Hermes process (gateway, every dispatcher-spawned worker, ad-hoc CLI invocations) because plugin discovery runs on every `hermes` startup. The plugin must be safe to load anywhere; the network loops run ONLY in the gateway.
+Hermes' plugin loader calls `register(ctx)` in every Hermes process: the gateway, every dispatcher-spawned worker, and ad-hoc CLI invocations. The plugin must be safe to load anywhere; **the polling thread runs ONLY in the gateway**.
 
-Loop-startup guard (in `register(ctx)`):
+Loop-startup guard in `register(ctx)`:
 
 ```python
 def _is_gateway() -> bool:
@@ -58,22 +35,32 @@ def _is_gateway() -> bool:
     return os.environ.get("_HERMES_GATEWAY") == "1" and not os.environ.get("HERMES_KANBAN_TASK")
 ```
 
-The tools and CLI subcommand are registered unconditionally; only loop startup is gated. A worker that calls `mc_promote_task` makes a direct HTTP POST + writes to `links.db` (cross-process SQLite write, safe in WAL).
+Tools and CLI register unconditionally so workers can invoke `mc_promote_task`. Only the polling thread is gated.
 
-**Test-env note:** `_HERMES_GATEWAY=1` is set at module import of `gateway.run`, so any test that imports gateway code would falsely trigger the gateway path. Plugin unit tests use `monkeypatch.delenv("_HERMES_GATEWAY", raising=False)` in their fixtures to simulate non-gateway runs. Documented in `tests/conftest.py`.
+**Test-env note:** `_HERMES_GATEWAY=1` is set at module-import of `gateway/run.py`, so any test that imports gateway code would falsely trigger the gateway path. Plugin unit tests use `monkeypatch.delenv("_HERMES_GATEWAY", raising=False)` in their fixtures.
 
 ---
 
-## Non-goals (explicit)
+## MC version requirements
 
-- A new dispatcher / runner. We reuse the existing in-gateway kanban dispatcher unchanged.
-- Multi-org per VM. One VM = one MC agent + connector = one MC org.
-- Sharded pool support. v1 of MC is single-pool; the agent never knows pools exist.
-- MC `GET /v1/events` consumption (deferred until that endpoint ships in MC v1.1).
-- A new tab in the Hermes dashboard. We add a small connection-status widget to the existing settings/plugins surface.
-- Auto-promoting local tasks to MC. Promotion is always an explicit operator/agent action.
-- Heartbeats (MC v1 bumps `last_seen_at` server-side on every authenticated request).
-- Webhooks in (MC → Hermes via inbound HTTP). The agent VM is firewalled; we poll.
+The plugin requires MC v1 + the small set of pulled-from-v1.1 features listed below. All three landed in MC alongside the plugin spec:
+
+| Plugin v1 needs | Status |
+|---|---|
+| `POST /v1/agents` + key minting (PAT-role) | MC v1. |
+| `POST /v1/connectors` + key minting (PAT-role, owner/admin) | MC v1. (Earlier spec drafts tagged "v1.1" in one annotation table; corrected.) |
+| `POST /v1/agents/:id/rotate-key` + same for connectors | MC v1. |
+| `GET /v1/me` | MC v1. |
+| `GET /v1/events?since=…&kinds=…&limit=…` | **Pulled into MC v1** (was v1.1). The first consumer is this plugin. |
+| `PATCH /v1/tasks/:id` (agent role, own tasks, status + metadata) | MC v1. |
+| `POST /v1/tasks` (connector role) | MC v1. |
+| `POST /v1/tasks/:id/comments` (agent + connector roles) | MC v1. |
+| `POST /v1/external_refs` (agent role) | MC v1. |
+| `GET /v1/tasks/:id` (one-shot fetch, for hydrate-after-event) | MC v1. |
+| `GET /v1/projects` (PAT role, for project-list cache) | MC v1. |
+| Idempotency-key regex validation | **Pulled into MC v1** (was v1.1). Plugin keys (`hermes:<task_id>`, `mc:<mc_task_id>`, etc.) match the format. |
+
+Plugin does NOT depend on: `GET /v1/tasks/:id/comments` pagination (the events stream carries comment-created events), heartbeats, SSE, server-side cursors, or per-row event visibility for agent role.
 
 ---
 
@@ -81,13 +68,13 @@ The tools and CLI subcommand are registered unconditionally; only loop startup i
 
 ```
 ┌─ MissionControl (Cloudflare Workers + D1, cloud) ─────────────────────────┐
-│  GET   /v1/me                         (any key — identity check)          │
-│  GET   /v1/tasks                      (agent key)                         │
+│  GET   /v1/me                         (any key)                           │
+│  GET   /v1/events?since=…&kinds=…     (connector key)                     │
+│  GET   /v1/tasks/:id                  (one-shot hydrate, connector key)   │
 │  PATCH /v1/tasks/:id                  (agent key)                         │
 │  POST  /v1/tasks                      (connector key)                     │
-│  POST  /v1/tasks/:id/comments         (agent or connector key)            │
-│  GET   /v1/tasks/:id/comments         (agent key; opaque cursor)          │
-│  POST  /v1/external_refs              (agent key; source_id=agent_id)     │
+│  POST  /v1/tasks/:id/comments         (agent key)                         │
+│  POST  /v1/external_refs              (agent key)                         │
 └──────────────────────────▲──────────────────────┬─────────────────────────┘
                            │ Bearer mcagt_…       │ Bearer mccnn_…
                            │                      │
@@ -96,14 +83,15 @@ The tools and CLI subcommand are registered unconditionally; only loop startup i
 │  ┌─ plugin: mission-control ────────────────────────────────────────────┐ │
 │  │                                                                       │ │
 │  │  config.py    — env loading; auth.json read/write w/ mtime cache     │ │
-│  │  client.py    — httpx wrapper: retry/backoff/idempotency-key/cursor  │ │
-│  │  registrar.py — PAT → agent + connector keys; caches projects        │ │
+│  │  client.py    — httpx wrapper: events_list, tasks_*, comments_*,     │ │
+│  │                  external_refs, agents/connectors lifecycle, projects│ │
+│  │  registrar.py — PAT → agent + connector keys; project cache          │ │
 │  │  links_db.py  — schema + helpers (mc_links, mc_comment_links,         │ │
-│  │                  mc_apply_log, mc_pull_cursor)                        │ │
-│  │  pull.py      — pull loop                                            │ │
-│  │  push.py      — push reactor (tails kanban task_events for one board)│ │
-│  │  apply.py     — applies MC → local using kanban_db helpers safely   │ │
-│  │  status_map.py — single source of truth for local↔MC status        │ │
+│  │                  mc_apply_log, mc_event_cursor)                       │ │
+│  │  pull.py      — events loop (GET /v1/events, dispatch via apply.py)  │ │
+│  │  push.py      — kanban task_events reactor (PATCH back to MC)        │ │
+│  │  apply.py     — kind-dispatch table for incoming MC events           │ │
+│  │  status_map.py — single source of truth for local↔MC status         │ │
 │  │  tools.py     — mc_promote_task tool                                │ │
 │  │  cli.py       — `hermes mc {register,status,promote,refresh-…,…}` │ │
 │  │  runtime.py   — daemon thread that runs asyncio.run(both_loops())   │ │
@@ -113,7 +101,7 @@ The tools and CLI subcommand are registered unconditionally; only loop startup i
 │  │  dashboard/                                                          │ │
 │  │    manifest.json — widget on the settings tab                       │ │
 │  │    plugin_api.py — GET /api/plugins/mission-control/status          │ │
-│  │  tests/        — pytest (see "Tests location" below)               │ │
+│  │  tests/        — pytest                                              │ │
 │  └────────────┬──────────────────────────────────┬───────────────────────┘ │
 │               │ writes/reads kanban (one board)  │ reads task_events       │
 │               ▼                                  ▼                         │
@@ -138,18 +126,25 @@ async def _run_loops():
     await asyncio.gather(pull_loop(), push_reactor())
 ```
 
-`asyncio.run` inside a non-main thread is safe (Python 3.8+). The thread is `daemon=True` so it doesn't block process exit; on gateway shutdown, the thread is abandoned (cleanly — both loops are sleep-bound with no held resources beyond open `httpx.AsyncClient`s and SQLite connections that close themselves on GC).
-
-Why a thread (not `asyncio.create_task` on the gateway's loop): plugin `register(ctx)` is called from plain-sync discovery context, BEFORE `asyncio.run(start_gateway())`. `asyncio.create_task` would raise `RuntimeError: no running event loop`. The agents-observe plugin uses the same daemon-thread pattern for exactly this reason.
+Why a thread (not `asyncio.create_task` on the gateway's loop): plugin `register(ctx)` is called from plain-sync discovery context, BEFORE `asyncio.run(start_gateway())`. The agents-observe plugin uses the same daemon-thread pattern.
 
 | Loop | Cadence | Reads | Writes |
 |---|---|---|---|
-| **Pull loop** | `MC_POLL_INTERVAL` (default 10s; min 2s) | `GET /v1/tasks?agent_id=self&updated_since=<cursor>&limit=100` then per-active-link `GET /v1/tasks/:id/comments?cursor=<saved>&limit=100` | Upserts kanban tasks + comments via `apply.py`; auto-unblocks `blocked` tasks on new MC comment; records applied event ids in `mc_apply_log`; advances cursors only after both phases complete |
+| **Pull loop** | `MC_POLL_INTERVAL` (default 10s; min 2s) | `GET /v1/events?since=<cursor>&kinds=task,comment,external_ref&limit=100` (connector key) | Dispatches each event via `apply.py`; updates `mc_event_cursor`; records applied kanban events in `mc_apply_log` |
 | **Push reactor** | Tails kanban `task_events` (1s SQLite poll) on the MC-pinned board | `task_events` rows since cursor, skipping ids in `mc_apply_log`; cross-checks `mc_links` membership | `PATCH /v1/tasks/:id` (status), `POST /v1/tasks/:id/comments` (locally-authored), `POST /v1/external_refs` (on first promotion); clears `push_dirty`, updates `last_pushed_at` + `last_terminal_state` |
 
-**Failure isolation:** MC outages must never block the kanban dispatcher or freeze the gateway. Each loop catches `httpx.RequestError` / `httpx.HTTPStatusError` for 5xx / `asyncio.TimeoutError`, backs off (5s → 30s → 120s with ±25% jitter), logs WARN per failure and INFO on recovery, never advances cursors on partial failure. On 401: all loops stop, plugin status = `auth_failed`, ERROR logged with remediation; re-run `hermes mc register` to recover.
+**Failure isolation:** MC outages must never block the kanban dispatcher or freeze the gateway. Each loop catches `httpx.RequestError` / `httpx.HTTPStatusError` for 5xx / `asyncio.TimeoutError`, backs off (5s → 30s → 120s with ±25% jitter), logs WARN per failure and INFO on recovery, never advances cursors on failure. On 401: all loops stop, plugin status = `auth_failed`, ERROR logged with remediation; re-run `hermes mc register` to recover.
 
-Loops run only after `register(ctx)` confirms `_is_gateway() == True` AND `~/.hermes/auth.json` has a `mission_control` block with non-empty `agent_key`. When either condition is missing, the plugin is inert (mirrors agents-observe).
+Loops run only after `register(ctx)` confirms `_is_gateway() == True` AND `~/.hermes/auth.json` has a `mission_control` block with non-empty agent + connector keys.
+
+### Why events-driven (vs tasks+comments polling)
+
+Earlier drafts of this spec had the plugin polling `GET /v1/tasks?updated_since=…` plus per-link `GET /v1/tasks/:id/comments?cursor=…`. That works for tasks (which have a since-filter) but is awkward for comments (no since-filter; cursor doesn't survive empty pages well). MC v1 already maintains an `events` append-only table for exactly this use case — the read endpoint was deferred only because no consumer existed yet. With the plugin as the first consumer, MC promotes `GET /v1/events` to v1 and the plugin's pull loop becomes:
+
+- One cursor (highest `events.id` seen) instead of one per-tasks-cursor + one per-link comment cursor.
+- One endpoint instead of two with per-link iteration.
+- Event payloads carry the data needed to apply locally (full task on `task.created`, full comment on `comment.created`, status diff on `task.status_changed`); fetch-on-demand for `task.updated` non-status diffs via `GET /v1/tasks/:id`.
+- Future SSE upgrade (v1.1) is a transport swap on the same endpoint, no architectural change.
 
 ---
 
@@ -165,9 +160,9 @@ services/hermes/plugins/mission-control/
   client.py                # httpx-based MC HTTP client
   registrar.py             # PAT → mints/rotates agent + connector keys
   links_db.py              # schema + helpers
-  pull.py
-  push.py
-  apply.py                 # MC → local writes via kanban_db helpers
+  pull.py                  # events loop
+  push.py                  # kanban task_events reactor
+  apply.py                 # MC event-kind dispatch
   status_map.py
   tools.py
   cli.py
@@ -177,9 +172,10 @@ services/hermes/plugins/mission-control/
     manifest.json
     plugin_api.py
   tests/
+    conftest.py
     test_status_map.py
     test_links_db.py
-    test_client.py            # respx-mocked HTTP
+    test_client.py
     test_registrar.py
     test_apply.py
     test_pull.py
@@ -196,7 +192,7 @@ The plugin is deployed into the VM at `~/.hermes/plugins/mission-control/` by `s
 ```yaml
 name: mission-control
 version: "0.1.0"
-description: "Bidirectional sync between this Hermes VM and a MissionControl deployment. Pulls assigned tasks into a dedicated local kanban board, mirrors status + comments back, auto-unblocks tasks when a human comments via MC."
+description: "Bidirectional sync between this Hermes VM and a MissionControl deployment. Subscribes to MC's events stream for tasks/comments assigned to this VM; mirrors local status back; auto-unblocks tasks when a human comments via MC."
 author: hermes-stack
 kind: standalone
 requires_env:
@@ -205,13 +201,9 @@ provides_tools:
   - mc_promote_task
 ```
 
-The plugin registers no hooks. The `requires_env` key triggers Hermes' built-in inert-plugin behavior when `HERMES_MC_URL` is unset. We deliberately keep the `HERMES_MC_` prefix everywhere — inside the VM env, in plugin code, and in the manifest. (Earlier draft proposed an unprefixed-inside-VM convention; dropped for consistency.)
+No hooks. The plugin runs background loops + provides a tool + adds a CLI command + ships a dashboard widget.
 
-The plugin opts in via the existing `plugins.enabled` allow-list in `~/.hermes/config.yaml` — `build.sh` appends `mission-control` to that list on the first build that has `HERMES_MC_URL` set (idempotent: `hermes_enable_plugin "mission-control"`).
-
-### Gateway marker
-
-No upstream change needed. The plugin reuses the existing `_HERMES_GATEWAY=1` env marker set at module-import in `gateway/run.py:543` and already consumed by `cli.py:539`. (An earlier draft of this spec proposed adding a new `HERMES_GATEWAY` marker — review caught the duplication.)
+The plugin opts in via the existing `plugins.enabled` allow-list in `~/.hermes/config.yaml` — `build.sh` appends `mission-control` on the first build that has `HERMES_MC_URL` set (idempotent: `hermes_enable_plugin "mission-control"`).
 
 ---
 
@@ -220,18 +212,18 @@ No upstream change needed. The plugin reuses the existing `_HERMES_GATEWAY=1` en
 ### Stack-side `.stack/.env` levers (in the `#>--- hermes ---` block)
 
 ```
-HERMES_MC_URL=                          # base URL (e.g. https://mc.example.com)
-HERMES_MC_USER_PAT=                     # one-time mcpat_… PAT for first-run; clear after
-HERMES_MC_AGENT_NAME=                   # override; default = OrbStack VM name
-HERMES_MC_BOARD=mc                      # dedicated kanban board for MC tasks
-HERMES_MC_POLL_INTERVAL=10              # seconds between pull cycles (min 2)
-HERMES_MC_BOOTSTRAP_SINCE=7d            # how far back to pull on first sync
-HERMES_MC_DEFAULT_PROJECT_SLUG=         # used by `hermes kanban create --mc`
-HERMES_MC_CONFLICT_SLOP_MS=5000         # window for treating a re-pull as a no-op
-HERMES_MC_DEBUG=false                   # extra DEBUG-level logs
+HERMES_MC_URL=                       # base URL (e.g. https://mc.example.com)
+HERMES_MC_USER_PAT=                  # one-time mcpat_… PAT for first-run; clear after
+HERMES_MC_AGENT_NAME=                # override; default = OrbStack VM name
+HERMES_MC_BOARD=mc                   # dedicated kanban board for MC tasks
+HERMES_MC_POLL_INTERVAL=10           # seconds between event-poll cycles (min 2)
+HERMES_MC_BOOTSTRAP_SINCE_DAYS=7     # ignore MC events older than this many days
+                                     # on first sync (avoid replaying years of history)
+HERMES_MC_DEFAULT_PROJECT_SLUG=      # used by `hermes kanban create --mc`
+HERMES_MC_DEBUG=false                # extra DEBUG-level logs
 ```
 
-All keys carry the `HERMES_MC_` prefix. `build.sh` writes them into the managed block of `~/.hermes/.env` with prefix intact. The plugin reads `os.environ["HERMES_MC_*"]` directly — no rename in the VM.
+All keys carry the `HERMES_MC_` prefix all the way into the VM (no rename in the managed `.env` block).
 
 ### `~/.hermes/auth.json` after registration
 
@@ -251,16 +243,16 @@ All keys carry the `HERMES_MC_` prefix. `build.sh` writes them into the managed 
 }
 ```
 
-`config.py` loads this once and caches in module state with mtime invalidation (re-reads if file changed). Avoids per-worker disk hits in hot kanban paths.
+`config.py` loads this once and caches in module state with mtime invalidation. Avoids per-worker disk hits in hot kanban paths.
 
-`HERMES_MC_USER_PAT` is read only when `auth.json` lacks a `mission_control` block (first run) OR when the operator explicitly runs `hermes mc register` / `refresh-projects`. After first run, the operator may delete `HERMES_MC_USER_PAT` from `.stack/.env` — subsequent restarts use stored keys.
+`HERMES_MC_USER_PAT` is read only when `auth.json` lacks a `mission_control` block (first run) OR when the operator explicitly runs `hermes mc register` / `refresh-projects`. After first run, the operator may delete `HERMES_MC_USER_PAT` from `.stack/.env`.
 
-### Two keys per VM
+### Two keys per VM (with distinct roles)
 
-- **Agent key** (`mcagt_…`) — pull loop, status PATCH, comment POST, external_ref POST. Scope: read/update/comment on own tasks (`agent_id == principal_id`). All `external_refs` rows the plugin creates use `source_kind='hermes'`, `source_id=self_agent_id` (the agent role enforces this match).
-- **Connector key** (`mccnn_…`) — local-originated task promotion (`POST /v1/tasks`) only. Scope: full task/project CRUD for the org.
+- **Agent key** (`mcagt_…`) — status PATCH, comment POST, external_ref POST. Scope: read/update/comment on own tasks (`agent_id == principal_id`). All `external_refs` rows the plugin creates use `source_kind='hermes'`, `source_id=self_agent_id` (the agent role enforces this match).
+- **Connector key** (`mccnn_…`) — events stream poll, one-shot task hydrate, local-originated promotion (`POST /v1/tasks`). Scope: full task/project CRUD + events read for the org. This is the right surface for "this VM is also a task source and an org-wide event consumer."
 
-The split mirrors MC's role design. Same VM acts as both, with two independent keys minted at registration.
+Why the events poll uses the connector key (not the agent key): MC's events stream is a whole-org change feed; per-row visibility filtering by `agent_id` would require joining events to the underlying resource on every read, which is expensive. The plugin filters events client-side (skip events for tasks where `agent_id != self_agent_id`).
 
 ### Project list cache
 
@@ -286,10 +278,8 @@ CREATE TABLE IF NOT EXISTS mc_links (
   source               TEXT    NOT NULL,        -- 'pulled' | 'pushed'
   local_status         TEXT    NOT NULL,        -- denorm cache of kanban.tasks.status
   last_terminal_state  TEXT,                    -- 'completed'|'failed'|'cancelled'|NULL
-  last_pulled_at       INTEGER NOT NULL DEFAULT 0,   -- mc updated_at last applied locally
-  last_pushed_at       INTEGER NOT NULL DEFAULT 0,   -- mc updated_at returned by our PATCH
-  last_pull_applied_at INTEGER NOT NULL DEFAULT 0,   -- wall-clock when pull last touched local
-  last_comment_cursor  TEXT    NOT NULL DEFAULT '',  -- opaque cursor from MC comments paginator
+  last_event_applied   INTEGER NOT NULL DEFAULT 0,    -- highest MC event id applied to this link
+  last_pushed_at       INTEGER NOT NULL DEFAULT 0,    -- mc updated_at returned by our PATCH
   push_dirty           INTEGER NOT NULL DEFAULT 0,
   push_failed_until    INTEGER NOT NULL DEFAULT 0,
   created_at           INTEGER NOT NULL
@@ -316,22 +306,26 @@ CREATE TABLE IF NOT EXISTS mc_apply_log (
 );
 CREATE INDEX IF NOT EXISTS mc_apply_log_applied ON mc_apply_log(applied_at);
 
-CREATE TABLE IF NOT EXISTS mc_pull_cursor (
-  k           TEXT    PRIMARY KEY,              -- 'tasks' or 'events'
-  cursor      INTEGER NOT NULL DEFAULT 0,       -- mc updated_at (tasks) | local task_events.id (events)
+-- Single global cursor pair: MC events id (pull loop) and local kanban
+-- task_events id (push reactor).
+CREATE TABLE IF NOT EXISTS mc_cursors (
+  k           TEXT    PRIMARY KEY,              -- 'events' (MC) or 'kanban_events' (local)
+  cursor      INTEGER NOT NULL DEFAULT 0,
   updated_at  INTEGER NOT NULL
 );
 ```
 
-**Why a separate DB:** the upstream kanban schema is owned by hermes; we don't add columns to it. Plugin tables live in their own SQLite (WAL mode, multi-writer-safe).
+**Why a separate DB:** the upstream kanban schema is owned by hermes; we don't add columns to it. Plugin tables live in their own SQLite (WAL mode, multi-writer-safe — gateway pull/push + occasional worker promotion call all open the same file).
 
-**Denormalized `local_status`:** updated transactionally in `links.db` every time we apply a pull or observe a push event. Lets `list_active_links()` be a pure links.db query (no per-link kanban-DB hit). Stale by at most one event cycle.
+**Denormalized `local_status`:** updated transactionally in `links.db` every time we apply an MC event or observe a kanban event. Lets `list_active_links()` be a pure links.db query (no per-link kanban-DB hit). Stale by at most one event cycle.
 
-**`mc_apply_log`:** the anti-feedback mechanism. When `apply.py` writes a status change to kanban (via the proper kanban_db helper), it captures the resulting `task_events.id` and inserts it here. The push reactor's main query becomes: `SELECT * FROM task_events WHERE id > ? AND id NOT IN (SELECT event_id FROM mc_apply_log WHERE applied_at > ?-86400000) ORDER BY id LIMIT 200`. Keeps the log bounded (purge entries older than 24h via a small periodic cleanup in the pull loop's idle ticks).
+**No `last_comment_cursor` column** (rev-3 had one) — comments arrive via the unified `comment.created` event in the MC events stream; no per-link comment paging needed.
+
+**`mc_apply_log`:** the anti-feedback mechanism. When `apply.py` writes a status change or comment to kanban (via the proper kanban_db helper), it captures the resulting `task_events.id`s (via pre/post-MAX range on the same kanban connection) and inserts them here. The push reactor's query filters out anything in this log. Bounded — entries older than 24h are purged on idle ticks.
 
 **Drift handling:**
-- If a kanban task referenced by `mc_links.local_task_id` is hard-deleted (rare; archive is the normal path), next push attempt sees no row, logs WARN, deletes the orphan link.
-- If `mc_task_id` returns 404 on a poll cycle, delete the link and archive the local task with `result='removed from mc'`.
+- If a kanban task referenced by `mc_links.local_task_id` is hard-deleted (rare; archive is the normal path), the push reactor sees no row, logs WARN, deletes the orphan link.
+- If a `task.deleted` event arrives for a linked task, archive the local task with `result='removed from mc'`.
 
 ### Status mapping (`status_map.py`)
 
@@ -341,7 +335,7 @@ MC statuses: `pending`, `ready`, `in_progress`, `blocked`, `completed`, `failed`
 | Hermes local | MC | Mechanism |
 |---|---|---|
 | `triage` | (no push — wait until promotion) | Link doesn't exist yet for unpushed tasks. |
-| `todo` (with parents not done) | (no push) | Same; link may exist but state is "waiting for parents". |
+| `todo` (with parents not done) | (no push) | Same. |
 | `todo` (no parents) | `pending` | Only meaningful for connector-pushed tasks pre-assignment. |
 | `scheduled` | `ready` | `metadata.scheduled_for: <iso8601>` carried in PATCH body. |
 | `ready` | `ready` | Direct. |
@@ -349,51 +343,40 @@ MC statuses: `pending`, `ready`, `in_progress`, `blocked`, `completed`, `failed`
 | `blocked` | `blocked` | `metadata.block_reason` from `block_task`'s `reason` arg. |
 | `review` | `in_progress` | `metadata.review_pending: true`. |
 | `done` + `last_terminal_state == 'completed'` | `completed` | Source of truth is the link, not result-string parsing. |
-| `done` + `last_terminal_state == 'failed'` | `failed` | Set by push reactor when it observes the `completion_blocked_hallucination` kind OR a `completed` event whose payload `outcome == 'failed'`. |
+| `done` + `last_terminal_state == 'failed'` | `failed` | Set by push reactor when it observes a `completed` event whose `latest_run.outcome` is not `completed`. |
 | `archived` | `cancelled` | `metadata.cancellation_reason` if known. |
 
-| MC | Hermes local | Apply mechanism (kanban_db helper) |
-|---|---|---|
-| `pending` | (skip — agent role can't see) | — |
-| `ready` | `ready` | New tasks: `kanban_db.create_task(conn, ..., initial_status='ready', tenant=..., assignee=...)`. Existing-task transitions: no-op if already `ready`/`scheduled`/`triage`/`todo`. Don't fight the dispatcher. |
-| `in_progress` | `running` | Almost always no-op (we're the agent — we're the one running it). If we see `in_progress` on a task whose local status is `ready` (operator force-set in MC), call nothing — the dispatcher's next claim cycle will transition it. |
-| `blocked` | `blocked` | `kanban_db.block_task(conn, task_id, reason=mc_block_reason)`. |
-| `completed` | `done` | `kanban_db.complete_task(conn, task_id, result='completed via mc', summary='completed via mc', metadata={'mc_terminal': 'completed'})`. Set `link.last_terminal_state='completed'`. (No `outcome=` kwarg — `complete_task` doesn't take one; the local run-row outcome is always `completed`.) |
-| `failed` | `done` | Same call but with `result=f'failed via mc: {reason}'`, `metadata={'mc_terminal': 'failed', 'mc_failure_reason': reason}`. Set `link.last_terminal_state='failed'`. (kanban_db has no `failed` task status; we surface failure as `done` + result/metadata. The local kanban dashboard's "completion outcome" column reads from the run-row, but for MC-applied completions we don't have a real run — the metadata is the source of truth.) |
-| `cancelled` | `archived` | `kanban_db.archive_task(conn, task_id)`. Set `link.last_terminal_state='cancelled'`. |
+| MC event kind | Local action |
+|---|---|
+| `task.created` (payload: `{task: full row}`) | If task.agent_id == our agent_id AND no link exists: `kanban_db.create_task(conn, ..., initial_status='ready', tenant=f'mc:{org_id}:{project_id}', assignee=our_agent_id, idempotency_key=f'mc:{mc_task_id}', board=cfg.board)`. Insert link `source='pulled', local_status='ready'`. POST `/v1/external_refs` with the agent key. If task.agent_id != us: skip. |
+| `task.assigned` (payload: `{from, to}`) | If `to == our_agent_id` AND no link: hydrate via `GET /v1/tasks/:id` and apply the create-flow above. If `from == our_agent_id` AND we have a link: log info; the task is no longer ours but we keep the link until a terminal event arrives (so we still see status changes the new agent makes). |
+| `task.status_changed` (payload: `{from, to, reason?}`) | If link exists: apply `to` via the appropriate kanban_db helper (block_task / complete_task / archive_task / no-op for transient transitions the dispatcher already owns). Update `link.local_status` + `last_terminal_state` if terminal. |
+| `task.updated` (payload: `{changed: {field: [old, new]}}`) | v1: ignore non-status changes (the plugin's local kanban row keeps its original title/body; humans refer to MC for the latest). v1.1 may add re-fetch + local mirror. |
+| `task.deleted` | If link exists: `kanban_db.archive_task(conn, local_task_id)` + `link.last_terminal_state='cancelled'` + record apply. |
+| `comment.created` (payload: `{comment: full row}`) | If link exists for the parent task AND `mc_comment_links.has_mc(comment.id) is False`: `kanban_db.add_comment(conn, local_task_id, author=f'mission-control:{comment.author_type}:{comment.author_id}', body=comment.body)`. Record apply. Insert `mc_comment_links(source='pulled')`. If `link.local_status == 'blocked'`: auto-unblock via `kanban_db.unblock_task(conn, local_task_id)` (after first appending a system-comment "auto-unblock: new comment from <author_type>"). |
+| `comment.deleted` | v1: ignore. (Comment stays in local kanban for audit.) |
+| `external_ref.added` / `external_ref.removed` | v1: ignore. (Plugin posts its own external_refs; others' refs aren't actionable here.) |
+| `agent.*` / `connector.*` / `project.*` | v1: ignore. (Plugin doesn't react to org topology changes.) |
 
-`apply.py` wraps each kanban_db helper call to:
-1. Open `kanban_db.connect(board=HERMES_MC_BOARD)`.
-2. `pre_max = conn.execute("SELECT IFNULL(MAX(id), 0) FROM task_events WHERE task_id = ?", (task_id,)).fetchone()[0]`.
-3. Call the helper (e.g. `kanban_db.block_task(conn, task_id, reason=...)`).
-4. `post_max = conn.execute("SELECT IFNULL(MAX(id), 0) FROM task_events WHERE task_id = ?", (task_id,)).fetchone()[0]`.
-5. For each `event_id in range(pre_max + 1, post_max + 1)`, INSERT into `links.db.mc_apply_log(event_id, link_id, applied_at)`. Range-INSERT (not `event_id IN (...)`) is correct because no other writer touches THIS task_id concurrently — the dispatcher only writes to a task after it has been claimed, and the pull-apply path runs on tasks the dispatcher isn't actively touching (or, when it is, the events are interleaved in id order and the range still captures them all).
-6. Update `mc_links.local_status`, `last_pulled_at`, `last_pull_applied_at`, and (if terminal) `last_terminal_state` in one `links.db` transaction.
-
-The pre/post-max approach replaces the earlier "highest id whose task_id matches" — that was race-vulnerable. Reading both bookends under the same kanban connection captures every event the helper emitted for this task, and no others.
-
-If step 5 fails after step 3 succeeds (rare crash window), the push reactor will see the events and try to push them back to MC. MC's PATCH is naturally idempotent for status (we send the desired state, MC accepts) so this is at worst a wasted PATCH, not corruption.
+`apply.py` exposes one function per event kind plus a dispatch table; unknown kinds (forward-compat with future MC versions) are logged at DEBUG and skipped.
 
 ---
 
 ## Sync semantics
 
-### kanban_db helpers used (verified signatures)
+### kanban_db helpers used (verified signatures from `services/hermes/_source/hermes_cli/kanban_db.py`)
 
-The plugin calls the following from `hermes_cli.kanban_db`. All take a `sqlite3.Connection` as first arg (obtained via `kanban_db.connect(board=...)`):
-
-- `connect(board: str | None = None) -> sqlite3.Connection`
+- `connect(db_path=None, *, board=None) -> sqlite3.Connection`
 - `create_task(conn, *, title, body=None, assignee=None, ..., tenant=None, idempotency_key=None, initial_status='running', board=None) -> str` — we pass `initial_status='ready'`, `tenant=f'mc:{org_id}:{project_id}'`, `idempotency_key=f'mc:{mc_task_id}'`.
-- `add_comment(conn, task_id, author, body) -> int` — returns the comment row id.
-- `list_comments(conn, task_id) -> list[Comment]`
-- `block_task(conn, task_id, *, reason=None, expected_run_id=None) -> bool` (kwarg-only after positional task_id)
-- `unblock_task(conn, task_id) -> bool` — there is no `by=` kwarg; if we want to record "unblocked by MC", we append a kanban comment first.
-- `complete_task(conn, task_id, *, result=None, summary=None, metadata=None, created_cards=None, expected_run_id=None) -> bool` — kwarg-only after positional task_id; no `outcome` kwarg exists.
+- `add_comment(conn, task_id, author, body) -> int`
+- `block_task(conn, task_id, *, reason=None, expected_run_id=None) -> bool`
+- `unblock_task(conn, task_id) -> bool`
+- `complete_task(conn, task_id, *, result=None, summary=None, metadata=None, created_cards=None, expected_run_id=None) -> bool`
 - `archive_task(conn, task_id) -> bool`
 - `latest_run(conn, task_id) -> Optional[Run]` — used by the push reactor to look up `task_runs.outcome` when processing a `completed` event.
-- **New upstream helper #1:** `kanban_db.list_events_since(conn, last_id, limit) -> list[Event]` — must return rows ordered by `id ASC` (NOT `created_at` — that has 1-second tie risk) with fields `(id, task_id, kind, payload, run_id, created_at)`. ~15 LOC. If upstream rejects, the plugin runs the raw SQL itself against `kanban_db.connect(board=...)` connection.
+- Plugin runs raw SQL `SELECT id, task_id, kind, payload, run_id, created_at FROM task_events WHERE id > ? ORDER BY id ASC LIMIT ?` directly against the kanban connection for the push reactor's tail. `services/hermes/_source/` is gitignored (separately-cloned upstream tree), so we don't add a helper upstream for v1; raw SQL is the documented fallback.
 
-**`tasks.idempotency_key` is NOT uniquely indexed.** The existing index is non-unique and kanban_db's `create_task` dedups by SELECT-then-INSERT. The pull loop is single-writer (only the gateway runs it), so the create-then-check race is not a real problem — we accept it explicitly. The earlier draft claimed a partial unique index; correction noted.
+**`tasks.idempotency_key` is NOT uniquely indexed.** Existing index is non-unique; kanban_db dedups by SELECT-then-INSERT. The pull loop is single-writer (only the gateway runs it), so the race is not a real problem.
 
 ### Event kinds the push reactor observes
 
@@ -401,21 +384,19 @@ Real kanban event kinds (audited from `_append_event` callsites):
 
 `assigned`, `blocked`, `commented`, `promoted`, `scheduled`, `spawned`, `claimed`, `archived`, `completed`, `unblocked`, `completion_blocked_hallucination`.
 
-The push reactor maps them as follows:
+The push reactor maps them:
 
-| Event kind | Mapped MC PATCH |
+| Event kind | Mapped MC PATCH (or POST) |
 |---|---|
 | `claimed` | PATCH status=`in_progress` |
 | `blocked` | PATCH status=`blocked` + `metadata.block_reason` from payload |
-| `unblocked` | PATCH status=`ready` (or `in_progress` if a `spawned` follows immediately; reactor coalesces in a 1s window) |
-| `completed` | PATCH MC status — but FIRST call `kanban_db.latest_run(conn, ev.task_id)` to read `Run.outcome`. The complete `task_runs.outcome` enum is `completed | blocked | crashed | timed_out | spawn_failed | gave_up | reclaimed | NULL` (NULL while still running). Map: `completed` → MC `completed`; everything else (`crashed`, `timed_out`, `spawn_failed`, `gave_up`, `reclaimed`, `blocked`) → MC `failed` with `metadata.failure_reason = task.last_failure_error or task.result or f'kanban outcome: {outcome}'`. The `completed` event payload itself does not carry outcome — outcome lives on `task_runs`. Always set `link.last_terminal_state` to whichever you sent. |
+| `unblocked` | PATCH status=`ready` (or `in_progress` if a `spawned` follows within 1s; reactor coalesces) |
+| `completed` | PATCH MC status — first call `kanban_db.latest_run(conn, ev.task_id)` to read `Run.outcome`. Map: `outcome='completed'` → MC `completed`; everything else (`crashed`, `timed_out`, `spawn_failed`, `gave_up`, `reclaimed`, `blocked`) → MC `failed` + `metadata.failure_reason = task.last_failure_error or task.result or f'kanban outcome: {outcome}'`. The `completed` event payload itself does not carry outcome — outcome lives on `task_runs`. Always set `link.last_terminal_state`. |
 | `completion_blocked_hallucination` | PATCH MC status=`failed` + `metadata.failure_reason='hallucinated subtask references; see kanban logs'`. Set `link.last_terminal_state='failed'`. |
 | `archived` | PATCH status=`cancelled` |
 | `scheduled` | PATCH status=`ready` + `metadata.scheduled_for` |
-| `assigned` | (no push — the agent_id doesn't change for MC-pulled tasks; for connector-pushed tasks, MC's POST already set it) |
-| `promoted` | (no push — local "todo→ready" already pushed via the ready mapping above when status reaches `ready`) |
-| `spawned` | (no push — implementation detail) |
-| `commented` | POST /v1/tasks/:id/comments (unless filtered out by `mc_comment_links` or `mission-control:` author prefix) |
+| `commented` | POST /v1/tasks/:id/comments unless filtered by `mc_comment_links.has_local()` or `author.startswith('mission-control:')` |
+| `assigned`, `promoted`, `spawned` | No push (local-only details) |
 
 ### Pull loop
 
@@ -424,51 +405,34 @@ async def pull_loop():
     backoff = Backoff(base=5, factor=2, cap=120, jitter=0.25)
     while not _stopping:
         try:
-            tasks_cursor = links_db.get_pull_cursor('tasks')
-            new_tasks_cursor = tasks_cursor
+            cursor = links_db.get_cursor('events')
+            highest = cursor
+            had_more = True
+            while had_more:
+                resp = await client.events_list(
+                    connector_key=cfg.connector_key,
+                    since=highest,
+                    kinds='task,comment,external_ref',
+                    limit=100,
+                )
+                events = resp['events']
+                for ev in events:
+                    if ev['id'] <= cfg.bootstrap_min_event_id:
+                        continue   # skip pre-bootstrap history
+                    await apply.handle_one_event(ev)
+                    highest = max(highest, ev['id'])
+                had_more = bool(resp.get('next_cursor')) or len(events) >= 100
+                # next_cursor (when present) is for within-since-window paging.
+                # Once we drain, we advance `since` and re-poll on the normal
+                # interval — no need to follow next_cursor across loop iterations.
+                # Break early once we've drained the window.
+                if not events:
+                    break
 
-            page = await client.tasks_list(
-                agent_key=cfg.agent_key,
-                agent_id=cfg.agent_id,
-                updated_since=tasks_cursor,
-                limit=100,
-            )
-            for mc_task in page.data:
-                await apply.handle_one_task(mc_task)
-                new_tasks_cursor = max(new_tasks_cursor, mc_task['updated_at'])
-            while page.next_cursor:
-                page = await client.tasks_list(agent_key=cfg.agent_key, cursor=page.next_cursor)
-                for mc_task in page.data:
-                    await apply.handle_one_task(mc_task)
-                    new_tasks_cursor = max(new_tasks_cursor, mc_task['updated_at'])
-
-            for link in links_db.list_active_links():     # filters local_status in {ready,running,blocked,scheduled,review}
-                cursor = link.last_comment_cursor or None
-                while True:
-                    cpage = await client.task_comments_list(
-                        agent_key=cfg.agent_key,
-                        mc_task_id=link.mc_task_id,
-                        cursor=cursor,
-                        limit=100,
-                    )
-                    for c in cpage.data:
-                        await apply.handle_one_comment(link, c)
-                    # Per "Required MC changes" #2: cpage.next_cursor is ALWAYS
-                    # populated (it's a "tip" cursor on the last page that
-                    # returns an empty page next time). Save it every iteration,
-                    # then break when an empty data page comes back.
-                    links_db.set_link_comment_cursor(link.local_task_id, cpage.next_cursor)
-                    if not cpage.data:
-                        break
-                    cursor = cpage.next_cursor
-
-            # Advance the global tasks-cursor ONLY after both phases succeed.
-            links_db.set_pull_cursor('tasks', new_tasks_cursor)
-
-            # Purge apply-log entries older than 24h (idle housekeeping).
+            links_db.set_cursor('events', highest)
             links_db.purge_apply_log(older_than_ms=24*3600*1000)
-
             backoff.reset()
+
         except (httpx.RequestError, httpx.HTTPStatusError, asyncio.TimeoutError) as e:
             log.warning("mc pull: transient failure (%s); backing off", e)
             await asyncio.sleep(backoff.next())
@@ -480,59 +444,59 @@ async def pull_loop():
         await asyncio.sleep(cfg.poll_interval_s)
 ```
 
-`handle_one_task(mc_task)` in `apply.py`:
+**`cfg.bootstrap_min_event_id`:** at registration time, the registrar calls `client.events_list(since=0, limit=1)` to get the current head of the events stream, then sets `bootstrap_min_event_id` to `head_id - (HERMES_MC_BOOTSTRAP_SINCE_DAYS converted to estimated event count)`. Approximation: for a fresh agent we want to start at "now"; for one that's been offline a few days we want to replay recent history. Simpler v1 approach: at registration time set `events` cursor to `0` and use `bootstrap_min_event_id = head_id - 100000` (skip everything before — practically "now-ish"). The exact tunable behavior can live in a config; the spec just needs to make sure we don't replay years of history on first run.
 
-1. Lookup `mc_links` by `mc_task_id`.
-2. **No link**, MC status is one of `{ready, in_progress, blocked}`:
-   - `kanban_db.create_task(conn, title=mc_task.title, body=mc_task.body, tenant=f'mc:{org_id}:{project_id}', assignee=cfg.agent_id, initial_status='ready', idempotency_key=f'mc:{mc_task.id}', board=cfg.board)` → `local_task_id`.
-   - Insert link: `source='pulled', mc_agent_id=mc_task.agent_id, local_status='ready', last_pulled_at=mc_task.updated_at`.
-   - POST `/v1/external_refs` with `source_kind='hermes', source_id=cfg.agent_id, external_id=local_task_id, resource_type='task', resource_id=mc_task.id` using **agent key** (Idempotency-Key: `hermes:xrf:{local_task_id}`).
-   - Record the created-task event id in `mc_apply_log`.
-3. **No link**, MC status is one of `{pending, completed, failed, cancelled}`: skip (no value in mirroring terminal/unassigned).
-4. **Link exists, source='pulled', mc_task.updated_at > link.last_pulled_at**:
-   - Compute `(local_status, terminal)` from `status_map.mc_to_local(mc_task)`.
-   - If `terminal`: call appropriate `kanban_db.{complete,archive}_task(...)`, set `link.last_terminal_state`.
-   - Else if `local_status == 'blocked'`: `kanban_db.block_task(conn, local_task_id, reason=mc_task.metadata.get('block_reason'))`.
-   - Else: log and no-op (state transitions like `ready→in_progress` are owned by the dispatcher, not us).
-   - Record event id(s) in `mc_apply_log`. Update `link.local_status`, `last_pulled_at`, `last_pull_applied_at`.
-5. **Link exists, source='pushed', mc_task.updated_at > link.last_pushed_at + cfg.conflict_slop_ms**:
-   - Genuine conflict (operator edited in MC after our PATCH). Log WARN with both updated_ats; apply MC state as in step 4.
-6. **Otherwise (echo of our own push, within slop window):** no-op, but update `link.last_pulled_at` to acknowledge.
+Actually simpler still: at registration time, set the `events` cursor to the current head id minus a "small replay window" (e.g. last 1000 events). The plugin will see the last day or so of events, dedup via idempotency keys / link membership, and proceed. No need for the `bootstrap_min_event_id` separate filter.
 
-`handle_one_comment(link, mc_comment)`:
+**`apply.handle_one_event(ev)`** dispatches on `ev['kind']` per the table in "Status mapping" above. Each handler opens a kanban connection on demand and captures the resulting `task_events.id`s via pre/post-MAX range into `mc_apply_log`:
 
-1. If `mc_comment_links.has_mc(mc_comment.id)`: skip (already mirrored).
-2. Open `kanban_db.connect(board=cfg.board)`.
-3. `comment_id = kanban_db.add_comment(conn, link.local_task_id, author=f'mission-control:{mc_comment.author_type}:{mc_comment.author_id}', body=mc_comment.body)`.
-4. Record the comment-row's `task_events` row id in `mc_apply_log` (kanban emits a `commented` event row alongside the comment row; we capture both via the highest event id post-insert).
-5. INSERT `mc_comment_links(local_comment_id=comment_id, mc_comment_id=mc_comment.id, source='pulled', ...)`.
-6. **Auto-unblock**: if `link.local_status == 'blocked'`:
-   - Append a system-comment first noting the unblock trigger: `add_comment(conn, link.local_task_id, author='mission-control:system', body=f'auto-unblock: new comment from {mc_comment.author_type}')`.
-   - `kanban_db.unblock_task(conn, link.local_task_id)`.
-   - Record the unblocked event id in `mc_apply_log`.
-   - Update `link.local_status='ready'`.
+```python
+def _apply_with_log(local_task_id, fn, *args, **kwargs):
+    """Wrap a kanban_db mutation. Captures any task_events rows it emits
+    for this task into mc_apply_log so the push reactor skips them."""
+    with kanban_db.connect(board=cfg.board) as conn:
+        pre_max = conn.execute(
+            "SELECT IFNULL(MAX(id), 0) FROM task_events WHERE task_id = ?",
+            (local_task_id,)).fetchone()[0]
+        result = fn(conn, local_task_id, *args, **kwargs)
+        post_max = conn.execute(
+            "SELECT IFNULL(MAX(id), 0) FROM task_events WHERE task_id = ?",
+            (local_task_id,)).fetchone()[0]
+        with links_db.connect(cfg.links_db_path()) as ldb:
+            for event_id in range(pre_max + 1, post_max + 1):
+                links_db.record_apply(ldb, event_id=event_id, link_id=local_task_id)
+        return result
+```
+
+The pre/post-MAX range correctly captures every event the helper emitted for this task (no other writer touches the same task_id concurrently — the dispatcher and pull loop are serialized on per-task state via the link).
 
 ### Push reactor
 
+The kanban dispatcher writes `task_events` rows on every status change, comment, etc. We tail this table on a 1s SQLite poll (cheap in WAL):
+
 ```python
 async def push_reactor():
-    last_event_id = links_db.get_pull_cursor('events')
+    last_event_id = links_db.get_cursor('kanban_events')
     backoff = Backoff(base=5, factor=2, cap=60, jitter=0.25)
     while not _stopping:
         try:
-            conn = kanban_db.connect(board=cfg.board)
-            events = kanban_db.list_events_since(conn, last_event_id, limit=200)
-            for ev in events:
-                last_event_id = ev.id
-                if links_db.is_in_apply_log(ev.id):
-                    continue
-                link = links_db.get_link(ev.task_id)
-                if not link:
-                    log.debug("event %d on unlinked task %s — skip", ev.id, ev.task_id)
-                    continue
-                _handle_event(link, ev)
-            await _drain_push_queue()
-            links_db.set_pull_cursor('events', last_event_id)
+            with kanban_db.connect(board=cfg.board) as kconn:
+                rows = kconn.execute(
+                    "SELECT id, task_id, kind, payload, run_id, created_at "
+                    "FROM task_events WHERE id > ? ORDER BY id ASC LIMIT 200",
+                    (last_event_id,)).fetchall()
+
+            with links_db.connect(cfg.links_db_path()) as ldb:
+                for r in rows:
+                    last_event_id = r['id']
+                    if links_db.is_in_apply_log(ldb, r['id']):
+                        continue   # echo of a pulled event — skip
+                    link = links_db.get_link(ldb, r['task_id'])
+                    if not link:
+                        continue   # not an MC-mirrored task
+                    await _handle_kanban_event(link, r)
+                links_db.set_cursor(ldb, 'kanban_events', last_event_id)
+
             backoff.reset()
         except (httpx.RequestError, httpx.HTTPStatusError, asyncio.TimeoutError) as e:
             log.warning("mc push: transient failure (%s); backing off", e)
@@ -545,37 +509,45 @@ async def push_reactor():
         await asyncio.sleep(1.0)
 ```
 
-`_handle_event(link, ev)` consults `status_map.event_kind_to_patch(ev.kind, ev.payload)` for status events; for `commented` events, it filters via `mc_comment_links.has_local(ev.payload.get('comment_id'))` AND a defensive check that the comment author doesn't start with `mission-control:` (defense-in-depth — if a future bug skips the mc_comment_links insert, the author prefix catches it). For `completed` events, it calls `kanban_db.latest_run(conn, ev.task_id)` and uses the `Run.outcome` per the mapping table.
+`_handle_kanban_event(link, r)` consults `status_map.event_kind_to_patch(r.kind, r.payload)` for status events; for `commented` events, filters via `mc_comment_links.has_local(r.payload.get('comment_id'))` AND a defensive check that the comment author doesn't start with `mission-control:`. For `completed` events, calls `kanban_db.latest_run(conn, r.task_id)` and uses the `Run.outcome` per the mapping table.
 
-`_drain_push_queue()` issues PATCH and POST in serial, marks `push_dirty=0`, updates `link.last_pushed_at` to the response's `updated_at`, and (for terminal transitions) sets `link.last_terminal_state`. On failure: leaves `push_dirty=1`, sets `push_failed_until=now+backoff`.
+On successful PATCH/POST: clear `push_dirty`, update `link.last_pushed_at` to the response's `updated_at`, set `link.last_terminal_state` if terminal. On failure: leave `push_dirty=1`, set `push_failed_until=now+backoff`. On 409 state-machine conflict: re-pull MC's canonical state (via the events stream's natural delivery), clear `push_dirty`.
 
-**No ping-pong defer.** Earlier draft had a `last_pull_applied_at`-based defer; rev-2 review showed it caused every newly-pulled task's first `ready→in_progress` PATCH to be deferred by `poll_interval + slop` (~15s default). The defer was over-cautious — the `mc_apply_log` mechanism is sufficient to suppress echoes, and any remaining race (operator changes MC after our PATCH within the cursor window) is just last-writer-wins, which is already the v1 semantic. The defer mechanism is removed. (`last_pull_applied_at` is kept on the link for diagnostics only.)
+No ping-pong defer needed — `mc_apply_log` suppresses pull→push echoes, and any remaining race (operator changes MC after our PATCH within the cursor window) is just last-writer-wins, which is the documented v1 semantic.
+
+### Comment dedup
+
+Bidirectional dedup uses two mechanisms layered together:
+
+- **Pull direction (MC → local):** before adding a comment, check `mc_comment_links.has_mc(mc_comment.id)`. If true → already mirrored; skip. Else → add comment with author prefix `mission-control:<author_type>:<author_id>` and insert `mc_comment_links(source='pulled')`.
+- **Push direction (local → MC):** the reactor's `commented` handler filters by (a) `mc_comment_links.has_local(local_comment_id)` AND (b) author prefix check (skip if author starts with `mission-control:`). This is defense-in-depth — if a future bug skips the `mc_comment_links` insert, the author prefix catches it. On successful POST, insert `mc_comment_links(source='pushed')` with the MC's returned `cmt_…` id.
 
 ### Local-originated promotion
 
-User runs `hermes kanban create --mc [<project-slug>] -t "task title"` (uses the existing `create` subcommand — there is no `add` alias). The `--mc` flag is added by the plugin via a register-time extension to the kanban subparser.
-
-**Subparser extension mechanism:** plugin discovery runs before the gateway starts but AFTER the kanban subparser is constructed in `cli.py` (line ordering verified in upstream). The plugin reaches into `hermes_cli.kanban.build_parser`'s output via `ctx.register_subcommand_extension('kanban', _extend_kanban_create)`. **This API does not exist on PluginContext today** — the plugin spec includes adding it as a one-method upstream change (same family as the `list_events_since` helper). Without it, the fallback is for `hermes mc` to provide `hermes mc promote <task_id>` only, and `hermes kanban create --mc` ships in plugin v1.1 once the upstream API lands.
-
-The promotion flow (used by both the CLI extension and the `mc_promote_task` tool):
+User runs `hermes mc promote <local_task_id> [--project <slug>]` or the LLM calls `mc_promote_task(local_task_id, project_slug=None)`. Flow:
 
 1. Resolve `project_slug → project_id` via `~/.hermes/mission-control/projects.json` (cached). Fail with friendly error pointing to `hermes mc refresh-projects` if unknown.
-2. Create the local kanban task in board `cfg.board`: `kanban_db.create_task(conn, ..., tenant=f'mc:{org_id}:{project_id}', initial_status='ready', assignee=cfg.agent_id, board=cfg.board)`.
-3. Call `client.tasks_create(connector_key=cfg.connector_key, project_id=project_id, title=..., body=..., agent_id=cfg.agent_id, idempotency_key=f'hermes:{local_task_id}', metadata={'origin': 'hermes'})`. Header `Idempotency-Key: hermes:{local_task_id}` for the additional Stripe-style guard.
-4. Insert `mc_links(local_task_id, mc_task_id, source='pushed', last_pushed_at=mc_task.updated_at, local_status='ready', ...)`.
-5. POST `/v1/external_refs` with the **agent** key (`source_id=cfg.agent_id`).
+2. Look up `links_db.get_link(local_task_id)` — if present, return `{mc_task_id: existing, already_linked: True}`.
+3. Read local kanban task via `kanban_db.connect(board=cfg.board)` + `kanban_db.get_task(conn, local_task_id)`.
+4. `client.tasks_create(connector_key=cfg.connector_key, project_id=project_id, title=task.title, body=task.body, agent_id=cfg.agent_id, idempotency_key=f'hermes:{local_task_id}', metadata={'origin': 'hermes'})`. Header `Idempotency-Key: hermes:{local_task_id}`.
+5. On `IdempotencyConflict` whose `existing_task_id` matches our link → return `already_linked=True`. Mismatch → log ERROR + raise to caller.
+6. Insert `mc_links(local_task_id, mc_task_id, source='pushed', last_pushed_at=mc_task.updated_at, local_status='ready', ...)`.
+7. POST `/v1/external_refs` with the **agent** key (`source_id=cfg.agent_id`, `idempotency_key=f'hermes:xrf:{local_task_id}'`).
+8. Return `{mc_task_id, already_linked: False}`.
 
-Calling promotion twice on the same local task is idempotent: the MC body-level idempotency_key returns 409 with `details.existing_task_id`. We compare to our link; if it matches → return success with `already_linked=true`; else log ERROR (someone else used the same key) and return 409 to the caller.
+The MC `task.created` event for this newly-created task will arrive in the next pull cycle. The apply handler sees we already have a `mc_links` row for `mc_task_id`, so it's a no-op.
 
-### Idempotency summary
+### Idempotency keys
+
+All keys conform to MC's regex `^[a-z][a-z0-9_-]{0,31}:.{1,200}$` (1-32 char source prefix + colon + payload).
 
 | Operation | Key |
 |---|---|
-| Pull → create local task | `kanban_db.create_task(..., idempotency_key=f'mc:{mc_task_id}')` — accepts the SELECT-then-INSERT race because pull is single-writer. |
-| Push → create MC task (promotion) | `Idempotency-Key: hermes:<local_task_id>` header + `idempotency_key: hermes:<local_task_id>` body field. Both layers. |
-| Push → MC PATCH | None needed; PATCH is naturally idempotent (we always send full desired status + metadata). |
-| Push → comment | `Idempotency-Key: hermes:cmt:<local_comment_id>` header. |
-| Push → external_ref | `Idempotency-Key: hermes:xrf:<local_task_id>` header. The unique index on `(resource_type, resource_id, source_kind, source_id)` is the second layer. |
+| Pull → create local task | `kanban_db.create_task(..., idempotency_key=f'mc:{mc_task_id}')` |
+| Push → create MC task (promotion) | Header `Idempotency-Key: hermes:<local_task_id>` + body field `idempotency_key: hermes:<local_task_id>`. Both layers. |
+| Push → MC PATCH | None needed; PATCH is naturally idempotent (we always send the full desired status + metadata). |
+| Push → comment | Header `Idempotency-Key: hermes:cmt:<local_comment_id>` |
+| Push → external_ref | Header `Idempotency-Key: hermes:xrf:<local_task_id>` (also second-layer dedup via MC's unique index on `(resource_type, resource_id, source_kind, source_id)`) |
 
 ---
 
@@ -585,21 +557,20 @@ Calling promotion twice on the same local task is idempotent: the MC body-level 
 
 Two mechanisms cover this:
 
-1. **All MC comments → local kanban thread.** Pulled comments land via `kanban_db.add_comment(conn, task_id, author=f'mission-control:{author_type}:{author_id}', body=...)`. Permanent, visible in dashboard / CLI / `kanban_list_comments`. Next worker invocation sees them.
+1. **All MC comments → local kanban thread.** `comment.created` events land via `kanban_db.add_comment(conn, task_id, author=f'mission-control:{author_type}:{author_id}', body=...)`. Permanent, visible in dashboard / CLI / `kanban_list_comments`. Next worker invocation sees them.
+2. **MC comment on a `blocked` task → auto-unblock.** When the apply handler sees a `comment.created` event for a task whose `link.local_status == 'blocked'`, it calls `kanban_db.unblock_task(conn, local_task_id)` after writing the comment. The dispatcher re-claims the task on its next tick and spawns a new worker, which orients via `kanban_list_comments` and sees the human's response.
 
-2. **MC comment on a `blocked` task → auto-unblock.** When `apply.handle_one_comment(link, c)` sees `link.local_status == 'blocked'`, it calls `kanban_db.unblock_task(conn, local_task_id)` after writing the comment. The dispatcher re-claims the task on its next tick and spawns a new worker, which orients via `kanban_list_comments` and sees the human's response.
-
-Comments on `running`/`ready`/other non-blocked tasks accumulate silently (not lost, just don't interrupt). Future config knob: `HERMES_MC_AUTO_UNBLOCK_STATUSES` (default `blocked`).
+Comments on `running`/`ready`/other non-blocked tasks accumulate silently. Future config knob: `HERMES_MC_AUTO_UNBLOCK_STATUSES` (default `blocked`).
 
 The plugin does NOT register `on_session_start` / `on_session_end` hooks — no live-session state needed.
 
-The author prefix `mission-control:` (not `mc:`, which is too short and reserves too much) is the defense-in-depth filter on the push side: any local comment whose author starts with `mission-control:` is skipped by the push reactor regardless of `mc_comment_links` state.
+The author prefix `mission-control:` (not `mc:`, which is too short) is the defense-in-depth filter on the push side: any local comment whose author starts with `mission-control:` is skipped by the push reactor regardless of `mc_comment_links` state.
 
 ---
 
 ## Agent tool
 
-ONE tool exposed to the LLM (registered via `ctx.register_tool`):
+One tool exposed to the LLM (registered via `ctx.register_tool`):
 
 ### `mc_promote_task`
 
@@ -622,101 +593,88 @@ Returns `{"mc_task_id": "t_xyz", "already_linked": <bool>}`.
 
 **Why no `mc_comment` tool:** the existing `kanban_comment(task_id, body)` tool already adds the comment to the local thread; the push reactor mirrors any local comment on a linked task up to MC automatically. A separate `mc_comment` would be a redundant alias.
 
-**Why no `mc_status` tool:** `hermes mc status` (CLI) covers this for operators. For the LLM, the existing kanban status tools already show task state; the MC linkage info is operator-debug, not agent-decision-relevant. Skip.
+**Why no `mc_status` tool:** `hermes mc status` (CLI) covers this for operators. For the LLM, the existing kanban status tools already show task state.
 
-**Why no `mc_update_status` tool:** status transitions go through the normal kanban lifecycle (`kanban_block`, `kanban_complete`, etc.), and the push reactor mirrors them. Direct status writes from the LLM would bypass the dispatcher's bookkeeping.
+**Why no `mc_update_status` tool:** status transitions go through the normal kanban lifecycle (`kanban_block`, `kanban_complete`, etc.); the push reactor mirrors them.
 
 ---
 
 ## CLI
 
-`hermes mc <subcommand>` — registered via `ctx.register_cli_command(name='mc', help='MissionControl integration', setup_fn=_mc_setup, handler_fn=_mc_handler)`. PluginContext API verified in `_source/hermes_cli/plugins.py:387`. `setup_fn(parser)` adds the subparsers; `handler_fn(args)` dispatches.
+`hermes mc <subcommand>` — registered via `ctx.register_cli_command(name='mc', help='MissionControl integration', setup_fn=_mc_setup, handler_fn=_mc_handler)` (verified at `_source/hermes_cli/plugins.py:387`).
 
 ```
-hermes mc register [--pat mcpat_…] [--name <agent-name>] [--bootstrap-since 7d]
+hermes mc register [--pat mcpat_…] [--name <agent-name>]
                               # First-run registration OR re-register. Reads PAT
                               # from --pat or HERMES_MC_USER_PAT. Mints (or rotates)
                               # agent + connector keys. Writes ~/.hermes/auth.json.
-                              # Caches projects.
+                              # Caches projects. Sets initial events cursor.
                               # Idempotent: re-running by an already-registered VM
-                              # rotates BOTH keys via POST /v1/agents/:id/rotate-key
-                              # and POST /v1/connectors/:id/rotate-key.
-                              #
-                              # Fails hard if POST /v1/connectors returns 404/403:
-                              # error code 'mc.connector_routes_unavailable' with
-                              # message "MC deployment does not support connector
-                              # minting; promotion features unavailable. Either
-                              # upgrade MC to a version with POST /v1/connectors,
-                              # or wait for plugin v1.1 which can run agent-only."
+                              # rotates BOTH keys.
+                              # Fails hard if POST /v1/connectors returns 404/403
+                              # (mc.connector_routes_unavailable).
 
 hermes mc status              # Print URL, org, agent_id, connector_id, last
-                              # successful pull/push, queue depth, last 5 errors,
-                              # loop-running indicator.
+                              # event cursor, last pull/push, error counts.
 
 hermes mc refresh-projects [--pat mcpat_…]
-                              # Re-fetch the project list. PAT read from
-                              # HERMES_MC_USER_PAT if --pat omitted.
+                              # Re-fetch the project list.
 
 hermes mc promote <local_task_id> [--project <slug>]
-                              # Promote an already-existing local task to MC.
+                              # Promote a local task to MC.
 
 hermes mc unlink <local_task_id>
-                              # Remove the MC link. Local task is unaffected.
-                              # MC task is NOT deleted (use MC API directly).
+                              # Remove the MC link. Local task unaffected.
+                              # MC task NOT deleted (use MC API directly).
 
 hermes mc test                # Smoke test:
                               #   1. GET /v1/me with agent key
                               #   2. GET /v1/me with connector key
-                              #   3. GET /v1/tasks?limit=1
-                              # Exit 0 on green; non-zero + diagnostics on fail.
+                              #   3. GET /v1/events?limit=1
+                              # Exit 0 on green; non-zero with diagnostics on fail.
 ```
 
-`hermes kanban create --mc [<slug>]` — added via the subparser-extension mechanism described in "Local-originated promotion". If the upstream extension API isn't available yet, this flag ships in plugin v1.1; v1 uses `hermes mc promote` as the operator-side path.
+`hermes kanban create --mc [<slug>]` — added in v1.1 once the upstream `register_subcommand_extension` API lands; v1 ships `hermes mc promote` as the operator-side path.
 
 ---
 
 ## Build.sh wiring
 
-New section in `services/hermes/build.sh`, executed alongside the other lever-conditional sections. Pseudocode:
+New section in `services/hermes/build.sh`, alongside the existing lever-conditional sections:
 
 ```bash
-# MissionControl (lever: HERMES_MC_URL non-empty in .stack/.env)
 if [ -n "${HERMES_MC_URL:-}" ]; then
   HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
 HERMES_MC_URL=$HERMES_MC_URL
 HERMES_MC_AGENT_NAME=${HERMES_MC_AGENT_NAME:-$VM}
 HERMES_MC_BOARD=${HERMES_MC_BOARD:-mc}
 HERMES_MC_POLL_INTERVAL=${HERMES_MC_POLL_INTERVAL:-10}
-HERMES_MC_BOOTSTRAP_SINCE=${HERMES_MC_BOOTSTRAP_SINCE:-7d}
+HERMES_MC_BOOTSTRAP_SINCE_DAYS=${HERMES_MC_BOOTSTRAP_SINCE_DAYS:-7}
 HERMES_MC_DEFAULT_PROJECT_SLUG=${HERMES_MC_DEFAULT_PROJECT_SLUG:-}
-HERMES_MC_CONFLICT_SLOP_MS=${HERMES_MC_CONFLICT_SLOP_MS:-5000}
 HERMES_MC_DEBUG=${HERMES_MC_DEBUG:-false}"
 
-  # Only sync USER_PAT into the VM if still set (operator hasn't cleared it).
   if [ -n "${HERMES_MC_USER_PAT:-}" ]; then
     HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
 HERMES_MC_USER_PAT=$HERMES_MC_USER_PAT"
   fi
 
-  hermes_sync_plugin "mission-control"        # new helper — rsync plugin into VM
-  hermes_enable_plugin "mission-control"      # new helper — append to plugins.enabled
-  log "mission-control: HERMES_MC_URL=$HERMES_MC_URL -> managed .env block + plugin enabled"
+  hermes_sync_plugin "mission-control"
+  hermes_enable_plugin "mission-control"
+  log "mission-control: HERMES_MC_URL=$HERMES_MC_URL -> managed .env + plugin enabled"
 else
   warn "mission-control: HERMES_MC_URL unset in .stack/.env — plugin not enabled"
 fi
 ```
 
-`hermes_sync_plugin` and `hermes_enable_plugin` are new shell helpers in `build.sh` (style mirrors existing `hermes_write` / `hermes_env_rewrite_managed_block`). Both are mount-aware: with `HERMES_MOUNT_ENABLED=true` they write Mac-side; with `false` they print the manual `orb -m` command and warn.
+`hermes_sync_plugin` and `hermes_enable_plugin` are new shell helpers in `build.sh` (mount-aware; degrade gracefully when `HERMES_MOUNT_ENABLED=false` with print-the-orb-command fallback).
 
-`hermes_enable_plugin "mission-control"` reads `~/.hermes/config.yaml`, parses (via the same pyyaml round-trip used elsewhere in `build.sh`), appends `'mission-control'` to `plugins.enabled` if absent, writes back. Idempotent.
-
-After registration completes, the operator may delete `HERMES_MC_USER_PAT` from `.stack/.env` — the next `just build` will see it unset and stop including it in the managed block.
+After registration completes, the operator may delete `HERMES_MC_USER_PAT` from `.stack/.env` — next `just build` will see it unset and stop including it in the managed block.
 
 ---
 
 ## Dashboard widget
 
-The plugin contributes one widget to the existing settings tab. We don't claim a precedent plugin (earlier draft cited `example-dashboard`/`spotify`, neither of which exists in `services/hermes/plugins/`) — instead, the widget API used here mirrors the upstream hermes dashboard plugin contract (manifest + Python router file, like `_source/plugins/kanban/dashboard/`).
+One widget contribution to the existing settings tab. v1 ships only the status API endpoint; the React widget bundle is deferred to v1.1 once the upstream dashboard plugin-bundle pipeline is documented. Operators get the same info via `hermes mc status`.
 
 `dashboard/manifest.json`:
 
@@ -727,15 +685,12 @@ The plugin contributes one widget to the existing settings tab. We don't claim a
   "description": "Sync status with MissionControl",
   "icon": "Cloud",
   "version": "1.0.0",
-  "widget": {
-    "host": "settings",
-    "position": "after:plugins"
-  },
+  "widget": { "host": "settings", "position": "after:plugins" },
   "api": "plugin_api.py"
 }
 ```
 
-`dashboard/plugin_api.py` exposes a FastAPI `APIRouter` (mounted at `/api/plugins/mission-control/`) with:
+`dashboard/plugin_api.py` exposes:
 
 ```
 GET /status   →   {
@@ -745,20 +700,16 @@ GET /status   →   {
   "agent_id": str | null,
   "connector_id": str | null,
   "loops_running": bool,
+  "events_cursor": int,
   "last_pull_ok_at": int | null,
   "last_push_ok_at": int | null,
   "consecutive_pull_errors": int,
   "consecutive_push_errors": int,
-  "queue_depth": int,
   "links_total": int,
   "links_dirty": int,
   "recent_errors": [{"at": int, "where": "pull"|"push", "msg": str}]
 }
 ```
-
-The widget HTML (a small React component bundled into `dist/index.js`) shows these fields read-only. No actions (use the CLI for register / promote / etc.).
-
-Implementation note: the widget bundle is built with the same upstream tooling as `_source/plugins/kanban/dashboard/`; we lift the build config (esbuild + Tailwind plugin loader) from there. The stack-side plugin ships the pre-built `dist/` artifact alongside source, so build.sh doesn't need a Node toolchain on the build host.
 
 ---
 
@@ -766,20 +717,20 @@ Implementation note: the widget bundle is built with the same upstream tooling a
 
 | Condition | Behavior |
 |---|---|
-| MC unreachable (connection error, timeout) | Loop backs off (5/30/120s with ±25% jitter); cursors stay; logs WARN. |
+| MC unreachable (connection error, timeout) | Loop backs off (5/30/120s ±25% jitter); cursors stay; logs WARN. |
 | MC 5xx | Same as unreachable. |
-| MC 401 (agent key) | All loops stop. Plugin status = `auth_failed`. Logs ERROR. Re-run `hermes mc register` to recover. |
-| MC 401 (connector key, on a promote path) | Push side surfaces error to caller (CLI or tool). Pull loop unaffected. |
-| MC 403 | Same as 401 but message points at "permissions changed in MC; check org membership/role". |
-| MC 404 on a known task | Delete the local link; archive the local task with `result='removed from mc'`; emit one local comment "MC task no longer accessible". |
-| MC 409 on push (state machine) | Log WARN with both states. Re-pull canonical state from MC and apply locally. Clear `push_dirty`. |
+| MC 401 (agent key) | All loops stop. Plugin status = `auth_failed`. ERROR logged. Re-run `hermes mc register` to recover. |
+| MC 401 (connector key, on events poll) | Same — both keys are needed for the plugin to function. |
+| MC 403 | Same as 401 but message points at "permissions changed in MC". |
+| MC 404 on a known task (during push) | Delete the local link; archive the local task with `result='removed from mc'`; emit one local comment "MC task no longer accessible". |
+| MC 409 on push (state machine) | Log WARN with both states. The next pull cycle's events will re-sync canonical MC state; clear `push_dirty`. |
 | MC 409 on POST (idempotency conflict) | If `details.existing_task_id` matches our link → no-op success. Else log ERROR. |
-| MC 422 (semantic — e.g. assigned to deleted agent) | Surface via `hermes mc status`; tasks remain unsynced until operator intervenes. |
+| MC 422 (semantic) | Surface via `hermes mc status`; tasks remain unsynced until operator intervenes. |
 | Kanban DB locked (rare in WAL) | Retry 3× with 50/100/200ms backoff, then log + skip the row. |
 | `auth.json` corrupt / missing keys | Plugin status = `not_registered`; loops not started. |
-| Pull-then-push echo (we pulled state X, that emitted a local event, reactor would push X back) | Suppressed by `mc_apply_log` event-id skip in the push reactor — no defer needed. See "No ping-pong defer." |
+| Pull-then-push echo | Suppressed by `mc_apply_log` event-id skip. |
 
-All MC error envelopes are dot-namespaced (`task.invalid_transition`, etc.). The plugin logs the full code + message + details; the dashboard widget shows the last 5.
+All MC error envelopes are dot-namespaced (`task.invalid_transition`, etc.). Plugin logs the full code + message + details; the dashboard widget shows the last 5.
 
 ---
 
@@ -788,13 +739,12 @@ All MC error envelopes are dot-namespaced (`task.invalid_transition`, etc.). The
 Plugin logging goes to `~/.hermes/logs/agent.log` (and stderr when `HERMES_PLUGINS_DEBUG=1`), with the logger named `hermes.plugins.mission_control`.
 
 Metrics surfaced through `hermes mc status` (not externalized to Prometheus in v1):
-
-- `pull.last_success_at`, `pull.last_error`, `pull.consecutive_errors`
+- `pull.last_success_at`, `pull.last_error`, `pull.consecutive_errors`, `pull.events_cursor`
 - `push.last_success_at`, `push.last_error`, `push.queue_depth`, `push.consecutive_errors`
 - `links.total`, `links.dirty`, `comments.linked`
 - `loops_running`
 
-The plugin registers no hooks, so it does not interact with `agents-observe` or other observer chains — they coexist trivially.
+The plugin registers no hooks, so it does not interact with `agents-observe` or other observer chains.
 
 ---
 
@@ -802,58 +752,38 @@ The plugin registers no hooks, so it does not interact with `agents-observe` or 
 
 ### Tests location
 
-Pytest tests live under `services/hermes/plugins/mission-control/tests/`. The plugin ships its own `pyproject.toml` with pytest+respx as devDependencies. CI runs `cd services/hermes/plugins/mission-control && pytest tests/ -v` as a new job in the repo's CI workflow.
+Pytest tests live under `services/hermes/plugins/mission-control/tests/`. The plugin ships its own `pyproject.toml` with pytest+respx as devDependencies. CI: `cd services/hermes/plugins/mission-control && pytest tests/ -v`.
 
-**PYTHONPATH strategy.** Plugin tests import `hermes_cli.kanban_db`, `gateway.run`, etc. — these aren't installed packages; they live in `services/hermes/_source/`. We add a `tests/conftest.py` that prepends `services/hermes/_source/` to `sys.path` at session start, so unmodified `import hermes_cli.kanban_db` works:
+**PYTHONPATH strategy:** `tests/conftest.py` prepends `services/hermes/_source/` to `sys.path` so plugin imports of `hermes_cli.kanban_db`, etc. resolve. Same conftest scrubs `_HERMES_GATEWAY` and `HERMES_KANBAN_TASK` from every test's env.
 
-```python
-# tests/conftest.py
-import sys
-from pathlib import Path
-HERMES_SOURCE = Path(__file__).resolve().parents[4] / "services/hermes/_source"
-sys.path.insert(0, str(HERMES_SOURCE))
-
-import pytest
-@pytest.fixture(autouse=True)
-def _scrub_gateway_marker(monkeypatch):
-    # _HERMES_GATEWAY=1 is set at module-import of gateway.run; scrub it
-    # so unit tests don't falsely trigger the gateway loop-startup path.
-    monkeypatch.delenv("_HERMES_GATEWAY", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
-```
-
-CI needs the hermes source tree checked out at `services/hermes/_source/` (already the case for the rest of the stack — confirmed in `services/hermes/build.sh`'s vendoring step). No extra checkout step needed.
-
-This is a new convention for stack-side plugins (agents-observe ships no tests today). We pick this approach because (a) it keeps plugin tests close to plugin code, (b) it doesn't require touching the upstream hermes test infrastructure, (c) it lets the plugin pin its own pytest version without coordinating with upstream.
-
-### Unit tests (pytest, mocked HTTP)
+### Unit tests (pytest, mocked HTTP via respx_mock fixture)
 
 | File | Coverage |
 |---|---|
-| `tests/test_status_map.py` | Every local↔MC status mapping; metadata patching; failure-vs-success disambiguation; event-kind→PATCH mapping. |
-| `tests/test_links_db.py` | Schema migration; cursor advance; dirty-flag lifecycle; comment-link dedup; apply-log purge; denormalized `local_status` updates. |
-| `tests/test_client.py` | Each MC endpoint wrapper (using `respx`): success path, 401, 5xx-with-retry, 409-with-existing-id, idempotency header inclusion, cursor pagination on comments. |
-| `tests/test_registrar.py` | PAT-flow happy path; existing-agent-rotation path (mints connector if missing); no-PAT path returns inert; 401 PAT; project caching to `~/.hermes/mission-control/projects.json`. |
-| `tests/test_apply.py` | `handle_one_task` for each of 6 (state × link-presence) combinations; `handle_one_comment` with and without auto-unblock; mc_apply_log capture. |
-| `tests/test_pull.py` | End-to-end pull cycle: new task creation, status update, comment pull, cursor advancement only after both phases, conflict detection. |
-| `tests/test_push.py` | Status push for each event kind, `completed`-event outcome-disambiguation via `latest_run`, comment push, dirty-flag clearing, retry-after-cooldown, comment dedup. |
-| `tests/test_auto_unblock.py` | Pulled comment on `blocked` task triggers `kanban_db.unblock_task`; pulled comment on `running` task does NOT; defense-in-depth `mission-control:` author filter. |
-| `tests/test_loop_guard.py` | `register(ctx)` skips loop startup when `_HERMES_GATEWAY!=1` or `HERMES_KANBAN_TASK` set; tools still register; CLI still registers. |
-| `tests/test_promote_idempotency.py` | `mc_promote_task` re-call returns `already_linked=true`; 409 from MC with non-matching existing id surfaces as error. |
+| `tests/test_status_map.py` | local↔MC status mapping; metadata patching; failure-vs-success disambiguation. |
+| `tests/test_links_db.py` | Schema; cursor advance; dirty-flag lifecycle; comment-link dedup; apply-log purge; denormalized `local_status` updates. |
+| `tests/test_client.py` | Each MC endpoint wrapper (respx_mock): success, 401 (AuthFailed), 5xx, 409 (IdempotencyConflict + existing_task_id), Idempotency-Key header inclusion, events cursor passthrough. |
+| `tests/test_registrar.py` | PAT happy path; existing-agent rotation; mints connector; no-PAT inert; 401 PAT; project caching; events-cursor initialization (sets `mc_cursors.events` to current head). |
+| `tests/test_apply.py` | One test per event kind in the dispatch table; auto-unblock on blocked; comment dedup via mc_comment_links; mc_apply_log capture via pre/post-MAX range. |
+| `tests/test_pull.py` | Event loop: cursor advance, kind dispatch, AuthFailed propagation, 5xx backoff schedule, board= kwarg always passed, drain-paginated-window-then-advance. |
+| `tests/test_push.py` | Each kanban event kind, `completed` outcome-disambiguation via `latest_run`, comment dedup both paths (mc_comment_links + author prefix), 409 state conflict, 404 orphan delete, idempotency headers, agent-key vs connector-key per endpoint. |
+| `tests/test_auto_unblock.py` | Pulled `comment.created` on `blocked` task triggers `unblock_task`; on `running` task does NOT; defense-in-depth `mission-control:` author filter. |
+| `tests/test_loop_guard.py` | `register(ctx)` skips loop startup when `_HERMES_GATEWAY!=1` or `HERMES_KANBAN_TASK` set; tools + CLI still register. |
+| `tests/test_promote_idempotency.py` | `mc_promote_task` re-call returns `already_linked=True`; 409 with matching existing id surfaces success; 409 with non-matching id surfaces error. |
 
 ### Integration tests
 
-`tests/integration/test_end_to_end.py` — spins up `wrangler dev` against MC's single-DB-mode build (uses the existing `pnpm test` infrastructure as a fixture in `services/mission-control/`), bootstraps a user + agent + project via the bootstrap endpoint, registers the plugin against that URL, then exercises:
+`tests/integration/test_end_to_end.py` — spins up `wrangler dev` against MC's local single-DB build, bootstraps user + agent + connector + project via the bootstrap endpoint, registers the plugin against that URL, exercises:
 
-1. Operator creates an MC task assigned to agent → plugin pulls → local kanban row appears.
-2. Local dispatcher transitions `ready → running` → MC PATCH lands (verified via GET /v1/tasks/:id) → next pull is a no-op (the local update was already echoed via `mc_apply_log` suppression; the MC GET returns the same updated_at our PATCH set).
-3. Operator POSTs MC comment on a non-blocked task → plugin pulls → kanban comment appears.
+1. Operator creates an MC task assigned to agent → events stream delivers `task.created` → local kanban row appears.
+2. Local dispatcher transitions `ready → running` → MC PATCH lands; next pull is a no-op (echo suppressed via `mc_apply_log`).
+3. Operator POSTs MC comment → events delivers `comment.created` → kanban comment appears.
 4. Operator POSTs MC comment on a `blocked` task → local task auto-unblocks.
-5. Agent (in a simulated worker) calls `mc_promote_task(local_id)` → MC POST → link inserted with `source='pushed'`.
-6. MC task gets `cancelled` → local task gets `archived`.
-7. Worker writes a comment via `kanban_db.add_comment` → push reactor mirrors to MC → next pull no-ops (dedup via mc_comment_links).
+5. Agent (worker) calls `mc_promote_task(local_id)` → MC POST → link inserted with `source='pushed'`.
+6. MC task gets `cancelled` → events delivers `task.deleted` (or `task.status_changed → cancelled`) → local task archived.
+7. Worker writes comment via `kanban_comment` → push reactor mirrors to MC → next pull no-ops (dedup via mc_comment_links).
 
-Integration tests live behind a `pytest -m integration` marker, skipped when `MC_INTEGRATION_TEST_URL` is unset.
+Behind `@pytest.mark.integration`; skipped when `MC_INTEGRATION_TEST_URL` is unset.
 
 ### Build-sh test
 
@@ -861,55 +791,43 @@ A new test in `services/hermes/build.test.sh` covers the managed-block injection
 
 ---
 
-## Upstream Hermes changes required
-
-The plugin spec depends on small additions to the upstream hermes-agent codebase, all separately reviewable and small:
-
-1. **`kanban_db.list_events_since(conn, last_id, limit) -> list[Event]`** — public helper: `SELECT id, task_id, kind, payload, run_id, created_at FROM task_events WHERE id > ? ORDER BY id ASC LIMIT ?`. **Order by `id` strictly**, NOT `created_at` (1-sec tie risk). ~15 lines. If upstream rejects, the plugin runs the raw SQL against `kanban_db.connect(board=...)`.
-2. **`PluginContext.register_subcommand_extension(parent_cmd, extender_fn)`** — lets a plugin add flags/subparsers to an existing built-in subcommand parser (kanban, in our case). ~30 lines. **Optional** for plugin v1: if not landed, `hermes kanban create --mc` ships in plugin v1.1; v1 ships `hermes mc promote` instead.
-
-(An earlier draft also proposed a `HERMES_GATEWAY=1` env marker — review noted the existing `_HERMES_GATEWAY` already does this. No new env-marker change is needed.)
-
-(`kanban_db.latest_run` already exists and is reused for closing-run lookup; no upstream change for that path.)
-
-These upstream changes are tracked as separate hermes-stack tasks; the plugin's plan starts with the PR for #1. #2 is plugin-v1.1-conditional.
-
----
-
 ## What's NOT in v1
 
-- Multi-org per VM (one MC org per VM).
-- Multi-pool awareness (MC v1 is single-pool).
-- MC `GET /v1/events` consumption (deferred to MC v1.1).
-- SSE push from MC (when MC adds it, the pull loop becomes a WebSocket; nothing else changes).
-- Heartbeat endpoint (v1.1 MC-side).
+- Multi-org per VM. One MC org per VM.
+- Multi-pool awareness. MC v1 is single-pool.
+- SSE push from MC. When MC ships `GET /v1/stream/events`, the pull loop swaps `client.events_list` for an EventSource-style consumer; the apply layer is unchanged.
+- Heartbeat endpoint. `last_seen_at` is bumped server-side on every authed request.
 - Rate-limit handling (MC v1 has stub rate-limiting).
-- Conflict-of-record resolution beyond last-writer-wins.
-- Local task → MC project autocreate (promotion requires an existing MC project; otherwise the CLI errors with "create the project in MC first").
-- Comments from `agents-observe` events echoing to MC.
-- `hermes kanban create --mc <slug>` if `register_subcommand_extension` doesn't land in upstream by v1.
+- Conflict resolution beyond last-writer-wins.
+- Local task → MC project autocreate. Promotion requires an existing MC project.
+- React dashboard widget bundle (deferred until upstream's dashboard-bundle pipeline is documented).
+- `hermes kanban create --mc <slug>` (depends on upstream `register_subcommand_extension`).
+- Reacting to `task.updated` events for non-status field changes (e.g. title/body edits).
+- Reacting to `comment.deleted` events (local comment stays for audit).
+- `external_ref.*` / `agent.*` / `connector.*` / `project.*` event handling.
 
 ---
 
-## Future work (out of scope here)
+## Future work (out of scope)
 
-- **Multi-VM coordination.** Two Hermes VMs both registered in the same MC org work trivially — each has its own agent_id + key; pull loops filter by own agent_id.
-- **Auto-refresh project cache** when MC ships project.created events.
-- **MCP server façade** wrapping the MC tools so other MCP clients (Claude Code, etc.) can use the same MC connection without the plugin.
-- **Per-task quota / fairness.** Dispatcher's `kanban.parallel_limit` already controls worker concurrency; the plugin does no rate shaping itself.
+- **Multi-VM coordination.** Two Hermes VMs in the same MC org — each has its own agent_id + connector + cursor; the events stream's client-side filter (`task.agent_id == self`) does the work naturally.
+- **SSE upgrade.** Swap `pull_loop`'s `events_list` poll for an EventSource consumer; nothing else changes.
+- **MCP server façade.** Wrap the MC tools as an MCP server so other MCP clients (Claude Code, etc.) can use the same MC connection.
+- **React widget.** Once the upstream dashboard-bundle pipeline is documented, add the widget on top of the existing status API.
 
 ---
 
 ## Resolved design questions (review trail)
 
-- ~~How does the agent map to local kanban?~~ → tenant tag `mc:<org_id>:<project_id>` on the kanban row + plugin-owned `mc_links` table on a dedicated board.
-- ~~Where do plugin tables live?~~ → Separate SQLite at `~/.hermes/mission-control/links.db`.
-- ~~Why two MC credentials per VM?~~ → MC agent role can't `POST /v1/tasks`; promotion needs connector role.
-- ~~How does the plugin surface human feedback to a running worker?~~ → It doesn't directly. Comments land in `kanban_db`; the next worker invocation orients on them. `blocked` tasks auto-unblock when a new MC comment arrives, so the dispatcher re-spawns the worker with the comment in context.
-- ~~How do we avoid pulled-status updates triggering a push that mirrors the same value back?~~ → `mc_apply_log` table records every `task_events.id` written by the pull-apply path; the push reactor skips any event id present there. Defense-in-depth: the `mission-control:` author prefix on pulled comments. (Earlier draft also had a "ping-pong window" defer; rev-3 review showed it was over-cautious and removed it.)
-- ~~How do we run async loops from a sync `register()` callsite?~~ → Daemon thread that owns its own asyncio event loop, matches the agents-observe pattern.
-- ~~Polling cadence?~~ → Default 10s, min 2s.
-- ~~Push trigger?~~ → Tail `task_events` on the MC-pinned board with a 1s SQLite poll; cursor in `links.db`.
-- ~~Which kanban board do MC tasks live in?~~ → A dedicated one, slug `HERMES_MC_BOARD` (default `"mc"`). Plugin always passes `board=` to kanban_db calls.
-- ~~How does the plugin know it's in the gateway?~~ → Existing `_HERMES_GATEWAY=1` env marker set at module-import of `gateway/run.py`. Worker subprocesses are identified by `HERMES_KANBAN_TASK`.
-- ~~How are kanban event kinds mapped to MC?~~ → Per the table in "Event kinds the push reactor observes" — uses real kanban event-kind names (claimed, blocked, unblocked, completed with outcome, archived, scheduled, commented).
+- **One loop or two?** One pull loop on `GET /v1/events`, one push reactor on local `task_events`.
+- **Why connector key for events?** Per-row agent visibility is impractical on a stream; connector role's whole-org read is the right surface.
+- **How to filter MC events?** Server-side by `kinds=task,comment,external_ref`; client-side by `task.agent_id == self_agent_id` (and link membership).
+- **Cursor type?** Single integer (`events.id` monotonic per pool).
+- **How to bootstrap?** Registrar sets initial `mc_cursors.events` to the current MC events-head id, so the first cycle picks up only new events. `HERMES_MC_BOOTSTRAP_SINCE_DAYS` is reserved for a future "replay the last N days" feature; v1 starts at head.
+- **Comment paging?** Not needed — comments arrive as events.
+- **Echo suppression?** `mc_apply_log` event-id skip in the push reactor.
+- **Bidirectional comment dedup?** `mc_comment_links` table + `mission-control:` author prefix (defense-in-depth).
+- **Auto-unblock?** Yes for `blocked` tasks on `comment.created`; configurable later.
+- **Why both agent and connector keys?** Agent key is narrowly scoped (PATCH own tasks, comment, external_refs); connector key is the events-poll + promotion credential.
+- **kanban_db helpers vs upstream PR?** Use real helper names (verified against `_source/hermes_cli/kanban_db.py`); the only upstream addition we wanted (`list_events_since`) is replaced by inline raw SQL since `_source/` is gitignored.
+- **Worker subprocess loop?** No — `_is_gateway()` guard via `_HERMES_GATEWAY` env marker.

@@ -63,6 +63,7 @@ def _register_plugin_as_package() -> None:
     spec.loader.exec_module(mod)
     # Pre-register submodules whose names collide with _source/ top-level packages.
     _load_plugin_submodule("mission_control", "tools")
+    _load_plugin_submodule("mission_control", "cli")
 
 
 _register_plugin_as_package()

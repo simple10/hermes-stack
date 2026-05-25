@@ -18,7 +18,13 @@ Design: `docs/specs/2026-05-23-mission-control-plugin-design.md` (rev 4) in the 
 2. **Set the levers** in `.stack/.env` (the stack-side env file):
 
    ```bash
-   HERMES_MC_URL=https://mc.example.com
+   # HERMES_MC_URL is the base URL of MC's API, UP TO BUT NOT INCLUDING /v1/.
+   # The plugin appends /v1/<resource> to every request. This decouples
+   # deployment topology (combined SPA+API vs split subdomain) from the plugin.
+   #   - Combined SPA + API on one Worker:    HERMES_MC_URL=https://mc.example.com/api
+   #   - API on its own subdomain:            HERMES_MC_URL=https://api.example.com
+   # Trailing slashes are stripped automatically.
+   HERMES_MC_URL=https://mc.example.com/api
    HERMES_MC_USER_PAT=mcpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    # Optional:
    # HERMES_MC_AGENT_NAME=my-vm           # default: OrbStack VM name

@@ -90,9 +90,9 @@ export const member = sqliteTable('member', {
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   role: text('role').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-}, (t) => ({
-  orgUserIdx: uniqueIndex('member_org_user').on(t.organizationId, t.userId),
-}));
+}, (t) => [
+  uniqueIndex('member_org_user').on(t.organizationId, t.userId),
+]);
 
 export const invitation = sqliteTable('invitation', {
   id: text('id').primaryKey(),
@@ -141,11 +141,11 @@ export const apiKey = sqliteTable('apiKey', {
   // additionalFields — promoted from metadata for indexed lookups
   orgId: text('org_id').notNull(),
   principalType: text('principal_type').notNull(),
-}, (t) => ({
-  orgPrincipalIdx: index('api_key_org_principal').on(t.orgId, t.principalType),
-  configIdx: index('api_key_config').on(t.configId),
-  referenceIdx: index('api_key_reference').on(t.referenceId),
-}));
+}, (t) => [
+  index('api_key_org_principal').on(t.orgId, t.principalType),
+  index('api_key_config').on(t.configId),
+  index('api_key_reference').on(t.referenceId),
+]);
 
 // ---------------------------------------------------------------------------
 // Custom master table — tenant pool registry

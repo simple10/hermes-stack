@@ -19,8 +19,6 @@ import { DuplicateError } from '../../../src/db/repos/_errors.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, agentCtx, asOrgId } from './_ctx.ts';
 import { makeId } from '../../../src/ids.ts';
-import type { Env } from '../../../src/db/client.ts';
-
 
 // Unique slug counter so parallel tests don't collide.
 let slugN = 0;

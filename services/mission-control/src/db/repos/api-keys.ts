@@ -31,7 +31,6 @@ import { masterClient } from '../client.ts';
 import { generateRawKey, hashKey, mintApiKey, disableApiKey } from '../../auth/api-keys.ts';
 import { makeId } from '../../ids.ts';
 import type { AuthContext } from '../../auth/types.ts';
-import type { Env } from '../client.ts';
 
 // ---------------------------------------------------------------------------
 // Types

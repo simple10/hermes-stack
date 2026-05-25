@@ -34,7 +34,7 @@ export const loggingMiddleware: MiddlewareHandler = async (c, next) => {
   const path = new URL(c.req.url).pathname;
 
   // Auth context is set by authMiddleware on authenticated routes.
-  const auth = c.get('auth' as any) as
+  const auth = c.get('auth') as
     | { orgId?: string; principal?: { type: string; id: string } }
     | undefined;
 

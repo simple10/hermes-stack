@@ -15,7 +15,7 @@
  */
 
 import { Hono } from 'hono';
-import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
+import { requireAnyRole } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
@@ -25,8 +25,8 @@ import { CommentCreateBody as createBody } from '../schemas/comments.ts';
 
 type Variables = { auth: AuthContext };
 
-export const commentsRouter = new Hono<{ Variables: Variables }>();
-commentsRouter.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const commentsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ---------------------------------------------------------------------------
 // Cursor helpers — chronological ASC (createdAt, id)
@@ -170,7 +170,6 @@ commentsRouter.get(
   async (c) => {
     try {
       const ctx = c.var.auth;
-      const env = c.env as { BETTER_AUTH_SECRET?: string };
       const taskId = c.req.param('taskId');
 
       // Resolve the task (validates org scope + agent ownership).
@@ -180,7 +179,7 @@ commentsRouter.get(
       const cursorRaw = c.req.query('cursor');
       const limit = clampLimit(limitRaw, 50, 100);
 
-      const secret = env.BETTER_AUTH_SECRET ?? '';
+      const secret = c.env.BETTER_AUTH_SECRET ?? '';
 
       // Cursor decode — chronological ASC cursor.
       let afterCreatedAt: number | undefined;

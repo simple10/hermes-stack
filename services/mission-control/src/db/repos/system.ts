@@ -17,7 +17,6 @@ import { lt } from 'drizzle-orm';
 import { events, idempotencyKeys } from '../pool.ts';
 import { verification } from '../master.ts';
 import { masterClient, poolClient } from '../client.ts';
-import type { Env } from '../client.ts'; // used in verification.purgeExpired to wrap masterBinding
 
 export const system = {
   events: {

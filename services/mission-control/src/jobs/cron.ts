@@ -10,19 +10,6 @@
 import { system } from '../db/repos/system.ts';
 
 // ---------------------------------------------------------------------------
-// Env shape (mirrors src/index.ts Env + DB client Env)
-// ---------------------------------------------------------------------------
-
-type CronEnv = {
-  DB?: D1Database;
-  MASTER_DB?: D1Database;
-  POOL_DEFAULT?: D1Database;
-  DB_MODE?: string;
-  EVENTS_RETENTION_DAYS?: string;
-  [key: string]: unknown;
-};
-
-// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -36,7 +23,7 @@ type CronEnv = {
  */
 export async function handleScheduled(
   event: ScheduledEvent,
-  env: CronEnv,
+  env: Env,
   _ctx: ExecutionContext,
 ): Promise<void> {
   const now = Date.now();

@@ -24,13 +24,19 @@ import { HttpError, errorResponse } from '../errors.ts';
 import type { AuthContext, OrgId } from './types.ts';
 import { asOrgId } from './types.ts';
 
+// Hono env-shape for every authed middleware in this file. `Bindings: Env`
+// makes `c.env` use the wrangler-generated Env type (no per-call-site casts);
+// `Variables: { auth }` lets `c.set('auth', …)` / `c.get('auth')` type-check
+// without `as any` shims.
+type AuthEnv = { Bindings: Env; Variables: { auth: AuthContext } };
+
 // ---------------------------------------------------------------------------
 // Auth middleware
 // ---------------------------------------------------------------------------
 
-export const authMiddleware: MiddlewareHandler = async (c, next) => {
+export const authMiddleware: MiddlewareHandler<AuthEnv> = async (c, next) => {
   try {
-    const env = c.env as Parameters<typeof createAuth>[0] & { [k: string]: unknown };
+    const env = c.env;
     const auth = createAuth(env);
     const request = c.req.raw;
 
@@ -150,8 +156,7 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
     };
 
     // Store on Hono context variable.  Handlers access via c.get('auth').
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    c.set('auth' as any, ctx);
+    c.set('auth', ctx);
     await next();
   } catch (e) {
     return errorResponse(c, e);
@@ -170,10 +175,9 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
  */
 export function requireMember(
   ...allowed: Array<'owner' | 'admin' | 'member'>
-): MiddlewareHandler {
+): MiddlewareHandler<AuthEnv> {
   return async (c, next) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = c.get('auth' as any) as AuthContext;
+    const ctx = c.get('auth');
     if (!ctx) {
       return errorResponse(c, new HttpError(401, 'auth.missing', 'Not authenticated'));
     }
@@ -209,10 +213,9 @@ export function requireMember(
  */
 export function requireMachine(
   ...allowed: Array<'agent' | 'connector'>
-): MiddlewareHandler {
+): MiddlewareHandler<AuthEnv> {
   return async (c, next) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = c.get('auth' as any) as AuthContext;
+    const ctx = c.get('auth');
     if (!ctx) {
       return errorResponse(c, new HttpError(401, 'auth.missing', 'Not authenticated'));
     }
@@ -237,10 +240,9 @@ export function requireMachine(
  */
 export function requireAnyRole(
   ...allowed: Array<AuthContext['role']>
-): MiddlewareHandler {
+): MiddlewareHandler<AuthEnv> {
   return async (c, next) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = c.get('auth' as any) as AuthContext;
+    const ctx = c.get('auth');
     if (!ctx) {
       return errorResponse(c, new HttpError(401, 'auth.missing', 'Not authenticated'));
     }

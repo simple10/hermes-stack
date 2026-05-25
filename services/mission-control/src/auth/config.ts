@@ -1,37 +1,23 @@
-import { betterAuth } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { organization, magicLink } from 'better-auth/plugins';
-import { apiKey } from '@better-auth/api-key';
-import * as schema from '../db/master.ts';
-import { masterClient } from '../db/client.ts';
+import { betterAuth } from 'better-auth'
+import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { organization, magicLink } from 'better-auth/plugins'
+import { apiKey } from '@better-auth/api-key'
+import * as schema from '../db/master.ts'
+import { masterClient } from '../db/client.ts'
 import {
   deliverVerificationEmail,
   deliverResetPasswordEmail,
   deliverMagicLinkEmail,
-} from './email.ts';
+} from './email.ts'
 
-type EmailBinding = {
-  send: (m: { to: string; from: string; subject: string; html: string; text?: string }) => Promise<{ messageId: string }>;
-};
-
-export type AuthEnv = {
-  DB?: D1Database;
-  MASTER_DB?: D1Database;
-  DB_MODE: string;
-  BETTER_AUTH_SECRET: string;
-  BETTER_AUTH_URL: string;
-  EMAIL_FROM?: string;
-  EMAIL?: EmailBinding;
-};
-
-export function createAuth(env: AuthEnv) {
-  const db = masterClient(env as Parameters<typeof masterClient>[0]);
+export function createAuth(env: Env) {
+  const db = masterClient(env)
 
   // better-auth's Drizzle adapter looks up tables by their better-auth model
   // name.  The apiKey plugin uses the lowercase key "apikey" to resolve the
   // table in the Drizzle ORM schema, but our master.ts exports the table as
   // `apiKey` (camelCase).  Provide an explicit mapping so both resolve.
-  const drizzleSchema = { ...schema, apikey: schema.apiKey };
+  const drizzleSchema = { ...schema, apikey: schema.apiKey }
 
   return betterAuth({
     database: drizzleAdapter(db, { provider: 'sqlite', schema: drizzleSchema }),
@@ -58,7 +44,7 @@ export function createAuth(env: AuthEnv) {
         sendMagicLink: (args) => deliverMagicLinkEmail(env, args),
       }),
     ],
-  });
+  })
 }
 
-export type Auth = ReturnType<typeof createAuth>;
+export type Auth = ReturnType<typeof createAuth>

@@ -26,13 +26,13 @@ import { mintApiKey } from '../auth/api-keys.ts';
 import { lookupAnyUserExists } from '../db/repos/users.ts';
 import { BootstrapBody as bodySchema } from '../schemas/bootstrap.ts';
 
-export const bootstrap = new Hono();
+export const bootstrap = new Hono<{ Bindings: Env }>();
 
 // ---------------------------------------------------------------------------
 
 bootstrap.post('/', async (c) => {
   try {
-    const env = c.env as any;
+    const env = c.env;
 
     // Gate 1: MC_ADMIN_TOKEN must be configured.
     if (!env.MC_ADMIN_TOKEN) {

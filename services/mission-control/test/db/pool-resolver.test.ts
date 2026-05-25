@@ -12,7 +12,7 @@ import { env } from 'cloudflare:workers';
 import { applyD1Migrations } from 'cloudflare:test';
 import type { D1Migration } from '@cloudflare/vitest-pool-workers';
 import { resolvePoolForOrg, _clearPoolCache } from '../../src/db/pool-resolver.ts';
-import { masterClient, type Env } from '../../src/db/client.ts';
+import { masterClient } from '../../src/db/client.ts';
 import { organization } from '../../src/db/master.ts';
 import { agents } from '../../src/db/pool.ts';
 import { HttpError } from '../../src/errors.ts';

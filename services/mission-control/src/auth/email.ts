@@ -17,23 +17,21 @@
  * password-changed). If/when we need richer styling, swap in React Email.
  */
 
-export type SendEmailArgs = { to: string; subject: string; html: string; text: string };
+export type SendEmailArgs = { to: string; subject: string; html: string; text: string }
 
-/** Cloudflare Email Service binding shape (subset we use). */
-type EmailBinding = {
-  send: (m: { to: string; from: string; subject: string; html: string; text?: string }) => Promise<{ messageId: string }>;
-};
-
-type EmailEnv = { EMAIL_FROM?: string; EMAIL?: EmailBinding };
-
-export async function sendEmail(env: EmailEnv, args: SendEmailArgs): Promise<void> {
+export async function sendEmail(env: Env, args: SendEmailArgs): Promise<void> {
   if (!env.EMAIL_FROM) {
     // Dev/test: no provider configured. Log-only.
-    console.warn('[email] EMAIL_FROM not set — skipping send.', { to: args.to, subject: args.subject });
-    return;
+    console.warn('[email] EMAIL_FROM not set — skipping send.', {
+      to: args.to,
+      subject: args.subject,
+    })
+    return
   }
   if (!env.EMAIL) {
-    throw new Error('[email] EMAIL_FROM is set but the EMAIL binding is missing — check wrangler.jsonc');
+    throw new Error(
+      '[email] EMAIL_FROM is set but the EMAIL binding is missing — check wrangler.jsonc',
+    )
   }
   const result = await env.EMAIL.send({
     to: args.to,
@@ -41,9 +39,9 @@ export async function sendEmail(env: EmailEnv, args: SendEmailArgs): Promise<voi
     subject: args.subject,
     html: args.html,
     text: args.text,
-  });
+  })
   if (!result?.messageId) {
-    throw new Error(`[email] CES send returned no messageId: ${JSON.stringify(result)}`);
+    throw new Error(`[email] CES send returned no messageId: ${JSON.stringify(result)}`)
   }
 }
 
@@ -52,12 +50,12 @@ export async function sendEmail(env: EmailEnv, args: SendEmailArgs): Promise<voi
 // ---------------------------------------------------------------------------
 
 const BUTTON_STYLE =
-  'display:inline-block;background:#000;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;';
+  'display:inline-block;background:#000;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;'
 const BODY_STYLE =
-  'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.5;color:#222;max-width:560px;margin:0 auto;padding:32px 24px;';
+  'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.5;color:#222;max-width:560px;margin:0 auto;padding:32px 24px;'
 
 function shell(body: string): string {
-  return `<!doctype html><html><body style="${BODY_STYLE}">${body}</body></html>`;
+  return `<!doctype html><html><body style="${BODY_STYLE}">${body}</body></html>`
 }
 
 function verifyEmailHtml(url: string, userName: string): string {
@@ -70,7 +68,7 @@ function verifyEmailHtml(url: string, userName: string): string {
     </p>
     <p style="font-size:12px;color:#666;">If the button doesn't work, paste this URL into your browser:<br/>
     <code>${escapeHtml(url)}</code></p>
-  `);
+  `)
 }
 
 function resetPasswordHtml(url: string, userName: string): string {
@@ -83,7 +81,7 @@ function resetPasswordHtml(url: string, userName: string): string {
     </p>
     <p style="font-size:12px;color:#666;">If you didn't request this, you can ignore this email.</p>
     <p style="font-size:12px;color:#666;">URL: <code>${escapeHtml(url)}</code></p>
-  `);
+  `)
 }
 
 function magicLinkHtml(url: string): string {
@@ -95,14 +93,17 @@ function magicLinkHtml(url: string): string {
     </p>
     <p style="font-size:12px;color:#666;">If you didn't request this, you can ignore this email.</p>
     <p style="font-size:12px;color:#666;">URL: <code>${escapeHtml(url)}</code></p>
-  `);
+  `)
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  )
 }
 function escapeAttr(s: string): string {
-  return escapeHtml(s);
+  return escapeHtml(s)
 }
 
 // ---------------------------------------------------------------------------
@@ -115,33 +116,33 @@ function escapeAttr(s: string): string {
 // ---------------------------------------------------------------------------
 
 export async function deliverVerificationEmail(
-  env: EmailEnv,
+  env: Env,
   params: { user: { email: string; name?: string }; url: string },
 ): Promise<void> {
-  const userName = params.user.name ?? params.user.email;
+  const userName = params.user.name ?? params.user.email
   await sendEmail(env, {
     to: params.user.email,
     subject: 'Verify your MissionControl email',
     html: verifyEmailHtml(params.url, userName),
     text: `Verify your email: ${params.url}`,
-  });
+  })
 }
 
 export async function deliverResetPasswordEmail(
-  env: EmailEnv,
+  env: Env,
   params: { user: { email: string; name?: string }; url: string },
 ): Promise<void> {
-  const userName = params.user.name ?? params.user.email;
+  const userName = params.user.name ?? params.user.email
   await sendEmail(env, {
     to: params.user.email,
     subject: 'Reset your MissionControl password',
     html: resetPasswordHtml(params.url, userName),
     text: `Reset your password: ${params.url}`,
-  });
+  })
 }
 
 export async function deliverMagicLinkEmail(
-  env: EmailEnv,
+  env: Env,
   params: { email: string; url: string },
 ): Promise<void> {
   await sendEmail(env, {
@@ -149,5 +150,5 @@ export async function deliverMagicLinkEmail(
     subject: 'Sign in to MissionControl',
     html: magicLinkHtml(params.url),
     text: `Sign in: ${params.url}`,
-  });
+  })
 }

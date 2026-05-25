@@ -24,7 +24,6 @@ import * as poolSchema from './pool.ts';
  *  - Dynamic POOL_<NAME> bindings looked up in pool-resolver
  *  - Auth/middleware enrichment (BETTER_AUTH_SECRET, MC_ADMIN_TOKEN, etc.)
  */
-export type Env = Record<string, unknown>;
 
 /** Returns a Drizzle client wired to the master (identity) DB. */
 export function masterClient(env: Env): DrizzleD1Database<typeof masterSchema> {

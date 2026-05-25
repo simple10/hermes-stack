@@ -23,7 +23,7 @@
  * a single since-window itself spans more than `limit` events.
  */
 import { Hono } from 'hono';
-import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
+import { requireAnyRole } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
@@ -32,8 +32,8 @@ import { EventListQuery as querySchema } from '../schemas/events.ts';
 
 type Variables = { auth: AuthContext };
 
-export const eventsRouter = new Hono<{ Variables: Variables }>();
-eventsRouter.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const eventsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 const VALID_KINDS = ['task', 'project', 'agent', 'connector', 'comment', 'external_ref'] as const;
 

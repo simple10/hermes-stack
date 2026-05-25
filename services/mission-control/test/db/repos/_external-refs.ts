@@ -20,8 +20,6 @@ import { DuplicateError, ForbiddenError } from '../../../src/db/repos/_errors.ts
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, agentCtx, connectorCtx, asOrgId } from './_ctx.ts';
 import { makeId } from '../../../src/ids.ts';
-import type { Env } from '../../../src/db/client.ts';
-
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-xrf`; }

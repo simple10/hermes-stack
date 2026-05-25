@@ -13,7 +13,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { organization } from './master.ts';
-import { masterClient, poolClient, type Env } from './client.ts';
+import { masterClient, poolClient } from './client.ts';
 import { HttpError } from '../errors.ts';
 
 // ---------------------------------------------------------------------------
@@ -68,6 +68,9 @@ export async function resolvePoolForOrg(env: Env, orgId: string) {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/** Env plus runtime POOL_* bindings (not all are listed in wrangler types). */
+type EnvWithPoolBindings = Env & Record<string, D1Database | undefined>;
+
 /**
  * Maps a tenantPoolId to the D1 binding on env.
  *
@@ -80,10 +83,11 @@ export async function resolvePoolForOrg(env: Env, orgId: string) {
 function resolveBinding(env: Env, tenantPoolId: string): D1Database | null {
   if (env.DB_MODE !== 'split') {
     // Single-DB mode: master and pool are the same binding.
-    return (env.DB ?? null) as D1Database | null;
+    return env.DB ?? null;
   }
   const key = 'POOL_' + tenantPoolId.toUpperCase().replace(/-/g, '_');
-  return (env[key] ?? null) as D1Database | null;
+  const bindings = env as EnvWithPoolBindings;
+  return bindings[key] ?? null;
 }
 
 // ---------------------------------------------------------------------------

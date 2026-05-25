@@ -5,15 +5,14 @@
  * in the response (serialised timestamps).
  */
 import { Hono } from 'hono';
-import { authMiddleware } from '../auth/middleware.ts';
 import type { AuthContext } from '../auth/types.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 
 type Variables = { auth: AuthContext };
 
-export const me = new Hono<{ Variables: Variables }>();
-me.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const me = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 me.get('/', async (c) => {
   const ctx = c.get('auth');

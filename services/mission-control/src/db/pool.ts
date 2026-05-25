@@ -33,10 +33,10 @@ export const agents = sqliteTable('agents', {
   deletedAt: integer('deleted_at'),
   deletedByType: text('deleted_by_type'),
   deletedById: text('deleted_by_id'),
-}, (t) => ({
-  nameUniqueActive: uniqueIndex('agents_name_per_org_active').on(t.orgId, t.name).where(sql`${t.deletedAt} IS NULL`),
-  kindIdx: index('agents_org_kind_active').on(t.orgId, t.kind).where(sql`${t.deletedAt} IS NULL`),
-}));
+}, (t) => [
+  uniqueIndex('agents_name_per_org_active').on(t.orgId, t.name).where(sql`${t.deletedAt} IS NULL`),
+  index('agents_org_kind_active').on(t.orgId, t.kind).where(sql`${t.deletedAt} IS NULL`),
+]);
 
 // ---------------------------------------------------------------------------
 // connectors
@@ -55,10 +55,10 @@ export const connectors = sqliteTable('connectors', {
   deletedAt: integer('deleted_at'),
   deletedByType: text('deleted_by_type'),
   deletedById: text('deleted_by_id'),
-}, (t) => ({
-  nameUniqueActive: uniqueIndex('connectors_name_per_org_active').on(t.orgId, t.name).where(sql`${t.deletedAt} IS NULL`),
-  kindIdx: index('connectors_org_kind_active').on(t.orgId, t.kind).where(sql`${t.deletedAt} IS NULL`),
-}));
+}, (t) => [
+  uniqueIndex('connectors_name_per_org_active').on(t.orgId, t.name).where(sql`${t.deletedAt} IS NULL`),
+  index('connectors_org_kind_active').on(t.orgId, t.kind).where(sql`${t.deletedAt} IS NULL`),
+]);
 
 // ---------------------------------------------------------------------------
 // projects
@@ -76,9 +76,9 @@ export const projects = sqliteTable('projects', {
   deletedAt: integer('deleted_at'),
   deletedByType: text('deleted_by_type'),
   deletedById: text('deleted_by_id'),
-}, (t) => ({
-  slugUniqueActive: uniqueIndex('projects_slug_per_org_active').on(t.orgId, t.slug).where(sql`${t.deletedAt} IS NULL`),
-}));
+}, (t) => [
+  uniqueIndex('projects_slug_per_org_active').on(t.orgId, t.slug).where(sql`${t.deletedAt} IS NULL`),
+]);
 
 // ---------------------------------------------------------------------------
 // tasks
@@ -103,12 +103,12 @@ export const tasks = sqliteTable('tasks', {
   deletedAt: integer('deleted_at'),
   deletedByType: text('deleted_by_type'),
   deletedById: text('deleted_by_id'),
-}, (t) => ({
-  orgProjectActive: index('tasks_org_project_active').on(t.orgId, t.projectId).where(sql`${t.deletedAt} IS NULL`),
-  orgAgentStatusActive: index('tasks_org_agent_status_active').on(t.orgId, t.agentId, t.status).where(sql`${t.deletedAt} IS NULL`),
-  orgUpdatedAt: index('tasks_org_updated_at').on(t.orgId, t.updatedAt).where(sql`${t.deletedAt} IS NULL`),
-  idempotencyActive: uniqueIndex('tasks_idempotency_active').on(t.orgId, t.idempotencyKey).where(sql`${t.deletedAt} IS NULL AND ${t.idempotencyKey} IS NOT NULL`),
-}));
+}, (t) => [
+  index('tasks_org_project_active').on(t.orgId, t.projectId).where(sql`${t.deletedAt} IS NULL`),
+  index('tasks_org_agent_status_active').on(t.orgId, t.agentId, t.status).where(sql`${t.deletedAt} IS NULL`),
+  index('tasks_org_updated_at').on(t.orgId, t.updatedAt).where(sql`${t.deletedAt} IS NULL`),
+  uniqueIndex('tasks_idempotency_active').on(t.orgId, t.idempotencyKey).where(sql`${t.deletedAt} IS NULL AND ${t.idempotencyKey} IS NOT NULL`),
+]);
 
 // ---------------------------------------------------------------------------
 // task_comments
@@ -126,9 +126,9 @@ export const taskComments = sqliteTable('task_comments', {
   deletedAt: integer('deleted_at'),
   deletedByType: text('deleted_by_type'),
   deletedById: text('deleted_by_id'),
-}, (t) => ({
-  taskActive: index('comments_task_active').on(t.orgId, t.taskId, t.createdAt).where(sql`${t.deletedAt} IS NULL`),
-}));
+}, (t) => [
+  index('comments_task_active').on(t.orgId, t.taskId, t.createdAt).where(sql`${t.deletedAt} IS NULL`),
+]);
 
 // ---------------------------------------------------------------------------
 // events  (append-only audit log)
@@ -144,10 +144,10 @@ export const events = sqliteTable('events', {
   actorId: text('actor_id'),
   payload: text('payload'),                      // JSON, kind-specific
   createdAt: integer('created_at').notNull(),
-}, (t) => ({
-  orgIdIdx: index('events_org_id').on(t.orgId, t.id),
-  resourceIdx: index('events_resource').on(t.orgId, t.resourceType, t.resourceId),
-}));
+}, (t) => [
+  index('events_org_id').on(t.orgId, t.id),
+  index('events_resource').on(t.orgId, t.resourceType, t.resourceId),
+]);
 
 // ---------------------------------------------------------------------------
 // external_refs  (polymorphic link table)
@@ -168,12 +168,12 @@ export const externalRefs = sqliteTable('external_refs', {
   deletedAt: integer('deleted_at'),
   deletedByType: text('deleted_by_type'),
   deletedById: text('deleted_by_id'),
-}, (t) => ({
-  uniqueActive: uniqueIndex('external_refs_unique_active').on(t.resourceType, t.resourceId, t.sourceKind, t.sourceId).where(sql`${t.deletedAt} IS NULL`),
-  lookupActive: index('external_refs_lookup_active').on(t.orgId, t.sourceKind, t.externalId).where(sql`${t.deletedAt} IS NULL`),
-  reverseActive: index('external_refs_reverse_active').on(t.orgId, t.resourceType, t.resourceId).where(sql`${t.deletedAt} IS NULL`),
-  sourceActive: index('external_refs_source_active').on(t.orgId, t.sourceKind, t.sourceId).where(sql`${t.deletedAt} IS NULL`),
-}));
+}, (t) => [
+  uniqueIndex('external_refs_unique_active').on(t.resourceType, t.resourceId, t.sourceKind, t.sourceId).where(sql`${t.deletedAt} IS NULL`),
+  index('external_refs_lookup_active').on(t.orgId, t.sourceKind, t.externalId).where(sql`${t.deletedAt} IS NULL`),
+  index('external_refs_reverse_active').on(t.orgId, t.resourceType, t.resourceId).where(sql`${t.deletedAt} IS NULL`),
+  index('external_refs_source_active').on(t.orgId, t.sourceKind, t.sourceId).where(sql`${t.deletedAt} IS NULL`),
+]);
 
 // ---------------------------------------------------------------------------
 // idempotency_keys  (request dedup; TTL-purged)
@@ -187,6 +187,6 @@ export const idempotencyKeys = sqliteTable('idempotency_keys', {
   responseBody: text('response_body').notNull(),
   createdAt: integer('created_at').notNull(),
   expiresAt: integer('expires_at').notNull(),  // created_at + 24h
-}, (t) => ({
-  expiresIdx: index('idempotency_keys_expires').on(t.expiresAt),
-}));
+}, (t) => [
+  index('idempotency_keys_expires').on(t.expiresAt),
+]);

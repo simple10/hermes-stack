@@ -16,8 +16,6 @@ import { makeId } from '../../../src/ids.ts';
 import { poolClient } from '../../../src/db/client.ts';
 import { events } from '../../../src/db/pool.ts';
 import { eq } from 'drizzle-orm';
-import type { Env } from '../../../src/db/client.ts';
-
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-evt`; }

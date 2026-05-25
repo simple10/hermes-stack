@@ -18,7 +18,6 @@ import { and, eq } from 'drizzle-orm';
 import { member } from '../master.ts';
 import { masterClient } from '../client.ts';
 import type { AuthContext } from '../../auth/types.ts';
-import type { Env } from '../client.ts';
 
 // ---------------------------------------------------------------------------
 // Types

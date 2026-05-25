@@ -15,7 +15,6 @@ import { db } from '../../../src/db/repos/index.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, agentCtx, asOrgId } from './_ctx.ts';
 import { makeId } from '../../../src/ids.ts';
-import type { Env } from '../../../src/db/client.ts';
 
 
 let slugN = 0;

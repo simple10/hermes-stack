@@ -4,7 +4,7 @@
  * These contexts bypass the HTTP layer and auth middleware entirely.
  * Use only in test/db/repos/* — production code must never import this.
  */
-import { poolClient, type Env } from '../../../src/db/client.ts';
+import { poolClient } from '../../../src/db/client.ts';
 import { asOrgId, type OrgId } from '../../../src/auth/types.ts';
 import type { AuthContext } from '../../../src/auth/types.ts';
 import { makeId } from '../../../src/ids.ts';

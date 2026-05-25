@@ -6,7 +6,7 @@
  * the request came in via session cookie, PAT, agent key, or connector key —
  * so handlers never need to branch on auth path.
  */
-import type { Env, PoolClient } from '../db/client.ts';
+import type { PoolClient } from '../db/client.ts';
 
 // ---------------------------------------------------------------------------
 // Branded OrgId

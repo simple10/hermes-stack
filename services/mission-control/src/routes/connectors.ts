@@ -16,7 +16,7 @@
  *   4. Emit connector.created; return { connector, key }.
  */
 import { Hono } from 'hono';
-import { authMiddleware, requireMember } from '../auth/middleware.ts';
+import { requireMember } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
@@ -31,8 +31,8 @@ const DEFAULT_GRACE = 300; // seconds
 
 type Variables = { auth: AuthContext };
 
-export const connectorsRouter = new Hono<{ Variables: Variables }>();
-connectorsRouter.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const connectorsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ---------------------------------------------------------------------------
 // POST /v1/connectors
@@ -99,13 +99,12 @@ connectorsRouter.post('/', requireMember('owner', 'admin'), async (c) => {
 connectorsRouter.get('/', requireMember('owner', 'admin', 'member'), async (c) => {
   try {
     const ctx = c.var.auth;
-    const env = c.env as any;
 
     const limitRaw = c.req.query('limit');
     const cursorRaw = c.req.query('cursor');
     const limit = clampLimit(limitRaw, 50, 100);
 
-    const secret = (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET ?? '';
+    const secret = c.env.BETTER_AUTH_SECRET ?? '';
 
     let cursor: { updatedAt: number; id: string } | undefined;
 
@@ -253,7 +252,6 @@ connectorsRouter.delete('/:id', requireMember('owner', 'admin'), async (c) => {
 connectorsRouter.post('/:id/rotate-key', requireMember('owner', 'admin'), async (c) => {
   try {
     const ctx = c.var.auth;
-    const env = c.env as any;
     const id = c.req.param('id');
 
     const existing = await db.connectors(ctx).findById(id);
@@ -271,8 +269,7 @@ connectorsRouter.post('/:id/rotate-key', requireMember('owner', 'admin'), async 
 
     // Step 2: Expire old key with grace window.
     const graceSeconds =
-      parseInt((env as { KEY_ROTATION_GRACE_SECONDS?: string }).KEY_ROTATION_GRACE_SECONDS ?? '', 10) ||
-      DEFAULT_GRACE;
+      parseInt(c.env.KEY_ROTATION_GRACE_SECONDS ?? '', 10) || DEFAULT_GRACE;
     const expiresOldAt = Date.now() + graceSeconds * 1000;
 
     if (oldKeyRow) {

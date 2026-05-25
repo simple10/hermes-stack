@@ -36,7 +36,7 @@
 
 import { Hono } from 'hono';
 import { and, desc, eq } from 'drizzle-orm';
-import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
+import { requireAnyRole } from '../auth/middleware.ts';
 import { tasks, taskComments, events } from '../db/pool.ts';
 import { HttpError, errorResponse, DuplicateError } from '../errors.ts';
 import { active, serializeTimestamps } from '../db/helpers.ts';
@@ -56,8 +56,8 @@ import {
 
 type Variables = { auth: AuthContext };
 
-export const tasksRouter = new Hono<{ Variables: Variables }>();
-tasksRouter.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const tasksRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // createBody + patchBody imported from ../schemas/tasks.ts above.
 // (STATUS_VALUES, IDEMPOTENCY_KEY_RE moved inline into the schema definitions.)
@@ -88,7 +88,6 @@ tasksRouter.post(
   async (c) => {
     try {
       const ctx = c.var.auth;
-      const env = c.env as { BETTER_AUTH_SECRET?: string; IDEMPOTENCY_TTL_SECONDS?: string };
 
       const raw = await c.req.json().catch(() => {
         throw new HttpError(400, 'task.bad_request', 'Request body must be valid JSON');
@@ -207,7 +206,7 @@ tasksRouter.post(
       // ---------------------------------------------------------------------------
       if (idempotencyHeader) {
         const bodyHash = await hashBody(raw);
-        const ttlSeconds = parseInt(env.IDEMPOTENCY_TTL_SECONDS ?? '', 10) || 86_400;
+        const ttlSeconds = parseInt(c.env.IDEMPOTENCY_TTL_SECONDS ?? '', 10) || 86_400;
         try {
           await recordIdempotency(ctx.pool, ctx.orgId, 'POST /v1/tasks', idempotencyHeader, bodyHash, 201, responseBody, ttlSeconds);
         } catch {
@@ -232,13 +231,12 @@ tasksRouter.get(
   async (c) => {
     try {
       const ctx = c.var.auth;
-      const env = c.env as { BETTER_AUTH_SECRET?: string };
 
       const limitRaw = c.req.query('limit');
       const cursorRaw = c.req.query('cursor');
       const limit = clampLimit(limitRaw, 50, 100);
 
-      const secret = env.BETTER_AUTH_SECRET ?? '';
+      const secret = c.env.BETTER_AUTH_SECRET ?? '';
 
       // ---------------------------------------------------------------------------
       // Filters

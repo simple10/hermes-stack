@@ -12,8 +12,6 @@ import { env } from 'cloudflare:workers';
 import { db } from '../../../src/db/repos/index.ts';
 import { createOrgFixture } from '../../helpers/orgs.ts';
 import { ownerCtx, asOrgId } from './_ctx.ts';
-import type { Env } from '../../../src/db/client.ts';
-
 
 let slugN = 0;
 function slug(prefix: string) { return `${prefix}-${++slugN}-org`; }

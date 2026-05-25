@@ -34,7 +34,7 @@
  */
 
 import { Hono } from 'hono';
-import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
+import { requireAnyRole } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
@@ -48,8 +48,8 @@ import {
 
 type Variables = { auth: AuthContext };
 
-export const externalRefsRouter = new Hono<{ Variables: Variables }>();
-externalRefsRouter.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const externalRefsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ---------------------------------------------------------------------------
 // Resource existence validation helper
@@ -156,7 +156,6 @@ externalRefsRouter.get(
   async (c) => {
     try {
       const ctx = c.var.auth;
-      const env = c.env as { BETTER_AUTH_SECRET?: string };
 
       const queryRaw = {
         resource_type: c.req.query('resource_type'),
@@ -175,7 +174,7 @@ externalRefsRouter.get(
 
       const q = queryParsed.data;
       const limit = clampLimit(q.limit, 50, 100);
-      const secret = env.BETTER_AUTH_SECRET ?? '';
+      const secret = c.env.BETTER_AUTH_SECRET ?? '';
 
       let cursor: { createdAt: number; id: string } | undefined;
 

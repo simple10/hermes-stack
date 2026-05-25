@@ -60,10 +60,9 @@ const ROUTE_SCHEMAS: Array<{ method: string; pattern: RegExp; schema: z.ZodTypeA
   { method: 'POST', pattern: new RegExp(`^${PREFIX}/external_refs$`),                      schema: ExternalRefCreateResponse },
 ];
 
-export const validateResponses: MiddlewareHandler = async (c, next) => {
+export const validateResponses: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
   // Self-gate: only run in non-production. Cheap early return otherwise.
-  const env = c.env as { DB_MODE?: string };
-  const isDev = env?.DB_MODE === 'single';
+  const isDev = c.env.DB_MODE === 'single';
   if (!isDev) {
     await next();
     return;

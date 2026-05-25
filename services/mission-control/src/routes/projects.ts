@@ -18,7 +18,7 @@
  * a project is deleted — no app-level logic required.
  */
 import { Hono } from 'hono';
-import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
+import { requireAnyRole } from '../auth/middleware.ts';
 import { ProjectCreateBody as createSchema } from '../schemas/projects.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
@@ -28,8 +28,8 @@ import type { AuthContext } from '../auth/types.ts';
 
 type Variables = { auth: AuthContext };
 
-export const projectsRouter = new Hono<{ Variables: Variables }>();
-projectsRouter.use('*', authMiddleware);
+// authMiddleware is applied at the /api/v1 parent in src/index.ts.
+export const projectsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // createSchema imported from ../schemas/projects.ts (AgentCreateBody alias).
 // patchSchema is derived locally — same shape, all fields optional.
@@ -92,13 +92,12 @@ projectsRouter.get(
   async (c) => {
     try {
       const ctx = c.var.auth;
-      const env = c.env as any;
 
       const limitRaw = c.req.query('limit');
       const cursorRaw = c.req.query('cursor');
       const limit = clampLimit(limitRaw, 50, 100);
 
-      const secret = (env as { BETTER_AUTH_SECRET?: string }).BETTER_AUTH_SECRET ?? '';
+      const secret = c.env.BETTER_AUTH_SECRET ?? '';
 
       let cursor: { updatedAt: number; id: string } | undefined;
 

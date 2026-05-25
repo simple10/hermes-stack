@@ -31,20 +31,20 @@ module.exports = {
      *   - trailing comments on the same line (e.g. `foo(); // repo-escape:`)
      */
     function hasEscapeComment(node) {
-      const src = context.getSourceCode();
-      // Leading comments (lines above).
-      const leading = src.getCommentsBefore(node);
-      if (leading.some((c) => /repo-escape:/.test(c.value))) return true;
-      // Trailing comments on the same line.
-      const trailing = src.getCommentsAfter(node);
-      if (trailing.some((c) => /repo-escape:/.test(c.value))) return true;
-      // Also check comments on the parent statement (catches `const x = foo(); // repo-escape:`).
-      const parent = node.parent;
-      if (parent) {
-        const parentTrailing = src.getCommentsAfter(parent);
-        if (parentTrailing.some((c) => /repo-escape:/.test(c.value))) return true;
-        const parentLeading = src.getCommentsBefore(parent);
-        if (parentLeading.some((c) => /repo-escape:/.test(c.value))) return true;
+      // ESLint 9 flat config: prefer context.sourceCode, fall back to getSourceCode for v8.
+      const src = context.sourceCode ?? context.getSourceCode();
+      const nodeLine = node.loc?.start?.line;
+      if (nodeLine == null) return false;
+      // Scan ALL comments in the file for `repo-escape:` markers on the SAME line
+      // as the node or on the line IMMEDIATELY ABOVE. Robust against multi-line
+      // chained expressions (e.g. `await ctx.pool // repo-escape: ...\n  .select()...`)
+      // where the comment sits between tokens of the same expression.
+      const all = src.getAllComments();
+      for (const c of all) {
+        if (!/repo-escape:/.test(c.value)) continue;
+        const commentLine = c.loc?.start?.line;
+        if (commentLine == null) continue;
+        if (commentLine === nodeLine || commentLine === nodeLine - 1) return true;
       }
       return false;
     }

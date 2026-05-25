@@ -29,7 +29,6 @@ type EmailEnv = { EMAIL_FROM?: string; EMAIL?: EmailBinding };
 export async function sendEmail(env: EmailEnv, args: SendEmailArgs): Promise<void> {
   if (!env.EMAIL_FROM) {
     // Dev/test: no provider configured. Log-only.
-    // eslint-disable-next-line no-console
     console.warn('[email] EMAIL_FROM not set — skipping send.', { to: args.to, subject: args.subject });
     return;
   }

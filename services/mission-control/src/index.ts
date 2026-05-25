@@ -16,6 +16,7 @@ import { loggingMiddleware } from './logging.ts';
 import { rateLimitMiddleware } from './rate-limit.ts';
 import { handleScheduled } from './jobs/cron.ts';
 import { requireJsonOnWrites } from './middleware/content-type-guard.ts';
+import { validateResponses } from './middleware/validate-responses.ts';
 
 type Env = {
   DB?: D1Database;
@@ -55,6 +56,9 @@ app.use('/v1/*', cors({
 app.use('/v1/*', requireJsonOnWrites);
 app.use('/v1/*', rateLimitMiddleware);
 app.use('/v1/*', loggingMiddleware);
+// Dev-mode response-shape validator — self-gates inside (no-op in prod).
+// Logs (does not throw) when a handler response drifts from src/schemas/.
+app.use('/v1/*', validateResponses);
 
 app.route('/v1/health', health);
 

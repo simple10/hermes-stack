@@ -11,9 +11,10 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   root: './web',
   plugins: [
+    // Paths relative to Vite root (./web), NOT the service root.
     tanstackRouter({
-      routesDirectory: 'web/src/routes',
-      generatedRouteTree: 'web/src/routeTree.gen.ts',
+      routesDirectory: 'src/routes',
+      generatedRouteTree: 'src/routeTree.gen.ts',
     }),
     react(),
     tailwindcss(),

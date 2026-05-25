@@ -170,6 +170,74 @@ Tests use `@cloudflare/vitest-pool-workers` to run inside a miniflare Workers en
 
 ---
 
+## UI (SPA — `web/`)
+
+A React SPA lives at `services/mission-control/web/` and is served from the
+same Worker via the Cloudflare Workers Assets binding. The Cloudflare Vite
+plugin (`@cloudflare/vite-plugin`) builds both the SPA and the Worker in
+one pass and runs them together under `pnpm dev` (single port, single
+process, unified HMR).
+
+```sh
+pnpm dev           # Vite dev server + Worker in-process via miniflare → http://localhost:5173
+pnpm build         # → web/dist/client/ (SPA) + dist/<worker>/ (Worker bundle + generated wrangler.json)
+pnpm test:web      # Vitest + happy-dom + RTL + MSW component/unit tests
+pnpm bundle:report # vite build + du -sh report; budget: 500 KB gzipped SPA
+```
+
+Routing: TanStack Router (file-based, paths under `web/src/routes/`).
+Auth UI: better-auth-ui shadcn registries (`auth.json`, `settings.json`,
+`user-button.json`) — components live under `web/src/components/auth/`.
+Operator screens (agents, connectors, projects, PATs, org / members /
+invitations): shadcn primitives + better-auth React client.
+Read-only screens: tasks list/detail, virtualized events viewer.
+
+See [`docs/specs/2026-05-24-mc-ui-design.md`](../../docs/specs/2026-05-24-mc-ui-design.md)
+for the full UI design + the
+[`docs/plans/2026-05-24-mc-ui.md`](../../docs/plans/2026-05-24-mc-ui.md)
+implementation plan.
+
+### Operating versions
+
+- **Wrangler:** ≥ 4.93.0 globally (required by `@cloudflare/vite-plugin`).
+  Pinned via `pnpm.overrides` so the peer-dep resolution sees a compatible
+  version without adding wrangler as a project dep.
+- **Node:** ≥ 22 (the `engines` field says 22+; tested on 23.8.0 locally).
+  `dependency-cruiser` doesn't run on Node 23.x — schemas browser-safety
+  enforcement is currently manual review (re-enable in CI on Node ≥ 24).
+- **shadcn add workflow:** `web/package.json` is a stub that exists only
+  because shadcn's CLI requires a package.json in the SPA directory. After
+  each `pnpm dlx shadcn add` run, move any new entries from `web/package.json`'s
+  `dependencies` up to the parent `services/mission-control/package.json`,
+  then reset `web/package.json` back to the stub form. Stray `web/pnpm-lock.yaml`
+  files should be `git rm`-ed.
+
+### Email (Cloudflare Email Service)
+
+The UI requires email verification (`requireEmailVerification: true` in
+the better-auth config). Outbound mail goes through Cloudflare Email
+Service via the `EMAIL` binding declared in `wrangler.jsonc`. All
+sending code lives in `src/auth/email.ts` — to swap providers
+(MailChannels, Resend, SES) edit only that file.
+
+Setup for production: the sender domain (`EMAIL_FROM` env var, e.g.
+`no-reply@mc.example.com`) must use Cloudflare DNS; CES adds the SPF,
+DKIM, and DMARC records during onboarding.
+
+In dev/test where `EMAIL_FROM` is unset, `sendEmail` logs and returns
+without dispatching — sign-up + verify flows still work end-to-end (the
+bootstrap user is pre-verified in `routes/bootstrap.ts`).
+
+### Web bundle budget
+
+Soft cap: **500 KB gzipped** for the SPA JS bundle. Current at v1: ~353 KB
+gzipped (71% of budget) — comfortable headroom for additional screens
+without restructuring.
+
+Run `pnpm bundle:report` after meaningful additions to check.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

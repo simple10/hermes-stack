@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:web": "vitest run --config web/vitest.config.ts",
+    "bundle:report": "vite build && du -sh web/dist/ && du -sh web/dist/assets/",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/routes/ src/auth/middleware.ts",
     "cf:types": "wrangler types",

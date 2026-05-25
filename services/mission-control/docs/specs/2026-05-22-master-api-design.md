@@ -266,6 +266,12 @@ This avoids the chicken-and-egg "no user can sign up without a UI" without needi
 
 For local dev: `pnpm seed:dev` calls the same `/v1/bootstrap` against `wrangler dev` + sets up a demo org with example agents/connectors/projects.
 
+**Amendment 2026-05-24 (MC UI v1):**
+1. The API mount prefix moved from `/v1/*` to `/api/v1/*` so the `/api/` prefix can form a clean boundary with the SPA fallthrough served by Workers Assets. Every endpoint listed below — including `/v1/bootstrap`, `/v1/auth/*`, etc. — now lives under `/api/v1/...`. The Hermes plugin's `HERMES_MC_URL` env var convention is the base URL *up to but excluding* `/v1/` (so combined-deploy values become `https://mc.example.com/api`; subdomain-deploy values stay `https://api.example.com`).
+2. The `/api/v1/bootstrap` handler now marks the user it creates as `emailVerified: true`. The UI enables `requireEmailVerification: true` in better-auth's config, so a non-pre-verified bootstrap user would be locked out of sign-in. Operators presenting `MC_ADMIN_TOKEN` are implicitly verifying the email they type.
+
+Both changes ship with the MC UI v1 work; see [`docs/specs/2026-05-24-mc-ui-design.md`](../../../../docs/specs/2026-05-24-mc-ui-design.md).
+
 ---
 
 ## Schema (v1)

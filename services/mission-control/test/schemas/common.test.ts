@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { IdSlug, IsoTimestamp, TaskStatus, ErrorEnvelope } from '../../src/schemas/common';
+import { IdSlug, IsoTimestamp, TaskStatus, ErrorEnvelope } from '../../src/schemas/common.ts';
 
 describe('common schemas', () => {
   it('IdSlug accepts a correctly prefixed id', () => {

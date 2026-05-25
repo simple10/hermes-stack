@@ -20,5 +20,5 @@
       "@mc/schemas/*": ["../src/schemas/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../src/schemas/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "../src/schemas/**/*.ts"]
 }

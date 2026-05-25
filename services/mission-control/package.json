@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "mkdir -p .wrangler/logs && FORCE_COLOR=1 vite 2>&1 | tee .wrangler/logs/dev-server.log",
+    "dev": "FORCE_COLOR=1 vite 2>&1 | tee .wrangler/dev-server.log",
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "wrangler deploy",

@@ -12,6 +12,18 @@
 		"enabled": true
 	},
 
+  // Workers Assets — serves the SPA built into web/dist/ by Vite. The Cloudflare
+  // Vite plugin auto-populates `directory` and `binding` at build time, so we
+  // only declare behavior here:
+  //   - not_found_handling: "single-page-application" → unmatched paths fall
+  //     through to index.html so TanStack Router can take over client-side.
+  //   - run_worker_first: ["/api/*"] → every /api/* request skips the asset
+  //     check entirely and hits the Hono router directly.
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
   // Single DB in dev (single-DB mode); SaaS prod overrides via env-specific blocks.
   // TODO: Run `wrangler login && wrangler d1 create mission-control-dev` and
   // replace the placeholder database_id below.

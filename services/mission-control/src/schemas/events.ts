@@ -4,18 +4,27 @@
 import { z } from 'zod';
 import { IsoTimestamp } from './common.ts';
 
-export const ResourceType = z.enum(['task', 'project', 'agent', 'connector', 'comment']);
+// Per VALID_KINDS in src/routes/events.ts — includes 'external_ref' even
+// though the master spec table lists only the 5 main resource types.
+export const ResourceType = z.enum(['task', 'project', 'agent', 'connector', 'comment', 'external_ref']);
 export type ResourceType = z.infer<typeof ResourceType>;
 
-/** GET /v1/events query (per querySchema in routes/events.ts). */
+/**
+ * GET /v1/events query.
+ *
+ * Defaults match the server handler (`since=0`, `limit=100`, `order='asc'`)
+ * so the schema can be used for server-side validation directly. The UI
+ * always sends explicit values, so defaults are inert from the client's
+ * perspective.
+ */
 export const EventListQuery = z.object({
-  since: z.coerce.number().int().nonnegative().optional(),
+  since: z.coerce.number().int().nonnegative().default(0),
   /** Comma-separated resource_type values. */
   kinds: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
   cursor: z.string().optional(),
   /** 'desc' for head-lookup (registrar bootstrap); 'asc' is the pagination default. */
-  order: z.enum(['asc', 'desc']).optional(),
+  order: z.enum(['asc', 'desc']).default('asc'),
 });
 export type EventListQuery = z.infer<typeof EventListQuery>;
 

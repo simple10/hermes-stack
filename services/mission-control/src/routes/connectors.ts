@@ -16,13 +16,16 @@
  *   4. Emit connector.created; return { connector, key }.
  */
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authMiddleware, requireMember } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
+import {
+  ConnectorCreateBody as createSchema,
+  ConnectorPatchBody as updateSchema,
+} from '../schemas/connectors.ts';
 
 const DEFAULT_GRACE = 300; // seconds
 
@@ -30,21 +33,6 @@ type Variables = { auth: AuthContext };
 
 export const connectorsRouter = new Hono<{ Variables: Variables }>();
 connectorsRouter.use('*', authMiddleware);
-
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-const createSchema = z.object({
-  name: z.string().min(1).max(100),
-  kind: z.string().min(1).max(50),
-  description: z.string().max(1000).optional(),
-});
-
-const updateSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  description: z.string().max(1000).nullable().optional(),
-});
 
 // ---------------------------------------------------------------------------
 // POST /v1/connectors

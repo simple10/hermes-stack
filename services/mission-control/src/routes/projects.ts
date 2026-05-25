@@ -18,8 +18,8 @@
  * a project is deleted — no app-level logic required.
  */
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
+import { ProjectCreateBody as createSchema } from '../schemas/projects.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
@@ -31,16 +31,8 @@ type Variables = { auth: AuthContext };
 export const projectsRouter = new Hono<{ Variables: Variables }>();
 projectsRouter.use('*', authMiddleware);
 
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-const createSchema = z.object({
-  name: z.string().min(1).max(200),
-  slug: z.string().regex(/^[a-z0-9-]+$/).min(1).max(64),
-  description: z.string().max(2000).optional(),
-});
-
+// createSchema imported from ../schemas/projects.ts (AgentCreateBody alias).
+// patchSchema is derived locally — same shape, all fields optional.
 const patchSchema = createSchema.partial();
 
 // ---------------------------------------------------------------------------

@@ -35,7 +35,6 @@
  */
 
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { and, desc, eq } from 'drizzle-orm';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { tasks, taskComments, events } from '../db/pool.ts';
@@ -50,54 +49,18 @@ import {
   hashBody,
 } from '../idempotency.ts';
 import type { AuthContext } from '../auth/types.ts';
+import {
+  TaskCreateBody as createBody,
+  TaskPatchBody as patchBody,
+} from '../schemas/tasks.ts';
 
 type Variables = { auth: AuthContext };
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 tasksRouter.use('*', authMiddleware);
 
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-const STATUS_VALUES = [
-  'pending',
-  'ready',
-  'in_progress',
-  'blocked',
-  'completed',
-  'failed',
-  'cancelled',
-] as const;
-
-// Idempotency key format: <source>:<payload>. <source> is 1-32 lowercase
-// chars (a-z, 0-9, _, -) starting with a letter; <payload> is 1-200 chars
-// of anything. Catches the footgun of passing a raw external id without a
-// source-kind prefix (which would silently collide across callers).
-// Examples: "notion:ws_abc:page_xyz:v3", "hermes:t_abc123", "mc:t_xyz".
-const IDEMPOTENCY_KEY_RE = /^[a-z][a-z0-9_-]{0,31}:.{1,200}$/;
-
-const createBody = z.object({
-  project_id: z.string().min(1),
-  title: z.string().min(1).max(500),
-  body: z.string().max(50_000).optional(),
-  agent_id: z.string().optional(),
-  priority: z.number().int().min(0).max(100).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  idempotency_key: z.string().regex(IDEMPOTENCY_KEY_RE, {
-    message:
-      'idempotency_key must match <source>:<payload> where <source> is 1-32 lowercase chars (a-z, 0-9, _, -) starting with a letter',
-  }).optional(),
-});
-
-const patchBody = z.object({
-  title: z.string().min(1).max(500).optional(),
-  body: z.string().max(50_000).optional(),
-  agent_id: z.string().nullable().optional(), // null to unassign
-  status: z.enum(STATUS_VALUES).optional(),
-  priority: z.number().int().min(0).max(100).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
+// createBody + patchBody imported from ../schemas/tasks.ts above.
+// (STATUS_VALUES, IDEMPOTENCY_KEY_RE moved inline into the schema definitions.)
 
 // ---------------------------------------------------------------------------
 // Internal helpers

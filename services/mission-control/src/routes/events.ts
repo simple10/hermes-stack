@@ -23,12 +23,12 @@
  * a single since-window itself spans more than `limit` events.
  */
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import type { AuthContext } from '../auth/types.ts';
+import { EventListQuery as querySchema } from '../schemas/events.ts';
 
 type Variables = { auth: AuthContext };
 
@@ -36,17 +36,6 @@ export const eventsRouter = new Hono<{ Variables: Variables }>();
 eventsRouter.use('*', authMiddleware);
 
 const VALID_KINDS = ['task', 'project', 'agent', 'connector', 'comment', 'external_ref'] as const;
-
-const querySchema = z.object({
-  since: z.coerce.number().int().nonnegative().default(0),
-  kinds: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
-  cursor: z.string().optional(),
-  // 'desc' returns rows in reverse id order — used by consumers to look up
-  // the current head of the stream (e.g. registrar bootstrap). 'asc' is the
-  // pagination default.
-  order: z.enum(['asc', 'desc']).default('asc'),
-});
 
 // ---------------------------------------------------------------------------
 // GET /v1/events

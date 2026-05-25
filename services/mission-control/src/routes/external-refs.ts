@@ -34,13 +34,17 @@
  */
 
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
+import {
+  ExternalRefCreateBody as createBody,
+  ExternalRefListQuery as listQuery,
+  type ExternalRefResourceType,
+} from '../schemas/external-refs.ts';
 
 type Variables = { auth: AuthContext };
 
@@ -48,38 +52,12 @@ export const externalRefsRouter = new Hono<{ Variables: Variables }>();
 externalRefsRouter.use('*', authMiddleware);
 
 // ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-const RESOURCE_TYPES = ['task', 'project', 'agent', 'connector', 'comment'] as const;
-
-const createBody = z.object({
-  resource_type: z.enum(RESOURCE_TYPES),
-  resource_id: z.string().min(1),
-  source_kind: z.string().min(1).max(50),
-  source_id: z.string().min(1).max(200),
-  external_id: z.string().min(1).max(500),
-  external_url: z.string().url().max(2000).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
-const listQuery = z.object({
-  resource_type: z.enum(RESOURCE_TYPES).optional(),
-  resource_id: z.string().optional(),
-  source_kind: z.string().optional(),
-  source_id: z.string().optional(),
-  external_id: z.string().optional(),
-  cursor: z.string().optional(),
-  limit: z.string().optional(),
-});
-
-// ---------------------------------------------------------------------------
 // Resource existence validation helper
 // ---------------------------------------------------------------------------
 
 async function validateResourceExists(
   ctx: AuthContext,
-  resource_type: typeof RESOURCE_TYPES[number],
+  resource_type: ExternalRefResourceType,
   resource_id: string,
 ): Promise<void> {
   let found = false;

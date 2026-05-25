@@ -15,26 +15,18 @@
  */
 
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { authMiddleware, requireAnyRole } from '../auth/middleware.ts';
 import { HttpError, errorResponse } from '../errors.ts';
 import { serializeTimestamps } from '../db/helpers.ts';
 import { db } from '../db/repos/index.ts';
 import { clampLimit } from '../pagination.ts';
 import type { AuthContext } from '../auth/types.ts';
+import { CommentCreateBody as createBody } from '../schemas/comments.ts';
 
 type Variables = { auth: AuthContext };
 
 export const commentsRouter = new Hono<{ Variables: Variables }>();
 commentsRouter.use('*', authMiddleware);
-
-// ---------------------------------------------------------------------------
-// Schemas
-// ---------------------------------------------------------------------------
-
-const createBody = z.object({
-  body: z.string().min(1).max(10_000),
-});
 
 // ---------------------------------------------------------------------------
 // Cursor helpers — chronological ASC (createdAt, id)

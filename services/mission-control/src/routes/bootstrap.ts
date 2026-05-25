@@ -16,7 +16,6 @@
  * Once any user exists in the master DB, this endpoint returns 409.
  */
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { masterClient } from '../db/client.ts';
 import { organization, member } from '../db/master.ts';
 import { createAuth } from '../auth/config.ts';
@@ -24,16 +23,9 @@ import { errorResponse, HttpError } from '../errors.ts';
 import { makeId } from '../ids.ts';
 import { mintApiKey } from '../auth/api-keys.ts';
 import { lookupAnyUserExists } from '../db/repos/users.ts';
+import { BootstrapBody as bodySchema } from '../schemas/bootstrap.ts';
 
 export const bootstrap = new Hono();
-
-const bodySchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  name: z.string().min(1),
-  orgName: z.string().min(1),
-  orgSlug: z.string().regex(/^[a-z0-9-]+$/).min(1),
-});
 
 // ---------------------------------------------------------------------------
 

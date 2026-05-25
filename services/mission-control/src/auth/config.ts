@@ -1,9 +1,18 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { organization } from 'better-auth/plugins';
+import { organization, magicLink } from 'better-auth/plugins';
 import { apiKey } from '@better-auth/api-key';
 import * as schema from '../db/master.ts';
 import { masterClient } from '../db/client.ts';
+import {
+  deliverVerificationEmail,
+  deliverResetPasswordEmail,
+  deliverMagicLinkEmail,
+} from './email.ts';
+
+type EmailBinding = {
+  send: (m: { to: string; from: string; subject: string; html: string; text?: string }) => Promise<{ messageId: string }>;
+};
 
 export type AuthEnv = {
   DB?: D1Database;
@@ -11,6 +20,8 @@ export type AuthEnv = {
   DB_MODE: string;
   BETTER_AUTH_SECRET: string;
   BETTER_AUTH_URL: string;
+  EMAIL_FROM?: string;
+  EMAIL?: EmailBinding;
 };
 
 export function createAuth(env: AuthEnv) {
@@ -27,7 +38,15 @@ export function createAuth(env: AuthEnv) {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     basePath: '/v1/auth',
-    emailAndPassword: { enabled: true },
+    emailAndPassword: {
+      enabled: true,
+      requireEmailVerification: true,
+      sendResetPassword: (args) => deliverResetPasswordEmail(env, args),
+    },
+    emailVerification: {
+      sendVerificationEmail: (args) => deliverVerificationEmail(env, args),
+      sendOnSignUp: true,
+    },
     plugins: [
       organization(),
       // The apiKey plugin uses the table name "apikey" internally. Our extra
@@ -35,6 +54,9 @@ export function createAuth(env: AuthEnv) {
       // written/read by application code; better-auth doesn't need to know about
       // them for its own flows.
       apiKey(),
+      magicLink({
+        sendMagicLink: (args) => deliverMagicLinkEmail(env, args),
+      }),
     ],
   });
 }

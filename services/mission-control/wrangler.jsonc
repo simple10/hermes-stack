@@ -27,16 +27,23 @@
   "vars": {
     "DB_MODE": "single",
     "BETTER_AUTH_URL": "http://localhost:8787"
+    // EMAIL_FROM intentionally unset in dev → sendEmail() no-ops (logs only).
+    // To actually send mail in dev, set EMAIL_FROM and add a send_email binding.
   },
 
   // ── Production SaaS environment (`wrangler deploy --env production`) ─────
   // Split-DB mode with separate master + pool bindings, plus cron triggers
-  // for events / idempotency / verification purges.
+  // for events / idempotency / verification purges, plus Cloudflare Email
+  // Service binding for transactional outbound mail.
   "env": {
     "production": {
       "vars": {
-        "DB_MODE": "split"
+        "DB_MODE": "split",
+        "EMAIL_FROM": "no-reply@mc.example.com"
       },
+      "send_email": [
+        { "name": "EMAIL", "remote": true }
+      ],
       "d1_databases": [
         {
           "binding": "MASTER_DB",

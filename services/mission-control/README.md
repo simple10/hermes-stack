@@ -203,8 +203,11 @@ implementation plan.
   Pinned via `pnpm.overrides` so the peer-dep resolution sees a compatible
   version without adding wrangler as a project dep.
 - **Node:** ≥ 22 (the `engines` field says 22+; tested on 23.8.0 locally).
-  `dependency-cruiser` doesn't run on Node 23.x — schemas browser-safety
-  enforcement is currently manual review (re-enable in CI on Node ≥ 24).
+- **ESLint:** uses `typescript-eslint` for the parser + `eslint-plugin-import`
+  with `eslint-import-resolver-typescript` for transitive-import checks.
+  `pnpm lint` exits 0 with informational `any` warnings; CI should treat
+  errors as blocking and warnings as advisory. Replaces the original
+  dependency-cruiser-based plan which didn't run on Node 23.x.
 - **shadcn add workflow:** `web/package.json` is a stub that exists only
   because shadcn's CLI requires a package.json in the SPA directory. After
   each `pnpm dlx shadcn add` run, move any new entries from `web/package.json`'s

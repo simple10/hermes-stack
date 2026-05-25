@@ -93,7 +93,7 @@ describe('cron', () => {
     await pool.insert(idempotencyKeys).values([
       {
         orgId: ORG,
-        route: 'POST /v1/tasks',
+        route: 'POST /api/v1/tasks',
         key: 'idem-expired',
         responseStatus: 201,
         responseBody: '{}',
@@ -102,7 +102,7 @@ describe('cron', () => {
       },
       {
         orgId: ORG,
-        route: 'POST /v1/tasks',
+        route: 'POST /api/v1/tasks',
         key: 'idem-active',
         responseStatus: 201,
         responseBody: '{}',

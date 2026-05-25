@@ -1,5 +1,5 @@
 /**
- * Integration tests for /v1/connectors CRUD + rotate-key.
+ * Integration tests for /api/v1/connectors CRUD + rotate-key.
  *
  * Mirrors agents.test.ts with connector-specific differences:
  *   - POST/PATCH/DELETE require owner|admin (no member)
@@ -32,7 +32,7 @@ beforeAll(async () => {
 
   // Org A via bootstrap.
   const res = await app.fetch(
-    new Request('http://x/v1/bootstrap', {
+    new Request('http://x/api/v1/bootstrap', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-mc-admin-token': ADMIN_TOKEN },
       body: JSON.stringify({
@@ -75,13 +75,13 @@ function req(method: string, path: string, token: string, body?: unknown) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/connectors
+// POST /api/v1/connectors
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/connectors', () => {
+describe('POST /api/v1/connectors', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/connectors', { method: 'POST', body: JSON.stringify({ name: 'x', kind: 'notion' }), headers: { 'content-type': 'application/json' } }),
+      new Request('http://x/api/v1/connectors', { method: 'POST', body: JSON.stringify({ name: 'x', kind: 'notion' }), headers: { 'content-type': 'application/json' } }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -90,14 +90,14 @@ describe('POST /v1/connectors', () => {
 
   it('returns 403 for member role (connectors require owner|admin)', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-create', 'member');
-    const res = await req('POST', '/v1/connectors', memberPat, { name: 'notion-1', kind: 'notion' });
+    const res = await req('POST', '/api/v1/connectors', memberPat, { name: 'notion-1', kind: 'notion' });
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('auth.role_insufficient');
   });
 
   it('returns 201 with connector + key on valid create (owner)', async () => {
-    const res = await req('POST', '/v1/connectors', pat, { name: 'notion-1', kind: 'notion', description: 'Notion connector' });
+    const res = await req('POST', '/api/v1/connectors', pat, { name: 'notion-1', kind: 'notion', description: 'Notion connector' });
     expect(res.status).toBe(201);
     const body = await res.json() as { connector: { id: string; name: string; kind: string }; key: string };
     expect(body.connector.name).toBe('notion-1');
@@ -108,39 +108,39 @@ describe('POST /v1/connectors', () => {
 
   it('returns 201 with admin role', async () => {
     const { pat: adminPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-admin-create', 'admin');
-    const res = await req('POST', '/v1/connectors', adminPat, { name: 'linear-admin', kind: 'linear' });
+    const res = await req('POST', '/api/v1/connectors', adminPat, { name: 'linear-admin', kind: 'linear' });
     expect(res.status).toBe(201);
   });
 
   it('returns 400 on missing name', async () => {
-    const res = await req('POST', '/v1/connectors', pat, { kind: 'notion' });
+    const res = await req('POST', '/api/v1/connectors', pat, { kind: 'notion' });
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('connector.validation_error');
   });
 
   it('returns 409 on duplicate name within org', async () => {
-    await req('POST', '/v1/connectors', pat, { name: 'dup-connector', kind: 'notion' });
-    const res = await req('POST', '/v1/connectors', pat, { name: 'dup-connector', kind: 'linear' });
+    await req('POST', '/api/v1/connectors', pat, { name: 'dup-connector', kind: 'notion' });
+    const res = await req('POST', '/api/v1/connectors', pat, { name: 'dup-connector', kind: 'linear' });
     expect(res.status).toBe(409);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('connector.duplicate_name');
   });
 
   it('allows same name in different orgs', async () => {
-    const res = await req('POST', '/v1/connectors', orgBPat, { name: 'notion-1', kind: 'notion' });
+    const res = await req('POST', '/api/v1/connectors', orgBPat, { name: 'notion-1', kind: 'notion' });
     expect(res.status).toBe(201);
   });
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/connectors
+// GET /api/v1/connectors
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/connectors', () => {
+describe('GET /api/v1/connectors', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/connectors'),
+      new Request('http://x/api/v1/connectors'),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -148,7 +148,7 @@ describe('GET /v1/connectors', () => {
   });
 
   it('returns list scoped to caller org', async () => {
-    const res = await req('GET', '/v1/connectors', pat);
+    const res = await req('GET', '/api/v1/connectors', pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { connectors: { id: string; org_id: string }[] };
     expect(Array.isArray(body.connectors)).toBe(true);
@@ -159,16 +159,16 @@ describe('GET /v1/connectors', () => {
 
   it('member can list connectors (GET is open to all roles)', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-list', 'member');
-    const res = await req('GET', '/v1/connectors', memberPat);
+    const res = await req('GET', '/api/v1/connectors', memberPat);
     expect(res.status).toBe(200);
   });
 
   it('org B list does not include org A connectors (isolation)', async () => {
-    const resA = await req('GET', '/v1/connectors', pat);
+    const resA = await req('GET', '/api/v1/connectors', pat);
     const bodyA = await resA.json() as { connectors: { id: string }[] };
     const idsA = bodyA.connectors.map((c) => c.id);
 
-    const resB = await req('GET', '/v1/connectors', orgBPat);
+    const resB = await req('GET', '/api/v1/connectors', orgBPat);
     const bodyB = await resB.json() as { connectors: { id: string }[] };
     const idsB = bodyB.connectors.map((c) => c.id);
 
@@ -179,20 +179,20 @@ describe('GET /v1/connectors', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/connectors/:id
+// GET /api/v1/connectors/:id
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/connectors/:id', () => {
+describe('GET /api/v1/connectors/:id', () => {
   let connectorId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/connectors', pat, { name: 'detail-connector', kind: 'github' });
+    const res = await req('POST', '/api/v1/connectors', pat, { name: 'detail-connector', kind: 'github' });
     const body = await res.json() as { connector: { id: string } };
     connectorId = body.connector.id;
   });
 
   it('returns 200 with connector detail', async () => {
-    const res = await req('GET', `/v1/connectors/${connectorId}`, pat);
+    const res = await req('GET', `/api/v1/connectors/${connectorId}`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { connector: { id: string; name: string } };
     expect(body.connector.id).toBe(connectorId);
@@ -200,33 +200,33 @@ describe('GET /v1/connectors/:id', () => {
   });
 
   it('returns 404 for non-existent connector', async () => {
-    const res = await req('GET', '/v1/connectors/cnn_doesnotexist', pat);
+    const res = await req('GET', '/api/v1/connectors/cnn_doesnotexist', pat);
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('connector.not_found');
   });
 
   it('returns 404 when org B tries to access org A connector (isolation)', async () => {
-    const res = await req('GET', `/v1/connectors/${connectorId}`, orgBPat);
+    const res = await req('GET', `/api/v1/connectors/${connectorId}`, orgBPat);
     expect(res.status).toBe(404);
   });
 });
 
 // ---------------------------------------------------------------------------
-// PATCH /v1/connectors/:id
+// PATCH /api/v1/connectors/:id
 // ---------------------------------------------------------------------------
 
-describe('PATCH /v1/connectors/:id', () => {
+describe('PATCH /api/v1/connectors/:id', () => {
   let connectorId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/connectors', pat, { name: 'patch-connector', kind: 'notion' });
+    const res = await req('POST', '/api/v1/connectors', pat, { name: 'patch-connector', kind: 'notion' });
     const body = await res.json() as { connector: { id: string } };
     connectorId = body.connector.id;
   });
 
   it('returns 200 with updated connector (owner)', async () => {
-    const res = await req('PATCH', `/v1/connectors/${connectorId}`, pat, { name: 'patch-connector-renamed', description: 'updated' });
+    const res = await req('PATCH', `/api/v1/connectors/${connectorId}`, pat, { name: 'patch-connector-renamed', description: 'updated' });
     expect(res.status).toBe(200);
     const body = await res.json() as { connector: { name: string; description: string } };
     expect(body.connector.name).toBe('patch-connector-renamed');
@@ -235,75 +235,75 @@ describe('PATCH /v1/connectors/:id', () => {
 
   it('returns 403 when member role tries to patch (connectors require owner|admin)', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-patch', 'member');
-    const res = await req('PATCH', `/v1/connectors/${connectorId}`, memberPat, { name: 'hacked' });
+    const res = await req('PATCH', `/api/v1/connectors/${connectorId}`, memberPat, { name: 'hacked' });
     expect(res.status).toBe(403);
   });
 
   it('returns 404 for non-existent connector', async () => {
-    const res = await req('PATCH', '/v1/connectors/cnn_doesnotexist', pat, { name: 'x' });
+    const res = await req('PATCH', '/api/v1/connectors/cnn_doesnotexist', pat, { name: 'x' });
     expect(res.status).toBe(404);
   });
 
   it('returns 404 when org B tries to patch org A connector (isolation)', async () => {
-    const res = await req('PATCH', `/v1/connectors/${connectorId}`, orgBPat, { name: 'hacked' });
+    const res = await req('PATCH', `/api/v1/connectors/${connectorId}`, orgBPat, { name: 'hacked' });
     expect(res.status).toBe(404);
   });
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /v1/connectors/:id
+// DELETE /api/v1/connectors/:id
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/connectors/:id', () => {
+describe('DELETE /api/v1/connectors/:id', () => {
   let connectorId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/connectors', pat, { name: 'delete-connector', kind: 'notion' });
+    const res = await req('POST', '/api/v1/connectors', pat, { name: 'delete-connector', kind: 'notion' });
     const body = await res.json() as { connector: { id: string } };
     connectorId = body.connector.id;
   });
 
   it('returns 403 when member role tries to delete', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-del', 'member');
-    const res = await req('DELETE', `/v1/connectors/${connectorId}`, memberPat);
+    const res = await req('DELETE', `/api/v1/connectors/${connectorId}`, memberPat);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 for non-existent connector', async () => {
-    const res = await req('DELETE', '/v1/connectors/cnn_doesnotexist', pat);
+    const res = await req('DELETE', '/api/v1/connectors/cnn_doesnotexist', pat);
     expect(res.status).toBe(404);
   });
 
   it('returns 404 when org B tries to delete org A connector (isolation)', async () => {
-    const res = await req('DELETE', `/v1/connectors/${connectorId}`, orgBPat);
+    const res = await req('DELETE', `/api/v1/connectors/${connectorId}`, orgBPat);
     expect(res.status).toBe(404);
   });
 
   it('returns 200 and soft-deletes the connector; subsequent GET returns 404', async () => {
     // Create a fresh connector dedicated to this test.
-    const createRes = await req('POST', '/v1/connectors', pat, { name: 'connector-to-delete-full', kind: 'notion' });
+    const createRes = await req('POST', '/api/v1/connectors', pat, { name: 'connector-to-delete-full', kind: 'notion' });
     expect(createRes.status).toBe(201);
     const { connector: freshCn } = await createRes.json() as { connector: { id: string } };
 
-    const delRes = await req('DELETE', `/v1/connectors/${freshCn.id}`, pat);
+    const delRes = await req('DELETE', `/api/v1/connectors/${freshCn.id}`, pat);
     expect(delRes.status).toBe(200);
 
-    const getRes = await req('GET', `/v1/connectors/${freshCn.id}`, pat);
+    const getRes = await req('GET', `/api/v1/connectors/${freshCn.id}`, pat);
     expect(getRes.status).toBe(404);
 
     // Second delete should also 404.
-    const del2Res = await req('DELETE', `/v1/connectors/${freshCn.id}`, pat);
+    const del2Res = await req('DELETE', `/api/v1/connectors/${freshCn.id}`, pat);
     expect(del2Res.status).toBe(404);
   });
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /v1/connectors/:id — active external_refs gate
+// DELETE /api/v1/connectors/:id — active external_refs gate
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/connectors/:id active external_refs gate', () => {
+describe('DELETE /api/v1/connectors/:id active external_refs gate', () => {
   it('returns 409 when connector has active external_refs', async () => {
-    const createRes = await req('POST', '/v1/connectors', pat, { name: 'gated-connector', kind: 'notion' });
+    const createRes = await req('POST', '/api/v1/connectors', pat, { name: 'gated-connector', kind: 'notion' });
     expect(createRes.status).toBe(201);
     const { connector } = await createRes.json() as { connector: { id: string } };
 
@@ -315,7 +315,7 @@ describe('DELETE /v1/connectors/:id active external_refs gate', () => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(refId, orgId, 'connector', connector.id, 'notion', connector.id, 'ext-abc', now, now).run();
 
-    const delRes = await req('DELETE', `/v1/connectors/${connector.id}`, pat);
+    const delRes = await req('DELETE', `/api/v1/connectors/${connector.id}`, pat);
     expect(delRes.status).toBe(409);
     const body = await delRes.json() as { error: { code: string; details: { ref_ids: string[] } } };
     expect(body.error.code).toBe('connector.has_active_refs');
@@ -324,29 +324,29 @@ describe('DELETE /v1/connectors/:id active external_refs gate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /v1/connectors/:id/rotate-key
+// POST /api/v1/connectors/:id/rotate-key
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/connectors/:id/rotate-key', () => {
+describe('POST /api/v1/connectors/:id/rotate-key', () => {
   let connectorId = '';
   let originalKey = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/connectors', pat, { name: 'rotate-connector', kind: 'linear' });
+    const res = await req('POST', '/api/v1/connectors', pat, { name: 'rotate-connector', kind: 'linear' });
     const body = await res.json() as { connector: { id: string }; key: string };
     connectorId = body.connector.id;
     originalKey = body.key;
   });
 
   it('returns 404 for non-existent connector', async () => {
-    const res = await req('POST', '/v1/connectors/cnn_doesnotexist/rotate-key', pat);
+    const res = await req('POST', '/api/v1/connectors/cnn_doesnotexist/rotate-key', pat);
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('connector.not_found');
   });
 
   it('returns new key and expires_old_at', async () => {
-    const res = await req('POST', `/v1/connectors/${connectorId}/rotate-key`, pat);
+    const res = await req('POST', `/api/v1/connectors/${connectorId}/rotate-key`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { key: string; expires_old_at: string | null };
     expect(typeof body.key).toBe('string');
@@ -357,12 +357,12 @@ describe('POST /v1/connectors/:id/rotate-key', () => {
     expect(expiresDate.getTime()).toBeGreaterThan(Date.now());
   });
 
-  it('new key can authenticate (GET /v1/me)', async () => {
-    const rotRes = await req('POST', `/v1/connectors/${connectorId}/rotate-key`, pat);
+  it('new key can authenticate (GET /api/v1/me)', async () => {
+    const rotRes = await req('POST', `/api/v1/connectors/${connectorId}/rotate-key`, pat);
     const { key: newKey } = await rotRes.json() as { key: string };
 
     const meRes = await app.fetch(
-      new Request('http://x/v1/me', { headers: { authorization: `Bearer ${newKey}` } }),
+      new Request('http://x/api/v1/me', { headers: { authorization: `Bearer ${newKey}` } }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -373,12 +373,12 @@ describe('POST /v1/connectors/:id/rotate-key', () => {
 
   it('403 when member role tries rotate-key', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'cnn-member-rot', 'member');
-    const res = await req('POST', `/v1/connectors/${connectorId}/rotate-key`, memberPat);
+    const res = await req('POST', `/api/v1/connectors/${connectorId}/rotate-key`, memberPat);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 when org B tries rotate-key on org A connector (isolation)', async () => {
-    const res = await req('POST', `/v1/connectors/${connectorId}/rotate-key`, orgBPat);
+    const res = await req('POST', `/api/v1/connectors/${connectorId}/rotate-key`, orgBPat);
     expect(res.status).toBe(404);
   });
 });

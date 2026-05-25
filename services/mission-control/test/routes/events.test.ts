@@ -1,5 +1,5 @@
 /**
- * Integration tests for GET /v1/events.
+ * Integration tests for GET /api/v1/events.
  *
  * Coverage:
  *   - returns {events, next_cursor} envelope
@@ -36,7 +36,7 @@ beforeAll(async () => {
   patA = fixA.pat;
 
   const p = await app.fetch(
-    new Request('http://x/v1/projects', {
+    new Request('http://x/api/v1/projects', {
       method: 'POST',
       headers: { Authorization: `Bearer ${patA}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'P', slug: 'events-p' }),
@@ -46,7 +46,7 @@ beforeAll(async () => {
   projectIdA = (await p.json() as { project: { id: string } }).project.id;
 
   const a = await app.fetch(
-    new Request('http://x/v1/agents', {
+    new Request('http://x/api/v1/agents', {
       method: 'POST',
       headers: { Authorization: `Bearer ${patA}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'agent-events-a', kind: 'hermes' }),
@@ -57,7 +57,7 @@ beforeAll(async () => {
   agentKeyA = ab.key;
 
   const t = await app.fetch(
-    new Request('http://x/v1/tasks', {
+    new Request('http://x/api/v1/tasks', {
       method: 'POST',
       headers: { Authorization: `Bearer ${patA}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ project_id: projectIdA, title: 't-for-events' }),
@@ -67,7 +67,7 @@ beforeAll(async () => {
   taskIdA = (await t.json() as { task: { id: string } }).task.id;
 
   await app.fetch(
-    new Request(`http://x/v1/tasks/${taskIdA}/comments`, {
+    new Request(`http://x/api/v1/tasks/${taskIdA}/comments`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${patA}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ body: 'first comment' }),
@@ -80,10 +80,10 @@ beforeAll(async () => {
   patB = fixB.pat;
 });
 
-describe('GET /v1/events', () => {
+describe('GET /api/v1/events', () => {
   it('returns {events, next_cursor} envelope with rows after setup', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/events?since=0&limit=100', {
+      new Request('http://x/api/v1/events?since=0&limit=100', {
         headers: { Authorization: `Bearer ${patA}` },
       }),
       TEST_ENV,
@@ -102,7 +102,7 @@ describe('GET /v1/events', () => {
   it('respects since as exclusive lower bound', async () => {
     const all = (await (
       await app.fetch(
-        new Request('http://x/v1/events?since=0&limit=100', {
+        new Request('http://x/api/v1/events?since=0&limit=100', {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,
@@ -112,7 +112,7 @@ describe('GET /v1/events', () => {
     const mid = all.events[Math.floor(all.events.length / 2)].id;
     const after = (await (
       await app.fetch(
-        new Request(`http://x/v1/events?since=${mid}&limit=100`, {
+        new Request(`http://x/api/v1/events?since=${mid}&limit=100`, {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,
@@ -124,7 +124,7 @@ describe('GET /v1/events', () => {
   it('filters by kinds (resource_type)', async () => {
     const tasksOnly = (await (
       await app.fetch(
-        new Request('http://x/v1/events?since=0&kinds=task&limit=100', {
+        new Request('http://x/api/v1/events?since=0&kinds=task&limit=100', {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,
@@ -135,7 +135,7 @@ describe('GET /v1/events', () => {
 
     const commentsOnly = (await (
       await app.fetch(
-        new Request('http://x/v1/events?since=0&kinds=comment&limit=100', {
+        new Request('http://x/api/v1/events?since=0&kinds=comment&limit=100', {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,
@@ -146,7 +146,7 @@ describe('GET /v1/events', () => {
 
   it('rejects agent role with 403', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/events?since=0&limit=10', {
+      new Request('http://x/api/v1/events?since=0&limit=10', {
         headers: { Authorization: `Bearer ${agentKeyA}` },
       }),
       TEST_ENV,
@@ -156,7 +156,7 @@ describe('GET /v1/events', () => {
 
   it('isolation: org B sees only its own (empty) events', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/events?since=0&limit=100', {
+      new Request('http://x/api/v1/events?since=0&limit=100', {
         headers: { Authorization: `Bearer ${patB}` },
       }),
       TEST_ENV,
@@ -171,7 +171,7 @@ describe('GET /v1/events', () => {
     // Force pagination by requesting a tiny limit.
     const page1 = (await (
       await app.fetch(
-        new Request('http://x/v1/events?since=0&limit=2', {
+        new Request('http://x/api/v1/events?since=0&limit=2', {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,
@@ -182,7 +182,7 @@ describe('GET /v1/events', () => {
 
     const page2 = (await (
       await app.fetch(
-        new Request(`http://x/v1/events?since=0&limit=2&cursor=${page1.next_cursor}`, {
+        new Request(`http://x/api/v1/events?since=0&limit=2&cursor=${page1.next_cursor}`, {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,
@@ -195,7 +195,7 @@ describe('GET /v1/events', () => {
   it('returns payload as a parsed object (not a JSON string)', async () => {
     const body = (await (
       await app.fetch(
-        new Request('http://x/v1/events?since=0&kinds=task&limit=100', {
+        new Request('http://x/api/v1/events?since=0&kinds=task&limit=100', {
           headers: { Authorization: `Bearer ${patA}` },
         }),
         TEST_ENV,

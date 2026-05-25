@@ -20,9 +20,9 @@ beforeAll(async () => {
 });
 
 describe('requireJsonOnWrites middleware', () => {
-  it('POST /v1/projects with application/x-www-form-urlencoded → 415', async () => {
+  it('POST /api/v1/projects with application/x-www-form-urlencoded → 415', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects', {
+      new Request('http://x/api/v1/projects', {
         method: 'POST',
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
@@ -38,9 +38,9 @@ describe('requireJsonOnWrites middleware', () => {
     expect(body.error.code).toBe('unsupported_media_type');
   });
 
-  it('POST /v1/projects with multipart/form-data → 415', async () => {
+  it('POST /api/v1/projects with multipart/form-data → 415', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects', {
+      new Request('http://x/api/v1/projects', {
         method: 'POST',
         headers: {
           'content-type': 'multipart/form-data; boundary=----WebKitFormBoundary',
@@ -54,9 +54,9 @@ describe('requireJsonOnWrites middleware', () => {
     expect(res.status).toBe(415);
   });
 
-  it('POST /v1/projects with application/json → not 415 (may be 401/400)', async () => {
+  it('POST /api/v1/projects with application/json → not 415 (may be 401/400)', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects', {
+      new Request('http://x/api/v1/projects', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -71,9 +71,9 @@ describe('requireJsonOnWrites middleware', () => {
     expect(res.status).not.toBe(415);
   });
 
-  it('GET /v1/projects with any content-type → not 415', async () => {
+  it('GET /api/v1/projects with any content-type → not 415', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects', {
+      new Request('http://x/api/v1/projects', {
         method: 'GET',
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
@@ -87,9 +87,9 @@ describe('requireJsonOnWrites middleware', () => {
     expect(res.status).not.toBe(415);
   });
 
-  it('PATCH /v1/agents/:id with form-urlencoded → 415', async () => {
+  it('PATCH /api/v1/agents/:id with form-urlencoded → 415', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/agents/agt_fake', {
+      new Request('http://x/api/v1/agents/agt_fake', {
         method: 'PATCH',
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
@@ -103,9 +103,9 @@ describe('requireJsonOnWrites middleware', () => {
     expect(res.status).toBe(415);
   });
 
-  it('DELETE /v1/projects/:id with no content-type → not 415', async () => {
+  it('DELETE /api/v1/projects/:id with no content-type → not 415', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects/prj_fake', {
+      new Request('http://x/api/v1/projects/prj_fake', {
         method: 'DELETE',
         headers: {
           'authorization': 'Bearer fake-token',

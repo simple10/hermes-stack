@@ -1,5 +1,5 @@
 /**
- * Integration tests for POST /v1/bootstrap.
+ * Integration tests for POST /api/v1/bootstrap.
  *
  * Each test runs against the same in-worker D1 instance (per-file isolation
  * from vitest-pool-workers).  Migrations are applied once in beforeAll.
@@ -49,11 +49,11 @@ const VALID_BODY = {
   orgSlug: 'acme',
 };
 
-describe('POST /v1/bootstrap', () => {
+describe('POST /api/v1/bootstrap', () => {
   it('returns 403 when MC_ADMIN_TOKEN is not configured', async () => {
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'anything' },
         body: JSON.stringify(VALID_BODY),
@@ -70,7 +70,7 @@ describe('POST /v1/bootstrap', () => {
   it('returns 403 when x-mc-admin-token header is wrong', async () => {
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'wrong-token' },
         body: JSON.stringify(VALID_BODY),
@@ -86,7 +86,7 @@ describe('POST /v1/bootstrap', () => {
   it('returns 400 when body fields are missing', async () => {
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify({ email: 'missing@other.com' }),
@@ -102,7 +102,7 @@ describe('POST /v1/bootstrap', () => {
   it('returns 400 when password is too short', async () => {
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify({ ...VALID_BODY, password: 'short' }),
@@ -118,7 +118,7 @@ describe('POST /v1/bootstrap', () => {
   it('returns 400 when orgSlug contains invalid characters', async () => {
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify({ ...VALID_BODY, orgSlug: 'Invalid Slug!' }),
@@ -134,7 +134,7 @@ describe('POST /v1/bootstrap', () => {
   it('returns 201 with user, organization, and PAT on valid bootstrap', async () => {
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify(VALID_BODY),
@@ -160,7 +160,7 @@ describe('POST /v1/bootstrap', () => {
     // does an UPDATE user SET emailVerified=true after creating the user.
     await clearUsers();
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify(VALID_BODY),
@@ -183,7 +183,7 @@ describe('POST /v1/bootstrap', () => {
     // Ensure there is a user in the DB by running a successful bootstrap first.
     await clearUsers();
     const firstRes = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify(VALID_BODY),
@@ -195,7 +195,7 @@ describe('POST /v1/bootstrap', () => {
 
     // Now try a second bootstrap — must be rejected.
     const res = await app.fetch(
-      new Request('http://x/v1/bootstrap', {
+      new Request('http://x/api/v1/bootstrap', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
         body: JSON.stringify({ ...VALID_BODY, email: 'second@example.com', orgSlug: 'second' }),

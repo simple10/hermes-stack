@@ -1,13 +1,13 @@
 /**
- * Integration tests for /v1/projects CRUD.
+ * Integration tests for /api/v1/projects CRUD.
  *
  * Coverage:
- *   - POST   /v1/projects — happy path, 401, 403 (agent role), 409 duplicate slug,
+ *   - POST   /api/v1/projects — happy path, 401, 403 (agent role), 409 duplicate slug,
  *                           event emitted, createdByUserId populated
- *   - GET    /v1/projects — list, cursor pagination (~150 rows), isolation
- *   - GET    /v1/projects/:id — detail, 404, isolation
- *   - PATCH  /v1/projects/:id — happy path, 403 (agent), 404, duplicate slug 409
- *   - DELETE /v1/projects/:id — soft delete + cascade external_refs, event emitted,
+ *   - GET    /api/v1/projects — list, cursor pagination (~150 rows), isolation
+ *   - GET    /api/v1/projects/:id — detail, 404, isolation
+ *   - PATCH  /api/v1/projects/:id — happy path, 403 (agent), 404, duplicate slug 409
+ *   - DELETE /api/v1/projects/:id — soft delete + cascade external_refs, event emitted,
  *                               403 (member), 404, isolation
  *   - Multi-tenant isolation: org A's projects invisible to org B
  */
@@ -40,7 +40,7 @@ beforeAll(async () => {
 
   // Org A via bootstrap (one-shot per DB).
   const res = await app.fetch(
-    new Request('http://x/v1/bootstrap', {
+    new Request('http://x/api/v1/bootstrap', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-mc-admin-token': ADMIN_TOKEN },
       body: JSON.stringify({
@@ -65,7 +65,7 @@ beforeAll(async () => {
 
   // Create an agent in Org A so we have an agent-role key for 403 tests.
   const agentRes = await app.fetch(
-    new Request('http://x/v1/agents', {
+    new Request('http://x/api/v1/agents', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -101,13 +101,13 @@ function req(method: string, path: string, token: string, body?: unknown) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/projects
+// POST /api/v1/projects
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/projects', () => {
+describe('POST /api/v1/projects', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects', {
+      new Request('http://x/api/v1/projects', {
         method: 'POST',
         body: JSON.stringify({ name: 'x', slug: 'x' }),
         headers: { 'content-type': 'application/json' },
@@ -119,14 +119,14 @@ describe('POST /v1/projects', () => {
   });
 
   it('returns 403 for agent role (agents cannot create projects)', async () => {
-    const res = await req('POST', '/v1/projects', agentKey, { name: 'from-agent', slug: 'from-agent' });
+    const res = await req('POST', '/api/v1/projects', agentKey, { name: 'from-agent', slug: 'from-agent' });
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('auth.role_insufficient');
   });
 
   it('returns 201 with serialized project on valid create (owner)', async () => {
-    const res = await req('POST', '/v1/projects', pat, {
+    const res = await req('POST', '/api/v1/projects', pat, {
       name: 'My Project',
       slug: 'my-project',
       description: 'A test project',
@@ -145,27 +145,27 @@ describe('POST /v1/projects', () => {
 
   it('returns 201 with member role', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'prj-member-create', 'member');
-    const res = await req('POST', '/v1/projects', memberPat, { name: 'Member Project', slug: 'member-project' });
+    const res = await req('POST', '/api/v1/projects', memberPat, { name: 'Member Project', slug: 'member-project' });
     expect(res.status).toBe(201);
   });
 
   it('returns 400 on missing name', async () => {
-    const res = await req('POST', '/v1/projects', pat, { slug: 'no-name' });
+    const res = await req('POST', '/api/v1/projects', pat, { slug: 'no-name' });
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('project.validation_error');
   });
 
   it('returns 400 on invalid slug (uppercase)', async () => {
-    const res = await req('POST', '/v1/projects', pat, { name: 'Bad Slug', slug: 'BAD-SLUG' });
+    const res = await req('POST', '/api/v1/projects', pat, { name: 'Bad Slug', slug: 'BAD-SLUG' });
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('project.validation_error');
   });
 
   it('returns 409 on duplicate slug within org (with existing_project_id)', async () => {
-    await req('POST', '/v1/projects', pat, { name: 'Dup Project', slug: 'dup-slug' });
-    const res = await req('POST', '/v1/projects', pat, { name: 'Another Dup', slug: 'dup-slug' });
+    await req('POST', '/api/v1/projects', pat, { name: 'Dup Project', slug: 'dup-slug' });
+    const res = await req('POST', '/api/v1/projects', pat, { name: 'Another Dup', slug: 'dup-slug' });
     expect(res.status).toBe(409);
     const body = await res.json() as { error: { code: string; details: { existing_project_id: string } } };
     expect(body.error.code).toBe('project.duplicate_slug');
@@ -175,12 +175,12 @@ describe('POST /v1/projects', () => {
 
   it('allows same slug in different orgs', async () => {
     // slug 'my-project' was created in org A; should succeed in org B.
-    const res = await req('POST', '/v1/projects', orgBPat, { name: 'Org B Project', slug: 'my-project' });
+    const res = await req('POST', '/api/v1/projects', orgBPat, { name: 'Org B Project', slug: 'my-project' });
     expect(res.status).toBe(201);
   });
 
   it('emits project.created event', async () => {
-    const createRes = await req('POST', '/v1/projects', pat, { name: 'Event Project', slug: 'event-project' });
+    const createRes = await req('POST', '/api/v1/projects', pat, { name: 'Event Project', slug: 'event-project' });
     expect(createRes.status).toBe(201);
     const { project } = await createRes.json() as { project: { id: string } };
 
@@ -194,13 +194,13 @@ describe('POST /v1/projects', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/projects — list + pagination
+// GET /api/v1/projects — list + pagination
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/projects', () => {
+describe('GET /api/v1/projects', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/projects'),
+      new Request('http://x/api/v1/projects'),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -208,7 +208,7 @@ describe('GET /v1/projects', () => {
   });
 
   it('returns list scoped to the caller org', async () => {
-    const res = await req('GET', '/v1/projects', pat);
+    const res = await req('GET', '/api/v1/projects', pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { projects: { id: string; org_id: string }[] };
     expect(Array.isArray(body.projects)).toBe(true);
@@ -218,11 +218,11 @@ describe('GET /v1/projects', () => {
   });
 
   it('org B list does not include org A projects (isolation)', async () => {
-    const resA = await req('GET', '/v1/projects', pat);
+    const resA = await req('GET', '/api/v1/projects', pat);
     const bodyA = await resA.json() as { projects: { id: string }[] };
     const idsA = bodyA.projects.map((p) => p.id);
 
-    const resB = await req('GET', '/v1/projects', orgBPat);
+    const resB = await req('GET', '/api/v1/projects', orgBPat);
     const bodyB = await resB.json() as { projects: { id: string }[] };
     const idsB = bodyB.projects.map((p) => p.id);
 
@@ -261,8 +261,8 @@ describe('GET /v1/projects', () => {
 
     do {
       const url = cursor
-        ? `/v1/projects?limit=50&cursor=${encodeURIComponent(cursor)}`
-        : '/v1/projects?limit=50';
+        ? `/api/v1/projects?limit=50&cursor=${encodeURIComponent(cursor)}`
+        : '/api/v1/projects?limit=50';
       const res = await req('GET', url, freshPat);
       expect(res.status).toBe(200);
       const body = await res.json() as { projects: { id: string }[]; next_cursor: string | null };
@@ -281,20 +281,20 @@ describe('GET /v1/projects', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/projects/:id
+// GET /api/v1/projects/:id
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/projects/:id', () => {
+describe('GET /api/v1/projects/:id', () => {
   let projectId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/projects', pat, { name: 'Detail Project', slug: 'detail-project' });
+    const res = await req('POST', '/api/v1/projects', pat, { name: 'Detail Project', slug: 'detail-project' });
     const body = await res.json() as { project: { id: string } };
     projectId = body.project.id;
   });
 
   it('returns 200 with project detail', async () => {
-    const res = await req('GET', `/v1/projects/${projectId}`, pat);
+    const res = await req('GET', `/api/v1/projects/${projectId}`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { project: { id: string; name: string } };
     expect(body.project.id).toBe(projectId);
@@ -302,33 +302,33 @@ describe('GET /v1/projects/:id', () => {
   });
 
   it('returns 404 for non-existent project', async () => {
-    const res = await req('GET', '/v1/projects/prj_doesnotexist', pat);
+    const res = await req('GET', '/api/v1/projects/prj_doesnotexist', pat);
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('project.not_found');
   });
 
   it('returns 404 when org B tries to access org A project (isolation)', async () => {
-    const res = await req('GET', `/v1/projects/${projectId}`, orgBPat);
+    const res = await req('GET', `/api/v1/projects/${projectId}`, orgBPat);
     expect(res.status).toBe(404);
   });
 });
 
 // ---------------------------------------------------------------------------
-// PATCH /v1/projects/:id
+// PATCH /api/v1/projects/:id
 // ---------------------------------------------------------------------------
 
-describe('PATCH /v1/projects/:id', () => {
+describe('PATCH /api/v1/projects/:id', () => {
   let projectId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/projects', pat, { name: 'Patch Project', slug: 'patch-project' });
+    const res = await req('POST', '/api/v1/projects', pat, { name: 'Patch Project', slug: 'patch-project' });
     const body = await res.json() as { project: { id: string } };
     projectId = body.project.id;
   });
 
   it('returns 200 with updated project (owner)', async () => {
-    const res = await req('PATCH', `/v1/projects/${projectId}`, pat, {
+    const res = await req('PATCH', `/api/v1/projects/${projectId}`, pat, {
       name: 'Patch Project Renamed',
       description: 'updated desc',
     });
@@ -339,29 +339,29 @@ describe('PATCH /v1/projects/:id', () => {
   });
 
   it('returns 403 for agent role (agents cannot patch projects)', async () => {
-    const res = await req('PATCH', `/v1/projects/${projectId}`, agentKey, { name: 'Hacked' });
+    const res = await req('PATCH', `/api/v1/projects/${projectId}`, agentKey, { name: 'Hacked' });
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('auth.role_insufficient');
   });
 
   it('returns 404 for non-existent project', async () => {
-    const res = await req('PATCH', '/v1/projects/prj_doesnotexist', pat, { name: 'x' });
+    const res = await req('PATCH', '/api/v1/projects/prj_doesnotexist', pat, { name: 'x' });
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('project.not_found');
   });
 
   it('returns 404 when org B tries to patch org A project (isolation)', async () => {
-    const res = await req('PATCH', `/v1/projects/${projectId}`, orgBPat, { name: 'hacked' });
+    const res = await req('PATCH', `/api/v1/projects/${projectId}`, orgBPat, { name: 'hacked' });
     expect(res.status).toBe(404);
   });
 
   it('returns 409 when patching slug to an existing slug', async () => {
     // Create a second project with a distinct slug.
-    await req('POST', '/v1/projects', pat, { name: 'Other Project', slug: 'patch-other-slug' });
+    await req('POST', '/api/v1/projects', pat, { name: 'Other Project', slug: 'patch-other-slug' });
     // Try to patch projectId's slug to the existing one.
-    const res = await req('PATCH', `/v1/projects/${projectId}`, pat, { slug: 'patch-other-slug' });
+    const res = await req('PATCH', `/api/v1/projects/${projectId}`, pat, { slug: 'patch-other-slug' });
     expect(res.status).toBe(409);
     const body = await res.json() as { error: { code: string; details: { existing_project_id: string } } };
     expect(body.error.code).toBe('project.duplicate_slug');
@@ -370,68 +370,68 @@ describe('PATCH /v1/projects/:id', () => {
 
   it('member role can patch projects', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'prj-member-patch', 'member');
-    const res = await req('PATCH', `/v1/projects/${projectId}`, memberPat, { description: 'by member' });
+    const res = await req('PATCH', `/api/v1/projects/${projectId}`, memberPat, { description: 'by member' });
     expect(res.status).toBe(200);
   });
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /v1/projects/:id
+// DELETE /api/v1/projects/:id
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/projects/:id', () => {
+describe('DELETE /api/v1/projects/:id', () => {
   let projectId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/projects', pat, { name: 'Delete Project', slug: 'delete-project' });
+    const res = await req('POST', '/api/v1/projects', pat, { name: 'Delete Project', slug: 'delete-project' });
     const body = await res.json() as { project: { id: string } };
     projectId = body.project.id;
   });
 
   it('returns 403 when member role tries to delete (member cannot delete)', async () => {
     const { pat: memberPat } = await createMemberFixture((env.DB as D1Database), orgId, 'prj-member-del', 'member');
-    const res = await req('DELETE', `/v1/projects/${projectId}`, memberPat);
+    const res = await req('DELETE', `/api/v1/projects/${projectId}`, memberPat);
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('auth.role_insufficient');
   });
 
   it('returns 403 when agent role tries to delete', async () => {
-    const res = await req('DELETE', `/v1/projects/${projectId}`, agentKey);
+    const res = await req('DELETE', `/api/v1/projects/${projectId}`, agentKey);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 for non-existent project', async () => {
-    const res = await req('DELETE', '/v1/projects/prj_doesnotexist', pat);
+    const res = await req('DELETE', '/api/v1/projects/prj_doesnotexist', pat);
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('project.not_found');
   });
 
   it('returns 404 when org B tries to delete org A project (isolation)', async () => {
-    const res = await req('DELETE', `/v1/projects/${projectId}`, orgBPat);
+    const res = await req('DELETE', `/api/v1/projects/${projectId}`, orgBPat);
     expect(res.status).toBe(404);
   });
 
   it('returns 200 and soft-deletes the project; subsequent GET returns 404', async () => {
-    const createRes = await req('POST', '/v1/projects', pat, { name: 'To Delete', slug: 'to-delete-full' });
+    const createRes = await req('POST', '/api/v1/projects', pat, { name: 'To Delete', slug: 'to-delete-full' });
     expect(createRes.status).toBe(201);
     const { project: freshProj } = await createRes.json() as { project: { id: string } };
 
-    const delRes = await req('DELETE', `/v1/projects/${freshProj.id}`, pat);
+    const delRes = await req('DELETE', `/api/v1/projects/${freshProj.id}`, pat);
     expect(delRes.status).toBe(200);
 
-    const getRes = await req('GET', `/v1/projects/${freshProj.id}`, pat);
+    const getRes = await req('GET', `/api/v1/projects/${freshProj.id}`, pat);
     expect(getRes.status).toBe(404);
 
     // Second delete should also 404.
-    const del2Res = await req('DELETE', `/v1/projects/${freshProj.id}`, pat);
+    const del2Res = await req('DELETE', `/api/v1/projects/${freshProj.id}`, pat);
     expect(del2Res.status).toBe(404);
   });
 
   it('cascade trigger soft-deletes external_refs on project delete', async () => {
     // Create a fresh project.
-    const createRes = await req('POST', '/v1/projects', pat, { name: 'Cascade Project', slug: 'cascade-project' });
+    const createRes = await req('POST', '/api/v1/projects', pat, { name: 'Cascade Project', slug: 'cascade-project' });
     expect(createRes.status).toBe(201);
     const { project } = await createRes.json() as { project: { id: string } };
 
@@ -451,7 +451,7 @@ describe('DELETE /v1/projects/:id', () => {
     expect(before!.deleted_at).toBeNull();
 
     // Delete the project.
-    const delRes = await req('DELETE', `/v1/projects/${project.id}`, pat);
+    const delRes = await req('DELETE', `/api/v1/projects/${project.id}`, pat);
     expect(delRes.status).toBe(200);
 
     // The trigger should have soft-deleted the external_ref.
@@ -463,11 +463,11 @@ describe('DELETE /v1/projects/:id', () => {
   });
 
   it('emits project.deleted event on delete', async () => {
-    const createRes = await req('POST', '/v1/projects', pat, { name: 'Event Del Project', slug: 'event-del-project' });
+    const createRes = await req('POST', '/api/v1/projects', pat, { name: 'Event Del Project', slug: 'event-del-project' });
     expect(createRes.status).toBe(201);
     const { project } = await createRes.json() as { project: { id: string } };
 
-    await req('DELETE', `/v1/projects/${project.id}`, pat);
+    await req('DELETE', `/api/v1/projects/${project.id}`, pat);
 
     const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'project' AND resource_id = ? AND kind = 'project.deleted' ORDER BY id DESC LIMIT 1`
@@ -483,18 +483,18 @@ describe('DELETE /v1/projects/:id', () => {
 
 describe('Multi-tenant isolation', () => {
   it('org A project ID not accessible by org B (GET :id)', async () => {
-    const createRes = await req('POST', '/v1/projects', pat, { name: 'Isolation A', slug: 'isolation-a' });
+    const createRes = await req('POST', '/api/v1/projects', pat, { name: 'Isolation A', slug: 'isolation-a' });
     const { project } = await createRes.json() as { project: { id: string } };
 
-    const res = await req('GET', `/v1/projects/${project.id}`, orgBPat);
+    const res = await req('GET', `/api/v1/projects/${project.id}`, orgBPat);
     expect(res.status).toBe(404);
   });
 
   it('org A project not in org B list', async () => {
-    const createRes = await req('POST', '/v1/projects', pat, { name: 'Isolation A2', slug: 'isolation-a2' });
+    const createRes = await req('POST', '/api/v1/projects', pat, { name: 'Isolation A2', slug: 'isolation-a2' });
     const { project } = await createRes.json() as { project: { id: string } };
 
-    const listRes = await req('GET', '/v1/projects', orgBPat);
+    const listRes = await req('GET', '/api/v1/projects', orgBPat);
     const { projects: listProjects } = await listRes.json() as { projects: { id: string }[] };
 
     const ids = listProjects.map((p) => p.id);

@@ -1,7 +1,7 @@
 /**
- * Integration tests for GET /v1/me.
+ * Integration tests for GET /api/v1/me.
  *
- * Flow: bootstrap a user → retrieve PAT → call GET /v1/me with the PAT →
+ * Flow: bootstrap a user → retrieve PAT → call GET /api/v1/me with the PAT →
  * assert response shape.
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
@@ -30,7 +30,7 @@ beforeAll(async () => {
 
   // Bootstrap to get a PAT.
   const res = await app.fetch(
-    new Request('http://x/v1/bootstrap', {
+    new Request('http://x/api/v1/bootstrap', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -57,10 +57,10 @@ beforeAll(async () => {
   userId = data.user.id;
 });
 
-describe('GET /v1/me', () => {
+describe('GET /api/v1/me', () => {
   it('returns 401 when no Authorization header is provided', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/me'),
+      new Request('http://x/api/v1/me'),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -71,7 +71,7 @@ describe('GET /v1/me', () => {
 
   it('returns 401 when bearer token is invalid', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/me', {
+      new Request('http://x/api/v1/me', {
         headers: { Authorization: 'Bearer mcpat_invalid_token_xyz' },
       }),
       TEST_ENV,
@@ -84,7 +84,7 @@ describe('GET /v1/me', () => {
 
   it('returns 200 with the correct identity for a PAT-authenticated user', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/me', {
+      new Request('http://x/api/v1/me', {
         headers: { Authorization: `Bearer ${pat}` },
       }),
       TEST_ENV,

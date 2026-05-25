@@ -1,8 +1,8 @@
 /**
- * Integration tests for /v1/external_refs CRUD.
+ * Integration tests for /api/v1/external_refs CRUD.
  *
  * Coverage:
- *   POST /v1/external_refs
+ *   POST /api/v1/external_refs
  *     - happy path: owner creates ref → 201, fields returned, event emitted
  *     - 401 without token
  *     - 400 on missing required fields
@@ -16,13 +16,13 @@
  *     - member can use any source_id
  *     - multi-tenant isolation: resource in different org → 422
  *
- *   GET /v1/external_refs
+ *   GET /api/v1/external_refs
  *     - list all for org (owner)
  *     - filter by resource_type, resource_id, source_kind, source_id, external_id
  *     - cursor pagination
  *     - multi-tenant isolation
  *
- *   DELETE /v1/external_refs/:id
+ *   DELETE /api/v1/external_refs/:id
  *     - soft delete (owner) → 200
  *     - 404 on non-existent / already-deleted
  *     - agent: can delete own ref (source_id == principal.id) → 200
@@ -77,7 +77,7 @@ beforeAll(async () => {
 
   // Bootstrap org A.
   const res = await app.fetch(
-    new Request('http://x/v1/bootstrap', {
+    new Request('http://x/api/v1/bootstrap', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-mc-admin-token': ADMIN_TOKEN },
       body: JSON.stringify({
@@ -97,39 +97,39 @@ beforeAll(async () => {
   orgId = data.organization.id;
 
   // Create a project.
-  const projRes = await req('POST', '/v1/projects', pat, { name: 'XRefs Project', slug: 'xrefs-project' });
+  const projRes = await req('POST', '/api/v1/projects', pat, { name: 'XRefs Project', slug: 'xrefs-project' });
   if (projRes.status !== 201) throw new Error(`Project create failed: ${await projRes.text()}`);
   const projData = await projRes.json() as { project: { id: string } };
   projectId = projData.project.id;
 
   // Create two agents.
-  const agentRes = await req('POST', '/v1/agents', pat, { name: 'xref-agent-1', kind: 'hermes' });
+  const agentRes = await req('POST', '/api/v1/agents', pat, { name: 'xref-agent-1', kind: 'hermes' });
   if (agentRes.status !== 201) throw new Error(`Agent create failed: ${await agentRes.text()}`);
   const agentData = await agentRes.json() as { agent: { id: string }; key: string };
   agentId = agentData.agent.id;
   agentKey = agentData.key;
 
-  const agentRes2 = await req('POST', '/v1/agents', pat, { name: 'xref-agent-2', kind: 'hermes' });
+  const agentRes2 = await req('POST', '/api/v1/agents', pat, { name: 'xref-agent-2', kind: 'hermes' });
   if (agentRes2.status !== 201) throw new Error(`Agent2 create failed: ${await agentRes2.text()}`);
   const agentData2 = await agentRes2.json() as { agent: { id: string }; key: string };
   agentId2 = agentData2.agent.id;
   agentKey2 = agentData2.key;
 
   // Create a connector.
-  const connectorRes = await req('POST', '/v1/connectors', pat, { name: 'xref-connector', kind: 'notion' });
+  const connectorRes = await req('POST', '/api/v1/connectors', pat, { name: 'xref-connector', kind: 'notion' });
   if (connectorRes.status !== 201) throw new Error(`Connector create failed: ${await connectorRes.text()}`);
   const connectorData = await connectorRes.json() as { connector: { id: string }; key: string };
   connectorId = connectorData.connector.id;
   connectorKey = connectorData.key;
 
   // Create a task.
-  const taskRes = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'XRef task', agent_id: agentId });
+  const taskRes = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'XRef task', agent_id: agentId });
   if (taskRes.status !== 201) throw new Error(`Task create failed: ${await taskRes.text()}`);
   const taskData = await taskRes.json() as { task: { id: string } };
   taskId = taskData.task.id;
 
   // Post a comment to get a comment ID.
-  const commentRes = await req('POST', `/v1/tasks/${taskId}/comments`, pat, { body: 'hello for xref' });
+  const commentRes = await req('POST', `/api/v1/tasks/${taskId}/comments`, pat, { body: 'hello for xref' });
   if (commentRes.status !== 201) throw new Error(`Comment create failed: ${await commentRes.text()}`);
   const commentData = await commentRes.json() as { comment: { id: string } };
   commentId = commentData.comment.id;
@@ -138,11 +138,11 @@ beforeAll(async () => {
   const orgB = await createOrgFixture((env.DB as D1Database), 'Org B XRefs', 'org-b-xrefs');
   orgBPat = orgB.pat;
 
-  const orgBProjRes = await req('POST', '/v1/projects', orgBPat, { name: 'OrgB Project', slug: 'orgb-project-xrefs' });
+  const orgBProjRes = await req('POST', '/api/v1/projects', orgBPat, { name: 'OrgB Project', slug: 'orgb-project-xrefs' });
   const orgBProjData = await orgBProjRes.json() as { project: { id: string } };
   orgBProjectId = orgBProjData.project.id;
 
-  const orgBTaskRes = await req('POST', '/v1/tasks', orgBPat, { project_id: orgBProjectId, title: 'OrgB XRef Task' });
+  const orgBTaskRes = await req('POST', '/api/v1/tasks', orgBPat, { project_id: orgBProjectId, title: 'OrgB XRef Task' });
   const orgBTaskData = await orgBTaskRes.json() as { task: { id: string } };
   orgBTaskId = orgBTaskData.task.id;
 });
@@ -167,13 +167,13 @@ function req(method: string, path: string, token: string, body?: unknown) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/external_refs
+// POST /api/v1/external_refs
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/external_refs', () => {
+describe('POST /api/v1/external_refs', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/external_refs', {
+      new Request('http://x/api/v1/external_refs', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -191,14 +191,14 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('returns 400 on missing required fields', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, { resource_type: 'task' });
+    const res = await req('POST', '/api/v1/external_refs', pat, { resource_type: 'task' });
     expect(res.status).toBe(400);
     const data = await res.json() as { error: { code: string } };
     expect(data.error.code).toBe('external_ref.validation_error');
   });
 
   it('returns 400 on invalid external_url', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'notion',
@@ -212,7 +212,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('returns 422 on non-existent task resource_id', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: 't_doesnotexist',
       source_kind: 'notion',
@@ -225,7 +225,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('returns 422 on non-existent project resource_id', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'project',
       resource_id: 'prj_doesnotexist',
       source_kind: 'notion',
@@ -236,7 +236,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('returns 422 on non-existent agent resource_id', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'agent',
       resource_id: 'agt_doesnotexist',
       source_kind: 'hermes',
@@ -247,7 +247,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('returns 422 on non-existent connector resource_id', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'connector',
       resource_id: 'cnn_doesnotexist',
       source_kind: 'hermes',
@@ -258,7 +258,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('returns 422 on non-existent comment resource_id', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'comment',
       resource_id: 'cmt_doesnotexist',
       source_kind: 'notion',
@@ -269,7 +269,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('owner creates ref for task → 201, fields correct', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'notion',
@@ -293,7 +293,7 @@ describe('POST /v1/external_refs', () => {
 
   it('409 duplicate: same (resource_type, resource_id, source_kind, source_id)', async () => {
     // Create one.
-    await req('POST', '/v1/external_refs', pat, {
+    await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'duplicate-test',
@@ -301,7 +301,7 @@ describe('POST /v1/external_refs', () => {
       external_id: 'dup-ext-1',
     });
     // Attempt a second with a different external_id but same unique key tuple.
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'duplicate-test',
@@ -314,7 +314,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('agent creates ref with source_id == own id → 201', async () => {
-    const res = await req('POST', '/v1/external_refs', agentKey, {
+    const res = await req('POST', '/api/v1/external_refs', agentKey, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'hermes',
@@ -325,7 +325,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('agent 403 when source_id != own id', async () => {
-    const res = await req('POST', '/v1/external_refs', agentKey, {
+    const res = await req('POST', '/api/v1/external_refs', agentKey, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'hermes',
@@ -338,7 +338,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('connector creates ref with source_id == own id → 201', async () => {
-    const res = await req('POST', '/v1/external_refs', connectorKey, {
+    const res = await req('POST', '/api/v1/external_refs', connectorKey, {
       resource_type: 'project',
       resource_id: projectId,
       source_kind: 'notion',
@@ -349,7 +349,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('connector 403 when source_id != own id', async () => {
-    const res = await req('POST', '/v1/external_refs', connectorKey, {
+    const res = await req('POST', '/api/v1/external_refs', connectorKey, {
       resource_type: 'project',
       resource_id: projectId,
       source_kind: 'notion',
@@ -362,7 +362,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('can create ref for comment resource_type', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'comment',
       resource_id: commentId,
       source_kind: 'notion',
@@ -375,7 +375,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('can create ref for agent resource_type', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'agent',
       resource_id: agentId,
       source_kind: 'registry',
@@ -386,7 +386,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('can create ref for connector resource_type', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'connector',
       resource_id: connectorId,
       source_kind: 'registry',
@@ -397,7 +397,7 @@ describe('POST /v1/external_refs', () => {
   });
 
   it('multi-tenant isolation: org B resource not accessible from org A', async () => {
-    const res = await req('POST', '/v1/external_refs', pat, {
+    const res = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: orgBTaskId,
       source_kind: 'notion',
@@ -411,34 +411,34 @@ describe('POST /v1/external_refs', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/external_refs
+// GET /api/v1/external_refs
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/external_refs', () => {
+describe('GET /api/v1/external_refs', () => {
   let listTaskId = '';
 
   beforeAll(async () => {
     // Create a dedicated task for list tests.
-    const taskRes = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'List XRefs Task' });
+    const taskRes = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'List XRefs Task' });
     const taskData = await taskRes.json() as { task: { id: string } };
     listTaskId = taskData.task.id;
 
     // Create several refs for various filter tests.
-    await req('POST', '/v1/external_refs', pat, {
+    await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: listTaskId,
       source_kind: 'notion',
       source_id: 'list-ws-1',
       external_id: 'list-page-1',
     });
-    await req('POST', '/v1/external_refs', pat, {
+    await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: listTaskId,
       source_kind: 'linear',
       source_id: 'list-team-1',
       external_id: 'list-issue-1',
     });
-    await req('POST', '/v1/external_refs', pat, {
+    await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'project',
       resource_id: projectId,
       source_kind: 'notion',
@@ -449,7 +449,7 @@ describe('GET /v1/external_refs', () => {
 
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/external_refs', { method: 'GET' }),
+      new Request('http://x/api/v1/external_refs', { method: 'GET' }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -457,7 +457,7 @@ describe('GET /v1/external_refs', () => {
   });
 
   it('lists all external_refs for org (no filter)', async () => {
-    const res = await req('GET', '/v1/external_refs', pat);
+    const res = await req('GET', '/api/v1/external_refs', pat);
     expect(res.status).toBe(200);
     const data = await res.json() as { external_refs: unknown[]; next_cursor: string | null };
     expect(Array.isArray(data.external_refs)).toBe(true);
@@ -465,7 +465,7 @@ describe('GET /v1/external_refs', () => {
   });
 
   it('filters by resource_type=task', async () => {
-    const res = await req('GET', `/v1/external_refs?resource_type=task&resource_id=${listTaskId}`, pat);
+    const res = await req('GET', `/api/v1/external_refs?resource_type=task&resource_id=${listTaskId}`, pat);
     expect(res.status).toBe(200);
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
@@ -476,7 +476,7 @@ describe('GET /v1/external_refs', () => {
   });
 
   it('filters by source_kind=notion', async () => {
-    const res = await req('GET', `/v1/external_refs?source_kind=notion&resource_id=${listTaskId}`, pat);
+    const res = await req('GET', `/api/v1/external_refs?source_kind=notion&resource_id=${listTaskId}`, pat);
     expect(res.status).toBe(200);
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
@@ -486,7 +486,7 @@ describe('GET /v1/external_refs', () => {
   });
 
   it('filters by source_id', async () => {
-    const res = await req('GET', `/v1/external_refs?source_id=list-ws-1`, pat);
+    const res = await req('GET', `/api/v1/external_refs?source_id=list-ws-1`, pat);
     expect(res.status).toBe(200);
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
@@ -496,7 +496,7 @@ describe('GET /v1/external_refs', () => {
   });
 
   it('filters by external_id', async () => {
-    const res = await req('GET', `/v1/external_refs?external_id=list-page-1`, pat);
+    const res = await req('GET', `/api/v1/external_refs?external_id=list-page-1`, pat);
     expect(res.status).toBe(200);
     const data = await res.json() as { external_refs: Array<Record<string, unknown>> };
     expect(data.external_refs.length).toBeGreaterThanOrEqual(1);
@@ -507,11 +507,11 @@ describe('GET /v1/external_refs', () => {
 
   it('cursor pagination works', async () => {
     // Create a task with many refs.
-    const taskRes = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Pagination XRefs Task' });
+    const taskRes = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Pagination XRefs Task' });
     const paginTaskId = (await taskRes.json() as { task: { id: string } }).task.id;
 
     for (let i = 0; i < 3; i++) {
-      await req('POST', '/v1/external_refs', pat, {
+      await req('POST', '/api/v1/external_refs', pat, {
         resource_type: 'task',
         resource_id: paginTaskId,
         source_kind: 'pagin-source',
@@ -520,13 +520,13 @@ describe('GET /v1/external_refs', () => {
       });
     }
 
-    const page1Res = await req('GET', `/v1/external_refs?resource_id=${paginTaskId}&limit=2`, pat);
+    const page1Res = await req('GET', `/api/v1/external_refs?resource_id=${paginTaskId}&limit=2`, pat);
     expect(page1Res.status).toBe(200);
     const page1 = await page1Res.json() as { external_refs: unknown[]; next_cursor: string | null };
     expect(page1.external_refs.length).toBe(2);
     expect(page1.next_cursor).not.toBeNull();
 
-    const page2Res = await req('GET', `/v1/external_refs?resource_id=${paginTaskId}&limit=2&cursor=${encodeURIComponent(page1.next_cursor!)}`, pat);
+    const page2Res = await req('GET', `/api/v1/external_refs?resource_id=${paginTaskId}&limit=2&cursor=${encodeURIComponent(page1.next_cursor!)}`, pat);
     expect(page2Res.status).toBe(200);
     const page2 = await page2Res.json() as { external_refs: unknown[]; next_cursor: string | null };
     expect(page2.external_refs.length).toBe(1);
@@ -535,7 +535,7 @@ describe('GET /v1/external_refs', () => {
 
   it('multi-tenant isolation: org A cannot see org B external_refs', async () => {
     // Create a ref in org B.
-    await req('POST', '/v1/external_refs', orgBPat, {
+    await req('POST', '/api/v1/external_refs', orgBPat, {
       resource_type: 'task',
       resource_id: orgBTaskId,
       source_kind: 'orgb-source',
@@ -544,7 +544,7 @@ describe('GET /v1/external_refs', () => {
     });
 
     // Org A cannot filter by source_id used in org B.
-    const res = await req('GET', `/v1/external_refs?source_id=orgb-ws-1`, pat);
+    const res = await req('GET', `/api/v1/external_refs?source_id=orgb-ws-1`, pat);
     expect(res.status).toBe(200);
     const data = await res.json() as { external_refs: unknown[] };
     expect(data.external_refs.length).toBe(0);
@@ -552,13 +552,13 @@ describe('GET /v1/external_refs', () => {
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /v1/external_refs/:id
+// DELETE /api/v1/external_refs/:id
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/external_refs/:id', () => {
+describe('DELETE /api/v1/external_refs/:id', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/external_refs/xrf_fake', { method: 'DELETE' }),
+      new Request('http://x/api/v1/external_refs/xrf_fake', { method: 'DELETE' }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -566,7 +566,7 @@ describe('DELETE /v1/external_refs/:id', () => {
   });
 
   it('returns 404 for non-existent ref', async () => {
-    const res = await req('DELETE', '/v1/external_refs/xrf_doesnotexist', pat);
+    const res = await req('DELETE', '/api/v1/external_refs/xrf_doesnotexist', pat);
     expect(res.status).toBe(404);
     const data = await res.json() as { error: { code: string } };
     expect(data.error.code).toBe('external_ref.not_found');
@@ -574,7 +574,7 @@ describe('DELETE /v1/external_refs/:id', () => {
 
   it('owner soft-deletes a ref → 200, ref no longer in GET', async () => {
     // Create a ref to delete.
-    const createRes = await req('POST', '/v1/external_refs', pat, {
+    const createRes = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'delete-test',
@@ -586,18 +586,18 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = createData.external_ref.id;
 
     // Delete it.
-    const deleteRes = await req('DELETE', `/v1/external_refs/${refId}`, pat);
+    const deleteRes = await req('DELETE', `/api/v1/external_refs/${refId}`, pat);
     expect(deleteRes.status).toBe(200);
 
     // Verify it no longer appears in GET.
-    const getRes = await req('GET', `/v1/external_refs?source_kind=delete-test&source_id=to-delete-ws`, pat);
+    const getRes = await req('GET', `/api/v1/external_refs?source_kind=delete-test&source_id=to-delete-ws`, pat);
     const getData = await getRes.json() as { external_refs: unknown[] };
     expect(getData.external_refs.length).toBe(0);
   });
 
   it('returns 404 on second delete of same ref', async () => {
     // Create and delete.
-    const createRes = await req('POST', '/v1/external_refs', pat, {
+    const createRes = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'double-delete',
@@ -605,15 +605,15 @@ describe('DELETE /v1/external_refs/:id', () => {
       external_id: 'dd-ext',
     });
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
-    await req('DELETE', `/v1/external_refs/${refId}`, pat);
+    await req('DELETE', `/api/v1/external_refs/${refId}`, pat);
 
-    const res2 = await req('DELETE', `/v1/external_refs/${refId}`, pat);
+    const res2 = await req('DELETE', `/api/v1/external_refs/${refId}`, pat);
     expect(res2.status).toBe(404);
   });
 
   it('after delete, 409 clears — new POST with same unique key succeeds', async () => {
     // Create ref.
-    const createRes = await req('POST', '/v1/external_refs', pat, {
+    const createRes = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'recreate-test',
@@ -623,10 +623,10 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
 
     // Delete it.
-    await req('DELETE', `/v1/external_refs/${refId}`, pat);
+    await req('DELETE', `/api/v1/external_refs/${refId}`, pat);
 
     // Now re-create with same unique tuple — should succeed.
-    const reCreateRes = await req('POST', '/v1/external_refs', pat, {
+    const reCreateRes = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'recreate-test',
@@ -640,14 +640,14 @@ describe('DELETE /v1/external_refs/:id', () => {
     // Create a dedicated task so the (resource_type, resource_id, source_kind,
     // source_id) tuple is unique to this test — earlier tests in this file
     // already use (task, taskId, hermes, agentId).
-    const taskRes = await req('POST', '/v1/tasks', pat, {
+    const taskRes = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'XRef delete-own task',
       agent_id: agentId,
     });
     const localTaskId = (await taskRes.json() as { task: { id: string } }).task.id;
 
-    const createRes = await req('POST', '/v1/external_refs', agentKey, {
+    const createRes = await req('POST', '/api/v1/external_refs', agentKey, {
       resource_type: 'task',
       resource_id: localTaskId,
       source_kind: 'hermes',
@@ -658,13 +658,13 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
 
     // Agent deletes it.
-    const deleteRes = await req('DELETE', `/v1/external_refs/${refId}`, agentKey);
+    const deleteRes = await req('DELETE', `/api/v1/external_refs/${refId}`, agentKey);
     expect(deleteRes.status).toBe(200);
   });
 
   it('agent 403 trying to delete a ref with different source_id', async () => {
     // Create a ref as owner (with a different source_id).
-    const createRes = await req('POST', '/v1/external_refs', pat, {
+    const createRes = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'foreign-to-agent',
@@ -675,7 +675,7 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
 
     // Agent 1 tries to delete it.
-    const deleteRes = await req('DELETE', `/v1/external_refs/${refId}`, agentKey);
+    const deleteRes = await req('DELETE', `/api/v1/external_refs/${refId}`, agentKey);
     expect(deleteRes.status).toBe(403);
     const data = await deleteRes.json() as { error: { code: string } };
     expect(data.error.code).toBe('external_ref.forbidden');
@@ -683,7 +683,7 @@ describe('DELETE /v1/external_refs/:id', () => {
 
   it('connector can delete any ref in the org', async () => {
     // Create a ref as owner.
-    const createRes = await req('POST', '/v1/external_refs', pat, {
+    const createRes = await req('POST', '/api/v1/external_refs', pat, {
       resource_type: 'task',
       resource_id: taskId,
       source_kind: 'connector-del-test',
@@ -693,13 +693,13 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
 
     // Connector deletes it.
-    const deleteRes = await req('DELETE', `/v1/external_refs/${refId}`, connectorKey);
+    const deleteRes = await req('DELETE', `/api/v1/external_refs/${refId}`, connectorKey);
     expect(deleteRes.status).toBe(200);
   });
 
   it('agent 2 cannot delete a ref created by agent 1', async () => {
     // Dedicated task — see comment in 'agent can delete own ref' for why.
-    const taskRes = await req('POST', '/v1/tasks', pat, {
+    const taskRes = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'XRef agent1->agent2 task',
       agent_id: agentId,
@@ -707,7 +707,7 @@ describe('DELETE /v1/external_refs/:id', () => {
     const localTaskId = (await taskRes.json() as { task: { id: string } }).task.id;
 
     // Agent 1 creates a ref.
-    const createRes = await req('POST', '/v1/external_refs', agentKey, {
+    const createRes = await req('POST', '/api/v1/external_refs', agentKey, {
       resource_type: 'task',
       resource_id: localTaskId,
       source_kind: 'hermes',
@@ -718,13 +718,13 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
 
     // Agent 2 tries to delete it.
-    const deleteRes = await req('DELETE', `/v1/external_refs/${refId}`, agentKey2);
+    const deleteRes = await req('DELETE', `/api/v1/external_refs/${refId}`, agentKey2);
     expect(deleteRes.status).toBe(403);
   });
 
   it('multi-tenant isolation: org A cannot delete org B refs', async () => {
     // Create a ref in org B.
-    const createRes = await req('POST', '/v1/external_refs', orgBPat, {
+    const createRes = await req('POST', '/api/v1/external_refs', orgBPat, {
       resource_type: 'task',
       resource_id: orgBTaskId,
       source_kind: 'orgb-del',
@@ -734,7 +734,7 @@ describe('DELETE /v1/external_refs/:id', () => {
     const refId = (await createRes.json() as { external_ref: { id: string } }).external_ref.id;
 
     // Org A tries to delete it.
-    const deleteRes = await req('DELETE', `/v1/external_refs/${refId}`, pat);
+    const deleteRes = await req('DELETE', `/api/v1/external_refs/${refId}`, pat);
     expect(deleteRes.status).toBe(404);
   });
 });

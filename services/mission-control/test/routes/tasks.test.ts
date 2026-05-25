@@ -1,19 +1,19 @@
 /**
- * Integration tests for /v1/tasks CRUD + state machine + idempotency.
+ * Integration tests for /api/v1/tasks CRUD + state machine + idempotency.
  *
  * Coverage:
- *   POST   /v1/tasks — happy path, 401/403, validation, initial status rules,
+ *   POST   /api/v1/tasks — happy path, 401/403, validation, initial status rules,
  *                      agent_id on create (status=ready + events), Layer-1 &
  *                      Layer-2 idempotency, event emission, multi-tenant isolation
- *   GET    /v1/tasks — list, filters (project_id, agent_id, status, updated_since),
+ *   GET    /api/v1/tasks — list, filters (project_id, agent_id, status, updated_since),
  *                      cursor pagination, agent-role forced filter, isolation
- *   GET    /v1/tasks/:id — detail (task + comments + events), 404, isolation,
+ *   GET    /api/v1/tasks/:id — detail (task + comments + events), 404, isolation,
  *                          agent-role own-task restriction
- *   PATCH  /v1/tasks/:id — happy path, state machine transitions, invalid
+ *   PATCH  /api/v1/tasks/:id — happy path, state machine transitions, invalid
  *                          transitions (409), side-effects (startedAt, completedAt),
  *                          agent-role restrictions, agent_id change (task.assigned),
  *                          event emission, isolation
- *   DELETE /v1/tasks/:id — soft delete, cascade trigger, event emission, 404,
+ *   DELETE /api/v1/tasks/:id — soft delete, cascade trigger, event emission, 404,
  *                          isolation, member/agent forbidden
  */
 import { describe, it, expect, beforeAll, inject } from 'vitest';
@@ -55,7 +55,7 @@ beforeAll(async () => {
 
   // Bootstrap org A.
   const res = await app.fetch(
-    new Request('http://x/v1/bootstrap', {
+    new Request('http://x/api/v1/bootstrap', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-mc-admin-token': ADMIN_TOKEN },
       body: JSON.stringify({
@@ -75,7 +75,7 @@ beforeAll(async () => {
   orgId = data.organization.id;
 
   // Create a project in org A.
-  const projRes = await req('POST', '/v1/projects', pat, { name: 'Tasks Project', slug: 'tasks-project' });
+  const projRes = await req('POST', '/api/v1/projects', pat, { name: 'Tasks Project', slug: 'tasks-project' });
   if (projRes.status !== 201) throw new Error(`Project create failed (${projRes.status}): ${await projRes.text()}`);
   const projData = await projRes.json() as { project: { id: string } };
   projectId = projData.project.id;
@@ -85,19 +85,19 @@ beforeAll(async () => {
   orgBPat = orgB.pat;
 
   // Create a project in org B.
-  const orgBProjRes = await req('POST', '/v1/projects', orgBPat, { name: 'Org B Project', slug: 'org-b-project' });
+  const orgBProjRes = await req('POST', '/api/v1/projects', orgBPat, { name: 'Org B Project', slug: 'org-b-project' });
   const orgBProjData = await orgBProjRes.json() as { project: { id: string } };
   orgBProjectId = orgBProjData.project.id;
 
   // Create agent in org A.
-  const agentRes = await req('POST', '/v1/agents', pat, { name: 'task-agent', kind: 'hermes' });
+  const agentRes = await req('POST', '/api/v1/agents', pat, { name: 'task-agent', kind: 'hermes' });
   if (agentRes.status !== 201) throw new Error(`Agent create failed (${agentRes.status}): ${await agentRes.text()}`);
   const agentData = await agentRes.json() as { agent: { id: string }; key: string };
   agentKey = agentData.key;
   agentId = agentData.agent.id;
 
   // Create second agent in org A.
-  const agentRes2 = await req('POST', '/v1/agents', pat, { name: 'task-agent-2', kind: 'hermes' });
+  const agentRes2 = await req('POST', '/api/v1/agents', pat, { name: 'task-agent-2', kind: 'hermes' });
   if (agentRes2.status !== 201) throw new Error(`Agent2 create failed: ${await agentRes2.text()}`);
   const agentData2 = await agentRes2.json() as { agent: { id: string }; key: string };
   agentKey2 = agentData2.key;
@@ -129,13 +129,13 @@ function req(method: string, path: string, token: string, body?: unknown, extraH
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/tasks
+// POST /api/v1/tasks
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/tasks', () => {
+describe('POST /api/v1/tasks', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/tasks', {
+      new Request('http://x/api/v1/tasks', {
         method: 'POST',
         body: JSON.stringify({ project_id: 'x', title: 'x' }),
         headers: { 'content-type': 'application/json' },
@@ -147,28 +147,28 @@ describe('POST /v1/tasks', () => {
   });
 
   it('returns 403 for agent role (agents cannot create tasks)', async () => {
-    const res = await req('POST', '/v1/tasks', agentKey, { project_id: projectId, title: 'x' });
+    const res = await req('POST', '/api/v1/tasks', agentKey, { project_id: projectId, title: 'x' });
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('auth.role_insufficient');
   });
 
   it('returns 400 on missing title', async () => {
-    const res = await req('POST', '/v1/tasks', pat, { project_id: projectId });
+    const res = await req('POST', '/api/v1/tasks', pat, { project_id: projectId });
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.validation_error');
   });
 
   it('returns 400 on missing project_id', async () => {
-    const res = await req('POST', '/v1/tasks', pat, { title: 'No Project' });
+    const res = await req('POST', '/api/v1/tasks', pat, { title: 'No Project' });
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.validation_error');
   });
 
   it('returns 400 on title too long (>500)', async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'x'.repeat(501),
     });
@@ -176,7 +176,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('returns 422 on non-existent project_id', async () => {
-    const res = await req('POST', '/v1/tasks', pat, { project_id: 'prj_doesnotexist', title: 'bad proj' });
+    const res = await req('POST', '/api/v1/tasks', pat, { project_id: 'prj_doesnotexist', title: 'bad proj' });
     expect(res.status).toBe(422);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.invalid_project');
@@ -184,14 +184,14 @@ describe('POST /v1/tasks', () => {
 
   it('returns 422 on project_id from different org', async () => {
     // orgBProjectId belongs to org B — should fail for org A user.
-    const res = await req('POST', '/v1/tasks', pat, { project_id: orgBProjectId, title: 'wrong org' });
+    const res = await req('POST', '/api/v1/tasks', pat, { project_id: orgBProjectId, title: 'wrong org' });
     expect(res.status).toBe(422);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.invalid_project');
   });
 
   it('returns 422 on non-existent agent_id', async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'bad agent',
       agent_id: 'agt_doesnotexist',
@@ -202,7 +202,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('creates task with status=pending when no agent_id provided', async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Pending Task',
     });
@@ -213,7 +213,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('creates task with status=ready when agent_id provided', async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Ready Task',
       agent_id: agentId,
@@ -225,7 +225,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('emits task.created event on create', async () => {
-    const res = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Event Task' });
+    const res = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Event Task' });
     expect(res.status).toBe(201);
     const { task } = await res.json() as { task: { id: string } };
 
@@ -237,7 +237,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('emits task.assigned event when agent_id provided at creation', async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Assigned Task',
       agent_id: agentId,
@@ -253,7 +253,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('persists priority, metadata, body fields', async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Full Task',
       body: 'Task description body',
@@ -268,7 +268,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('createdByUserId is set when using PAT (owner)', async () => {
-    const res = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Created By Test' });
+    const res = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Created By Test' });
     expect(res.status).toBe(201);
     const { task } = await res.json() as { task: { created_by_user_id?: string } };
     expect(typeof task.created_by_user_id).toBe('string');
@@ -276,7 +276,7 @@ describe('POST /v1/tasks', () => {
   });
 
   it('member role can create tasks', async () => {
-    const res = await req('POST', '/v1/tasks', memberPat, { project_id: projectId, title: 'Member Task' });
+    const res = await req('POST', '/api/v1/tasks', memberPat, { project_id: projectId, title: 'Member Task' });
     expect(res.status).toBe(201);
   });
 
@@ -289,7 +289,7 @@ describe('POST /v1/tasks', () => {
     const body = { project_id: projectId, title: 'Idempotent Task Layer1' };
 
     const res1 = await app.fetch(
-      new Request('http://x/v1/tasks', {
+      new Request('http://x/api/v1/tasks', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -305,7 +305,7 @@ describe('POST /v1/tasks', () => {
     const data1 = await res1.json() as { task: { id: string } };
 
     const res2 = await app.fetch(
-      new Request('http://x/v1/tasks', {
+      new Request('http://x/api/v1/tasks', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -334,7 +334,7 @@ describe('POST /v1/tasks', () => {
     const idempotencyKey = `tasks-test-idem-conflict-${Date.now()}`;
 
     const res1 = await app.fetch(
-      new Request('http://x/v1/tasks', {
+      new Request('http://x/api/v1/tasks', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -349,7 +349,7 @@ describe('POST /v1/tasks', () => {
     expect(res1.status).toBe(201);
 
     const res2 = await app.fetch(
-      new Request('http://x/v1/tasks', {
+      new Request('http://x/api/v1/tasks', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -373,7 +373,7 @@ describe('POST /v1/tasks', () => {
   it('Layer-2: returns 409 when creating second task with same idempotency_key in same org', async () => {
     const ikey = `notion:ws-abc:page-${Date.now()}:v1`;
 
-    const res1 = await req('POST', '/v1/tasks', pat, {
+    const res1 = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'First Semantic Task',
       idempotency_key: ikey,
@@ -381,7 +381,7 @@ describe('POST /v1/tasks', () => {
     expect(res1.status).toBe(201);
     const data1 = await res1.json() as { task: { id: string } };
 
-    const res2 = await req('POST', '/v1/tasks', pat, {
+    const res2 = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Second Semantic Task (conflict)',
       idempotency_key: ikey,
@@ -395,14 +395,14 @@ describe('POST /v1/tasks', () => {
   it('Layer-2: allows same idempotency_key in different orgs (org isolation)', async () => {
     const ikey = `mc:shared-key-different-orgs-${Date.now()}`;
 
-    const resA = await req('POST', '/v1/tasks', pat, {
+    const resA = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Org A Task',
       idempotency_key: ikey,
     });
     expect(resA.status).toBe(201);
 
-    const resB = await req('POST', '/v1/tasks', orgBPat, {
+    const resB = await req('POST', '/api/v1/tasks', orgBPat, {
       project_id: orgBProjectId,
       title: 'Org B Task',
       idempotency_key: ikey,
@@ -413,7 +413,7 @@ describe('POST /v1/tasks', () => {
   it('Layer-2: allows reuse of idempotency_key after task is soft-deleted', async () => {
     const ikey = `mc:reusable-after-delete-${Date.now()}`;
 
-    const res1 = await req('POST', '/v1/tasks', pat, {
+    const res1 = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Deletable Task',
       idempotency_key: ikey,
@@ -422,10 +422,10 @@ describe('POST /v1/tasks', () => {
     const { task } = await res1.json() as { task: { id: string } };
 
     // Soft-delete.
-    await req('DELETE', `/v1/tasks/${task.id}`, pat);
+    await req('DELETE', `/api/v1/tasks/${task.id}`, pat);
 
     // Same key should now work again.
-    const res2 = await req('POST', '/v1/tasks', pat, {
+    const res2 = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Recycled Task',
       idempotency_key: ikey,
@@ -434,29 +434,29 @@ describe('POST /v1/tasks', () => {
   });
 
   it('multi-tenant isolation: org B cannot see org A tasks', async () => {
-    const resA = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Org A Only' });
+    const resA = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Org A Only' });
     expect(resA.status).toBe(201);
     const { task } = await resA.json() as { task: { id: string } };
 
     // Org B GET :id should return 404.
-    const resB = await req('GET', `/v1/tasks/${task.id}`, orgBPat);
+    const resB = await req('GET', `/api/v1/tasks/${task.id}`, orgBPat);
     expect(resB.status).toBe(404);
   });
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/tasks
+// GET /api/v1/tasks
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/tasks', () => {
+describe('GET /api/v1/tasks', () => {
   let taskId1 = '';
   let taskId2 = '';
 
   beforeAll(async () => {
-    const r1 = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'List Task 1', priority: 10 });
+    const r1 = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'List Task 1', priority: 10 });
     taskId1 = ((await r1.json()) as { task: { id: string } }).task.id;
 
-    const r2 = await req('POST', '/v1/tasks', pat, {
+    const r2 = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'List Task 2',
       agent_id: agentId,
@@ -467,7 +467,7 @@ describe('GET /v1/tasks', () => {
 
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/tasks'),
+      new Request('http://x/api/v1/tasks'),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -475,7 +475,7 @@ describe('GET /v1/tasks', () => {
   });
 
   it('returns paginated task list scoped to caller org', async () => {
-    const res = await req('GET', '/v1/tasks', pat);
+    const res = await req('GET', '/api/v1/tasks', pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: { org_id: string }[]; next_cursor: string | null };
     expect(Array.isArray(body.tasks)).toBe(true);
@@ -485,7 +485,7 @@ describe('GET /v1/tasks', () => {
   });
 
   it('filters by project_id', async () => {
-    const res = await req('GET', `/v1/tasks?project_id=${projectId}`, pat);
+    const res = await req('GET', `/api/v1/tasks?project_id=${projectId}`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: { project_id: string }[] };
     for (const t of body.tasks) {
@@ -494,7 +494,7 @@ describe('GET /v1/tasks', () => {
   });
 
   it('filters by agent_id', async () => {
-    const res = await req('GET', `/v1/tasks?agent_id=${agentId}`, pat);
+    const res = await req('GET', `/api/v1/tasks?agent_id=${agentId}`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: { agent_id: string; id: string }[] };
     const ids = body.tasks.map((t) => t.id);
@@ -505,7 +505,7 @@ describe('GET /v1/tasks', () => {
   });
 
   it('filters by single status', async () => {
-    const res = await req('GET', '/v1/tasks?status=ready', pat);
+    const res = await req('GET', '/api/v1/tasks?status=ready', pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: { status: string }[] };
     for (const t of body.tasks) {
@@ -514,7 +514,7 @@ describe('GET /v1/tasks', () => {
   });
 
   it('filters by comma-separated status list', async () => {
-    const res = await req('GET', '/v1/tasks?status=pending,ready', pat);
+    const res = await req('GET', '/api/v1/tasks?status=pending,ready', pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: { status: string }[] };
     for (const t of body.tasks) {
@@ -524,7 +524,7 @@ describe('GET /v1/tasks', () => {
 
   it('filters by updated_since (ISO string)', async () => {
     const since = new Date(Date.now() - 5000).toISOString();
-    const res = await req('GET', `/v1/tasks?updated_since=${encodeURIComponent(since)}`, pat);
+    const res = await req('GET', `/api/v1/tasks?updated_since=${encodeURIComponent(since)}`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: unknown[] };
     expect(Array.isArray(body.tasks)).toBe(true);
@@ -532,16 +532,16 @@ describe('GET /v1/tasks', () => {
 
   it('filters by updated_since (ms epoch)', async () => {
     const since = Date.now() - 5000;
-    const res = await req('GET', `/v1/tasks?updated_since=${since}`, pat);
+    const res = await req('GET', `/api/v1/tasks?updated_since=${since}`, pat);
     expect(res.status).toBe(200);
   });
 
   it('agent role: forced filter — agent sees only own tasks', async () => {
     // agentKey belongs to agentId; taskId2 is assigned to agentId.
     // Create a task NOT assigned to this agent.
-    await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Unassigned Task' });
+    await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Unassigned Task' });
 
-    const res = await req('GET', '/v1/tasks', agentKey);
+    const res = await req('GET', '/api/v1/tasks', agentKey);
     expect(res.status).toBe(200);
     const body = await res.json() as { tasks: { agent_id: string }[] };
     // All returned tasks must be assigned to agentId.
@@ -551,18 +551,18 @@ describe('GET /v1/tasks', () => {
   });
 
   it('agent_id=me is rejected for non-agent principals (400)', async () => {
-    const res = await req('GET', '/v1/tasks?agent_id=me', pat);
+    const res = await req('GET', '/api/v1/tasks?agent_id=me', pat);
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.invalid_filter');
   });
 
   it('org B cannot see org A tasks in list', async () => {
-    const resA = await req('GET', '/v1/tasks', pat);
+    const resA = await req('GET', '/api/v1/tasks', pat);
     const bodyA = await resA.json() as { tasks: { id: string }[] };
     const idsA = bodyA.tasks.map((t) => t.id);
 
-    const resB = await req('GET', '/v1/tasks', orgBPat);
+    const resB = await req('GET', '/api/v1/tasks', orgBPat);
     const bodyB = await resB.json() as { tasks: { id: string }[] };
     for (const t of bodyB.tasks) {
       expect(idsA).not.toContain(t.id);
@@ -576,7 +576,7 @@ describe('GET /v1/tasks', () => {
       'Pagination Tasks Org',
       'pagination-tasks-org',
     );
-    const projRes = await req('POST', '/v1/projects', freshPat, { name: 'Pag Project', slug: 'pag-proj' });
+    const projRes = await req('POST', '/api/v1/projects', freshPat, { name: 'Pag Project', slug: 'pag-proj' });
     const { project: pagProj } = await projRes.json() as { project: { id: string } };
 
     // Insert 75 tasks directly for speed.
@@ -599,8 +599,8 @@ describe('GET /v1/tasks', () => {
 
     do {
       const url = cursor
-        ? `/v1/tasks?limit=25&cursor=${encodeURIComponent(cursor)}`
-        : '/v1/tasks?limit=25';
+        ? `/api/v1/tasks?limit=25&cursor=${encodeURIComponent(cursor)}`
+        : '/api/v1/tasks?limit=25';
       const res = await req('GET', url, freshPat);
       expect(res.status).toBe(200);
       const body = await res.json() as { tasks: { id: string }[]; next_cursor: string | null };
@@ -618,14 +618,14 @@ describe('GET /v1/tasks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /v1/tasks/:id
+// GET /api/v1/tasks/:id
 // ---------------------------------------------------------------------------
 
-describe('GET /v1/tasks/:id', () => {
+describe('GET /api/v1/tasks/:id', () => {
   let taskId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Detail Task',
       agent_id: agentId,
@@ -634,14 +634,14 @@ describe('GET /v1/tasks/:id', () => {
   });
 
   it('returns 404 for non-existent task', async () => {
-    const res = await req('GET', '/v1/tasks/t_doesnotexist', pat);
+    const res = await req('GET', '/api/v1/tasks/t_doesnotexist', pat);
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.not_found');
   });
 
   it('returns task detail with comments and events arrays', async () => {
-    const res = await req('GET', `/v1/tasks/${taskId}`, pat);
+    const res = await req('GET', `/api/v1/tasks/${taskId}`, pat);
     expect(res.status).toBe(200);
     const body = await res.json() as { task: { id: string }; comments: unknown[]; events: unknown[] };
     expect(body.task.id).toBe(taskId);
@@ -650,12 +650,12 @@ describe('GET /v1/tasks/:id', () => {
   });
 
   it('returns 404 when org B tries to access org A task', async () => {
-    const res = await req('GET', `/v1/tasks/${taskId}`, orgBPat);
+    const res = await req('GET', `/api/v1/tasks/${taskId}`, orgBPat);
     expect(res.status).toBe(404);
   });
 
   it('agent can access their own task', async () => {
-    const res = await req('GET', `/v1/tasks/${taskId}`, agentKey);
+    const res = await req('GET', `/api/v1/tasks/${taskId}`, agentKey);
     expect(res.status).toBe(200);
     const body = await res.json() as { task: { id: string } };
     expect(body.task.id).toBe(taskId);
@@ -663,7 +663,7 @@ describe('GET /v1/tasks/:id', () => {
 
   it('agent returns 403 for task assigned to another agent', async () => {
     // Create task assigned to agentId2.
-    const createRes = await req('POST', '/v1/tasks', pat, {
+    const createRes = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Other Agent Task',
       agent_id: agentId2,
@@ -671,7 +671,7 @@ describe('GET /v1/tasks/:id', () => {
     const { task } = await createRes.json() as { task: { id: string } };
 
     // agentKey (agentId) tries to access it.
-    const res = await req('GET', `/v1/tasks/${task.id}`, agentKey);
+    const res = await req('GET', `/api/v1/tasks/${task.id}`, agentKey);
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.forbidden');
@@ -679,14 +679,14 @@ describe('GET /v1/tasks/:id', () => {
 });
 
 // ---------------------------------------------------------------------------
-// PATCH /v1/tasks/:id — state machine + fields
+// PATCH /api/v1/tasks/:id — state machine + fields
 // ---------------------------------------------------------------------------
 
-describe('PATCH /v1/tasks/:id', () => {
+describe('PATCH /api/v1/tasks/:id', () => {
   let taskId = '';
 
   beforeAll(async () => {
-    const res = await req('POST', '/v1/tasks', pat, {
+    const res = await req('POST', '/api/v1/tasks', pat, {
       project_id: projectId,
       title: 'Patchable Task',
     });
@@ -694,33 +694,33 @@ describe('PATCH /v1/tasks/:id', () => {
   });
 
   it('returns 404 for non-existent task', async () => {
-    const res = await req('PATCH', '/v1/tasks/t_doesnotexist', pat, { title: 'x' });
+    const res = await req('PATCH', '/api/v1/tasks/t_doesnotexist', pat, { title: 'x' });
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.not_found');
   });
 
   it('returns 404 when org B tries to patch org A task', async () => {
-    const res = await req('PATCH', `/v1/tasks/${taskId}`, orgBPat, { title: 'hacked' });
+    const res = await req('PATCH', `/api/v1/tasks/${taskId}`, orgBPat, { title: 'hacked' });
     expect(res.status).toBe(404);
   });
 
   it('returns 400 on invalid status value', async () => {
-    const res = await req('PATCH', `/v1/tasks/${taskId}`, pat, { status: 'flying' });
+    const res = await req('PATCH', `/api/v1/tasks/${taskId}`, pat, { status: 'flying' });
     expect(res.status).toBe(400);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.validation_error');
   });
 
   it('updates title and returns updated task', async () => {
-    const res = await req('PATCH', `/v1/tasks/${taskId}`, pat, { title: 'Updated Title' });
+    const res = await req('PATCH', `/api/v1/tasks/${taskId}`, pat, { title: 'Updated Title' });
     expect(res.status).toBe(200);
     const body = await res.json() as { task: { title: string } };
     expect(body.task.title).toBe('Updated Title');
   });
 
   it('emits task.updated event for non-status changes', async () => {
-    const res = await req('PATCH', `/v1/tasks/${taskId}`, pat, { title: 'Event Update' });
+    const res = await req('PATCH', `/api/v1/tasks/${taskId}`, pat, { title: 'Event Update' });
     expect(res.status).toBe(200);
 
     const row = await (env.DB as D1Database).prepare(
@@ -736,7 +736,7 @@ describe('PATCH /v1/tasks/:id', () => {
   describe('state machine transitions', () => {
     it('pending → ready: allowed', async () => {
       // Create fresh task for state machine tests (isolated).
-      const cr = await req('POST', '/v1/tasks', pat, {
+      const cr = await req('POST', '/api/v1/tasks', pat, {
         project_id: projectId,
         title: 'SM Task pending-ready',
         agent_id: agentId,
@@ -744,21 +744,21 @@ describe('PATCH /v1/tasks/:id', () => {
       const { task: t } = await cr.json() as { task: { id: string; status: string } };
       // Task was created with agent_id so starts as 'ready'. Reassign without agent to reset.
       // Actually the plan spec says pending→ready. Let's create without agent first.
-      const cr2 = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM pending task' });
+      const cr2 = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM pending task' });
       const { task: t2 } = await cr2.json() as { task: { id: string; status: string } };
       expect(t2.status).toBe('pending');
 
-      const res = await req('PATCH', `/v1/tasks/${t2.id}`, pat, { status: 'ready' });
+      const res = await req('PATCH', `/api/v1/tasks/${t2.id}`, pat, { status: 'ready' });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { status: string } };
       expect(body.task.status).toBe('ready');
     });
 
     it('pending → in_progress: rejected (409)', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM pending-ip' });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM pending-ip' });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
       expect(res.status).toBe(409);
       const body = await res.json() as { error: { code: string; details: { from: string; to: string } } };
       expect(body.error.code).toBe('task.invalid_transition');
@@ -768,7 +768,7 @@ describe('PATCH /v1/tasks/:id', () => {
 
     it('ready → in_progress: allowed; sets startedAt', async () => {
       // Create task with agent (status=ready).
-      const cr = await req('POST', '/v1/tasks', pat, {
+      const cr = await req('POST', '/api/v1/tasks', pat, {
         project_id: projectId,
         title: 'SM ready-ip',
         agent_id: agentId,
@@ -776,7 +776,7 @@ describe('PATCH /v1/tasks/:id', () => {
       const { task: t } = await cr.json() as { task: { id: string; started_at?: string | null } };
       expect(t.started_at).toBeNull();
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { status: string; started_at?: string | null } };
       expect(body.task.status).toBe('in_progress');
@@ -785,23 +785,23 @@ describe('PATCH /v1/tasks/:id', () => {
     });
 
     it('in_progress → blocked → in_progress: allowed', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM blocked', agent_id: agentId });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM blocked', agent_id: agentId });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'blocked' });
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'blocked' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { status: string } };
       expect(body.task.status).toBe('in_progress');
     });
 
     it('in_progress → completed: allowed; sets completedAt', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM completed', agent_id: agentId });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM completed', agent_id: agentId });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'completed' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'completed' });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { status: string; completed_at?: string | null } };
       expect(body.task.status).toBe('completed');
@@ -809,42 +809,42 @@ describe('PATCH /v1/tasks/:id', () => {
     });
 
     it('completed → pending: rejected (terminal state)', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM terminal', agent_id: agentId });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM terminal', agent_id: agentId });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'completed' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'completed' });
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'pending' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'pending' });
       expect(res.status).toBe(409);
       const body = await res.json() as { error: { code: string } };
       expect(body.error.code).toBe('task.invalid_transition');
     });
 
     it('cancelled → in_progress: rejected (terminal)', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM cancelled' });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM cancelled' });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'cancelled' });
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'cancelled' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
       expect(res.status).toBe(409);
     });
 
     it('pending → cancelled: sets completedAt', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM cancel pending' });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM cancel pending' });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'cancelled' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'cancelled' });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { completed_at?: string | null } };
       expect(typeof body.task.completed_at).toBe('string');
     });
 
     it('emits task.status_changed event on transition', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'SM event', agent_id: agentId });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'SM event', agent_id: agentId });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      await req('PATCH', `/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
+      await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { status: 'in_progress' });
 
       const row = await (env.DB as D1Database).prepare(
         `SELECT kind, payload FROM events WHERE org_id = ? AND resource_id = ? AND kind = 'task.status_changed' ORDER BY id DESC LIMIT 1`
@@ -862,10 +862,10 @@ describe('PATCH /v1/tasks/:id', () => {
 
   describe('agent_id updates', () => {
     it('emits task.assigned event when agent_id changes', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Reassign Test' });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Reassign Test' });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: agentId });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { agent_id: agentId });
       expect(res.status).toBe(200);
 
       const row = await (env.DB as D1Database).prepare(
@@ -877,20 +877,20 @@ describe('PATCH /v1/tasks/:id', () => {
     });
 
     it('can unassign agent (set agent_id = null)', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Unassign Test', agent_id: agentId });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Unassign Test', agent_id: agentId });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: null });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { agent_id: null });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { agent_id?: string | null } };
       expect(body.task.agent_id).toBeNull();
     });
 
     it('returns 422 when agent_id references non-existent agent', async () => {
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Bad Agent PATCH' });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Bad Agent PATCH' });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: 'agt_doesnotexist' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { agent_id: 'agt_doesnotexist' });
       expect(res.status).toBe(422);
       const body = await res.json() as { error: { code: string } };
       expect(body.error.code).toBe('task.invalid_agent');
@@ -898,12 +898,12 @@ describe('PATCH /v1/tasks/:id', () => {
 
     it('auto-promotes pending → ready when agent_id set and no explicit status', async () => {
       // Create a pending task (no agent).
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Auto Promote Task' });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Auto Promote Task' });
       const { task: t } = await cr.json() as { task: { id: string; status: string } };
       expect(t.status).toBe('pending');
 
       // PATCH with agent_id only (no status field).
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, pat, { agent_id: agentId });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, pat, { agent_id: agentId });
       expect(res.status).toBe(200);
       const body = await res.json() as { task: { status: string; agent_id: string } };
       // Status must be auto-promoted to 'ready'.
@@ -934,7 +934,7 @@ describe('PATCH /v1/tasks/:id', () => {
     let agentTaskId = '';
 
     beforeAll(async () => {
-      const cr = await req('POST', '/v1/tasks', pat, {
+      const cr = await req('POST', '/api/v1/tasks', pat, {
         project_id: projectId,
         title: 'Agent Owned Task',
         agent_id: agentId,
@@ -943,19 +943,19 @@ describe('PATCH /v1/tasks/:id', () => {
     });
 
     it('agent can update status on own task', async () => {
-      const res = await req('PATCH', `/v1/tasks/${agentTaskId}`, agentKey, { status: 'in_progress' });
+      const res = await req('PATCH', `/api/v1/tasks/${agentTaskId}`, agentKey, { status: 'in_progress' });
       expect(res.status).toBe(200);
     });
 
     it('agent can update metadata on own task', async () => {
-      const res = await req('PATCH', `/v1/tasks/${agentTaskId}`, agentKey, {
+      const res = await req('PATCH', `/api/v1/tasks/${agentTaskId}`, agentKey, {
         metadata: { progress: 50 },
       });
       expect(res.status).toBe(200);
     });
 
     it('agent returns 403 when trying to update title (not allowed)', async () => {
-      const res = await req('PATCH', `/v1/tasks/${agentTaskId}`, agentKey, { title: 'Hacked Title' });
+      const res = await req('PATCH', `/api/v1/tasks/${agentTaskId}`, agentKey, { title: 'Hacked Title' });
       expect(res.status).toBe(403);
       const body = await res.json() as { error: { code: string } };
       expect(body.error.code).toBe('task.forbidden');
@@ -963,23 +963,23 @@ describe('PATCH /v1/tasks/:id', () => {
 
     it('agent returns 403 when trying to patch another agent\'s task', async () => {
       // Create task assigned to agentId2.
-      const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Other Agent Task PATCH', agent_id: agentId2 });
+      const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Other Agent Task PATCH', agent_id: agentId2 });
       const { task: t } = await cr.json() as { task: { id: string } };
 
-      const res = await req('PATCH', `/v1/tasks/${t.id}`, agentKey, { status: 'in_progress' });
+      const res = await req('PATCH', `/api/v1/tasks/${t.id}`, agentKey, { status: 'in_progress' });
       expect(res.status).toBe(403);
     });
   });
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /v1/tasks/:id
+// DELETE /api/v1/tasks/:id
 // ---------------------------------------------------------------------------
 
-describe('DELETE /v1/tasks/:id', () => {
+describe('DELETE /api/v1/tasks/:id', () => {
   it('returns 401 without token', async () => {
     const res = await app.fetch(
-      new Request('http://x/v1/tasks/t_fake', { method: 'DELETE' }),
+      new Request('http://x/api/v1/tasks/t_fake', { method: 'DELETE' }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
     );
@@ -987,58 +987,58 @@ describe('DELETE /v1/tasks/:id', () => {
   });
 
   it('returns 403 for member role (members cannot delete tasks)', async () => {
-    const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Member Del Task' });
+    const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Member Del Task' });
     const { task: t } = await cr.json() as { task: { id: string } };
 
-    const res = await req('DELETE', `/v1/tasks/${t.id}`, memberPat);
+    const res = await req('DELETE', `/api/v1/tasks/${t.id}`, memberPat);
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('auth.role_insufficient');
   });
 
   it('returns 403 for agent role', async () => {
-    const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Agent Del Task', agent_id: agentId });
+    const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Agent Del Task', agent_id: agentId });
     const { task: t } = await cr.json() as { task: { id: string } };
 
-    const res = await req('DELETE', `/v1/tasks/${t.id}`, agentKey);
+    const res = await req('DELETE', `/api/v1/tasks/${t.id}`, agentKey);
     expect(res.status).toBe(403);
   });
 
   it('returns 404 for non-existent task', async () => {
-    const res = await req('DELETE', '/v1/tasks/t_doesnotexist', pat);
+    const res = await req('DELETE', '/api/v1/tasks/t_doesnotexist', pat);
     expect(res.status).toBe(404);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('task.not_found');
   });
 
   it('returns 404 when org B tries to delete org A task', async () => {
-    const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Isolation Del Task' });
+    const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Isolation Del Task' });
     const { task: t } = await cr.json() as { task: { id: string } };
 
-    const res = await req('DELETE', `/v1/tasks/${t.id}`, orgBPat);
+    const res = await req('DELETE', `/api/v1/tasks/${t.id}`, orgBPat);
     expect(res.status).toBe(404);
   });
 
   it('soft-deletes task; subsequent GET returns 404', async () => {
-    const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'To Delete' });
+    const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'To Delete' });
     const { task: t } = await cr.json() as { task: { id: string } };
 
-    const delRes = await req('DELETE', `/v1/tasks/${t.id}`, pat);
+    const delRes = await req('DELETE', `/api/v1/tasks/${t.id}`, pat);
     expect(delRes.status).toBe(200);
 
-    const getRes = await req('GET', `/v1/tasks/${t.id}`, pat);
+    const getRes = await req('GET', `/api/v1/tasks/${t.id}`, pat);
     expect(getRes.status).toBe(404);
 
     // Second delete should also 404.
-    const del2 = await req('DELETE', `/v1/tasks/${t.id}`, pat);
+    const del2 = await req('DELETE', `/api/v1/tasks/${t.id}`, pat);
     expect(del2.status).toBe(404);
   });
 
   it('emits task.deleted event', async () => {
-    const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Event Delete Task' });
+    const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Event Delete Task' });
     const { task: t } = await cr.json() as { task: { id: string } };
 
-    await req('DELETE', `/v1/tasks/${t.id}`, pat);
+    await req('DELETE', `/api/v1/tasks/${t.id}`, pat);
 
     const row = await (env.DB as D1Database).prepare(
       `SELECT kind FROM events WHERE org_id = ? AND resource_type = 'task' AND resource_id = ? AND kind = 'task.deleted' ORDER BY id DESC LIMIT 1`
@@ -1048,7 +1048,7 @@ describe('DELETE /v1/tasks/:id', () => {
   });
 
   it('cascade trigger soft-deletes task_comments on task delete', async () => {
-    const cr = await req('POST', '/v1/tasks', pat, { project_id: projectId, title: 'Cascade Comments Task' });
+    const cr = await req('POST', '/api/v1/tasks', pat, { project_id: projectId, title: 'Cascade Comments Task' });
     const { task: t } = await cr.json() as { task: { id: string } };
 
     // Insert a comment directly.
@@ -1064,7 +1064,7 @@ describe('DELETE /v1/tasks/:id', () => {
     expect(before?.deleted_at).toBeNull();
 
     // Delete task.
-    await req('DELETE', `/v1/tasks/${t.id}`, pat);
+    await req('DELETE', `/api/v1/tasks/${t.id}`, pat);
 
     // Comment should be soft-deleted by the trigger.
     const after = await (env.DB as D1Database).prepare(`SELECT deleted_at FROM task_comments WHERE id = ?`).bind(cmtId).first() as { deleted_at: number | null } | null;
@@ -1077,7 +1077,7 @@ describe('DELETE /v1/tasks/:id', () => {
 // idempotency_key regex validation (added when MC bumped the regex to v1)
 // ---------------------------------------------------------------------------
 
-describe('POST /v1/tasks — idempotency_key regex validation', () => {
+describe('POST /api/v1/tasks — idempotency_key regex validation', () => {
   it.each([
     ['no-prefix-no-colon', 400],
     [':no-source-prefix', 400],
@@ -1090,7 +1090,7 @@ describe('POST /v1/tasks — idempotency_key regex validation', () => {
     // the same body — the Layer-1 header dedup would otherwise catch the
     // retried request.
     const res = await app.fetch(
-      new Request('http://x/v1/tasks', {
+      new Request('http://x/api/v1/tasks', {
         method: 'POST',
         headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({

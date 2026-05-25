@@ -37,9 +37,9 @@ const app = new Hono<{ Bindings: Env }>();
 //   3. requireJsonOnWrites — 415 if state-changing request uses form-urlencoded/multipart
 //   4. rateLimitMiddleware — short-circuits on rate limit exceeded (v1: no-op stub)
 //   5. loggingMiddleware   — runs after next(); captures final status + auth context
-app.use('/v1/*', secureHeaders());
+app.use('/api/v1/*', secureHeaders());
 
-app.use('/v1/*', cors({
+app.use('/api/v1/*', cors({
   origin: (origin, c) => {
     const env = c.env as Env;
     const allowed =
@@ -53,30 +53,30 @@ app.use('/v1/*', cors({
   allowHeaders: ['authorization', 'content-type', 'idempotency-key', 'x-mc-admin-token'],
 }));
 
-app.use('/v1/*', requireJsonOnWrites);
-app.use('/v1/*', rateLimitMiddleware);
-app.use('/v1/*', loggingMiddleware);
+app.use('/api/v1/*', requireJsonOnWrites);
+app.use('/api/v1/*', rateLimitMiddleware);
+app.use('/api/v1/*', loggingMiddleware);
 // Dev-mode response-shape validator — self-gates inside (no-op in prod).
 // Logs (does not throw) when a handler response drifts from src/schemas/.
-app.use('/v1/*', validateResponses);
+app.use('/api/v1/*', validateResponses);
 
-app.route('/v1/health', health);
+app.route('/api/v1/health', health);
 
 // Mount better-auth handler — handles all auth flows (signup, signin, orgs, api-keys, …)
-app.on(['POST', 'GET'], '/v1/auth/*', async (c) => {
+app.on(['POST', 'GET'], '/api/v1/auth/*', async (c) => {
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
 
-app.route('/v1/bootstrap', bootstrap);
-app.route('/v1/me', me);
-app.route('/v1/agents', agentsRouter);
-app.route('/v1/connectors', connectorsRouter);
-app.route('/v1/projects', projectsRouter);
-app.route('/v1/tasks', tasksRouter);
-app.route('/v1/tasks', commentsRouter);
-app.route('/v1/external_refs', externalRefsRouter);
-app.route('/v1/events', eventsRouter);
+app.route('/api/v1/bootstrap', bootstrap);
+app.route('/api/v1/me', me);
+app.route('/api/v1/agents', agentsRouter);
+app.route('/api/v1/connectors', connectorsRouter);
+app.route('/api/v1/projects', projectsRouter);
+app.route('/api/v1/tasks', tasksRouter);
+app.route('/api/v1/tasks', commentsRouter);
+app.route('/api/v1/external_refs', externalRefsRouter);
+app.route('/api/v1/events', eventsRouter);
 
 // Workers Module Worker shape: fetch handler + scheduled (cron) handler.
 export default {

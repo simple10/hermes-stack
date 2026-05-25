@@ -144,7 +144,7 @@ beforeAll(async () => {
 
   // Bootstrap the org.
   const res = await app.fetch(
-    new Request('http://x/v1/bootstrap', {
+    new Request('http://x/api/v1/bootstrap', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-mc-admin-token': ADMIN_TOKEN },
       body: JSON.stringify({
@@ -171,10 +171,10 @@ beforeAll(async () => {
 describe('cascade: task soft-delete → comments + external_refs', () => {
   it('cascades to 3 comments and 2 external_refs via Drizzle (app route)', async () => {
     // Create a project and task via the API to get valid IDs.
-    const projRes = await req('POST', '/v1/projects', pat, { name: 'Task Cascade Project', slug: 'task-cascade-proj' });
+    const projRes = await req('POST', '/api/v1/projects', pat, { name: 'Task Cascade Project', slug: 'task-cascade-proj' });
     const { project } = await projRes.json() as { project: { id: string } };
 
-    const taskRes = await req('POST', '/v1/tasks', pat, { project_id: project.id, title: 'Cascade Task 1' });
+    const taskRes = await req('POST', '/api/v1/tasks', pat, { project_id: project.id, title: 'Cascade Task 1' });
     const { task } = await taskRes.json() as { task: { id: string } };
 
     // Insert 3 comments and 2 external_refs directly.
@@ -195,7 +195,7 @@ describe('cascade: task soft-delete → comments + external_refs', () => {
     }
 
     // Soft-delete the task via API (uses Drizzle under the hood).
-    const delRes = await req('DELETE', `/v1/tasks/${task.id}`, pat);
+    const delRes = await req('DELETE', `/api/v1/tasks/${task.id}`, pat);
     expect(delRes.status).toBe(200);
 
     // All 3 comments must be cascaded.
@@ -214,20 +214,20 @@ describe('cascade: task soft-delete → comments + external_refs', () => {
   });
 
   it('does not cascade to unrelated tasks in the same org', async () => {
-    const projRes = await req('POST', '/v1/projects', pat, { name: 'Task No-Touch Project', slug: 'task-notouch-proj' });
+    const projRes = await req('POST', '/api/v1/projects', pat, { name: 'Task No-Touch Project', slug: 'task-notouch-proj' });
     const { project } = await projRes.json() as { project: { id: string } };
 
-    const taskRes1 = await req('POST', '/v1/tasks', pat, { project_id: project.id, title: 'Delete Me' });
+    const taskRes1 = await req('POST', '/api/v1/tasks', pat, { project_id: project.id, title: 'Delete Me' });
     const { task: t1 } = await taskRes1.json() as { task: { id: string } };
 
-    const taskRes2 = await req('POST', '/v1/tasks', pat, { project_id: project.id, title: 'Keep Me Alive' });
+    const taskRes2 = await req('POST', '/api/v1/tasks', pat, { project_id: project.id, title: 'Keep Me Alive' });
     const { task: t2 } = await taskRes2.json() as { task: { id: string } };
 
     const c1 = await insertComment(t1.id, 0);
     const c2 = await insertComment(t2.id, 0);
 
     // Delete only t1.
-    await req('DELETE', `/v1/tasks/${t1.id}`, pat);
+    await req('DELETE', `/api/v1/tasks/${t1.id}`, pat);
 
     // t1's comment is deleted.
     const row1 = await getCommentDelete(c1);
@@ -410,16 +410,16 @@ describe('cascade: partial unique index allows name re-use after soft-delete', (
   it('agent name can be reused after soft-delete (partial unique index)', async () => {
     // Create an agent via the API.
     const name = `unique-agent-${Date.now()}`;
-    const res1 = await req('POST', '/v1/agents', pat, { name, kind: 'hermes' });
+    const res1 = await req('POST', '/api/v1/agents', pat, { name, kind: 'hermes' });
     expect(res1.status).toBe(201);
     const { agent } = await res1.json() as { agent: { id: string } };
 
     // Soft-delete it via API.
-    const del = await req('DELETE', `/v1/agents/${agent.id}`, pat);
+    const del = await req('DELETE', `/api/v1/agents/${agent.id}`, pat);
     expect(del.status).toBe(200);
 
     // Creating another agent with the same name should succeed.
-    const res2 = await req('POST', '/v1/agents', pat, { name, kind: 'hermes' });
+    const res2 = await req('POST', '/api/v1/agents', pat, { name, kind: 'hermes' });
     expect(res2.status).toBe(201);
     const { agent: agent2 } = await res2.json() as { agent: { id: string } };
     expect(agent2.id).not.toBe(agent.id);
@@ -427,13 +427,13 @@ describe('cascade: partial unique index allows name re-use after soft-delete', (
 
   it('connector name can be reused after soft-delete', async () => {
     const name = `unique-connector-${Date.now()}`;
-    const res1 = await req('POST', '/v1/connectors', pat, { name, kind: 'notion' });
+    const res1 = await req('POST', '/api/v1/connectors', pat, { name, kind: 'notion' });
     expect(res1.status).toBe(201);
     const { connector } = await res1.json() as { connector: { id: string } };
 
-    await req('DELETE', `/v1/connectors/${connector.id}`, pat);
+    await req('DELETE', `/api/v1/connectors/${connector.id}`, pat);
 
-    const res2 = await req('POST', '/v1/connectors', pat, { name, kind: 'notion' });
+    const res2 = await req('POST', '/api/v1/connectors', pat, { name, kind: 'notion' });
     expect(res2.status).toBe(201);
     const { connector: connector2 } = await res2.json() as { connector: { id: string } };
     expect(connector2.id).not.toBe(connector.id);
@@ -441,13 +441,13 @@ describe('cascade: partial unique index allows name re-use after soft-delete', (
 
   it('project slug can be reused after soft-delete', async () => {
     const slug = `unique-project-${Date.now()}`;
-    const res1 = await req('POST', '/v1/projects', pat, { name: 'Unique P', slug });
+    const res1 = await req('POST', '/api/v1/projects', pat, { name: 'Unique P', slug });
     expect(res1.status).toBe(201);
     const { project } = await res1.json() as { project: { id: string } };
 
-    await req('DELETE', `/v1/projects/${project.id}`, pat);
+    await req('DELETE', `/api/v1/projects/${project.id}`, pat);
 
-    const res2 = await req('POST', '/v1/projects', pat, { name: 'Unique P v2', slug });
+    const res2 = await req('POST', '/api/v1/projects', pat, { name: 'Unique P v2', slug });
     expect(res2.status).toBe(201);
     const { project: project2 } = await res2.json() as { project: { id: string } };
     expect(project2.id).not.toBe(project.id);
@@ -460,14 +460,14 @@ describe('cascade: partial unique index allows name re-use after soft-delete', (
 
 describe('cascade: already-deleted children are not re-cascaded', () => {
   it('pre-deleted comment retains its original deleted_at after task delete', async () => {
-    const projRes = await req('POST', '/v1/projects', pat, { name: 'Pre-del Project', slug: `pre-del-proj-${Date.now()}` });
+    const projRes = await req('POST', '/api/v1/projects', pat, { name: 'Pre-del Project', slug: `pre-del-proj-${Date.now()}` });
     const { project } = await projRes.json() as { project: { id: string } };
 
-    const taskRes = await req('POST', '/v1/tasks', pat, { project_id: project.id, title: 'Pre-delete Task' });
+    const taskRes = await req('POST', '/api/v1/tasks', pat, { project_id: project.id, title: 'Pre-delete Task' });
     const { task } = await taskRes.json() as { task: { id: string } };
 
     // Post a comment via API (simulates normal flow).
-    const cRes = await req('POST', `/v1/tasks/${task.id}/comments`, pat, { body: 'Pre-deleted comment' });
+    const cRes = await req('POST', `/api/v1/tasks/${task.id}/comments`, pat, { body: 'Pre-deleted comment' });
     const { comment } = await cRes.json() as { comment: { id: string } };
 
     // Manually soft-delete the comment first (simulate prior deletion).
@@ -477,7 +477,7 @@ describe('cascade: already-deleted children are not re-cascaded', () => {
     ).bind(earlyTs, 'user', 'usr_early', comment.id).run();
 
     // Now delete the task — trigger's WHERE clause is `AND deleted_at IS NULL`.
-    await req('DELETE', `/v1/tasks/${task.id}`, pat);
+    await req('DELETE', `/api/v1/tasks/${task.id}`, pat);
 
     // The comment's deleted_at should remain earlyTs (trigger skipped it).
     const row = await getCommentDelete(comment.id);

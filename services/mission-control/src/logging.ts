@@ -10,7 +10,7 @@
 import type { MiddlewareHandler } from 'hono';
 
 // Paths whose request/response bodies must never be logged.
-const SENSITIVE_PATHS = ['/v1/auth/', '/v1/bootstrap'];
+const SENSITIVE_PATHS = ['/api/v1/auth/', '/api/v1/bootstrap'];
 
 function isSensitive(path: string): boolean {
   return SENSITIVE_PATHS.some((prefix) => path.startsWith(prefix));

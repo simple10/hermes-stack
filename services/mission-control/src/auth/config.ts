@@ -37,7 +37,7 @@ export function createAuth(env: AuthEnv) {
     database: drizzleAdapter(db, { provider: 'sqlite', schema: drizzleSchema }),
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    basePath: '/v1/auth',
+    basePath: '/api/v1/auth',
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,

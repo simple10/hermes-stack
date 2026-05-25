@@ -26,4 +26,9 @@ export default [
       'mc-local/no-raw-pool-in-routes': 'error',
     },
   },
+  // Note: schemas/* browser-safety enforcement lives in .dependency-cruiser.cjs
+  // (run via `pnpm lint:deps`). The flat ESLint config here lacks a TS parser
+  // (pre-existing situation — fixing typescript-eslint is out of scope for this
+  // plan), so an ESLint-side no-restricted-imports rule wouldn't actually fire.
+  // dependency-cruiser uses TS's own resolver via tsconfig and works regardless.
 ];

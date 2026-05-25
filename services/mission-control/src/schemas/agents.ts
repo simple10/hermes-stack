@@ -58,7 +58,7 @@ export const Agent = z
     created_at: IsoTimestamp,
     updated_at: IsoTimestamp,
   })
-  .merge(SoftDeleteFields);
+  .extend(SoftDeleteFields.shape);
 export type Agent = z.infer<typeof Agent>;
 
 // ---------------------------------------------------------------------------

@@ -40,6 +40,15 @@ export default defineConfig({
             'test/pagination.test.ts',
             'test/serialize.test.ts',
             'test/state-machine/**/*.test.ts',
+            'test/schemas/**/*.test.ts',
+            'test/auth/email.test.ts',
+            'test/middleware/**/*.test.ts',
+          ],
+          // Existing miniflare-dependent middleware tests stay in the
+          // `workers` project; the broad include above is for future
+          // unit-pure middleware tests.
+          exclude: [
+            'test/middleware/content-type-guard.test.ts',
           ],
         },
       },
@@ -55,6 +64,12 @@ export default defineConfig({
             'test/pagination.test.ts',
             'test/serialize.test.ts',
             'test/state-machine/**/*.test.ts',
+            'test/schemas/**/*.test.ts',
+            'test/auth/email.test.ts',
+            // Note: test/middleware/**/*.test.ts is NOT excluded wholesale
+            // because content-type-guard.test.ts still needs the workers pool.
+            // The unit project's `exclude` keeps it there; future unit-pure
+            // middleware tests should be added to this list explicitly.
           ],
           pool: cloudflarePool(poolOptions),
           globalSetup: ['./test/global-setup.ts'],

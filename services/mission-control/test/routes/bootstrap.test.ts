@@ -154,6 +154,31 @@ describe('POST /v1/bootstrap', () => {
     expect(body.pat.startsWith('mcpat_')).toBe(true);
   });
 
+  it('marks the bootstrap user as emailVerified=true so sign-in works', async () => {
+    // requireEmailVerification: true in better-auth would block sign-in for
+    // the bootstrap user unless we pre-verify them. The bootstrap handler
+    // does an UPDATE user SET emailVerified=true after creating the user.
+    await clearUsers();
+    const res = await app.fetch(
+      new Request('http://x/v1/bootstrap', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-mc-admin-token': 'test-tok' },
+        body: JSON.stringify(VALID_BODY),
+      }),
+      { ...env, MC_ADMIN_TOKEN: 'test-tok' } as any,
+      { passThroughOnException: () => {} } as any,
+    );
+    expect(res.status).toBe(201);
+    // Read the user row directly. DB column is snake_case (`email_verified`)
+    // per the Drizzle schema; SQLite stores booleans as 0/1.
+    const row = await (env.DB as D1Database)
+      .prepare('SELECT email_verified FROM user WHERE email = ?')
+      .bind(VALID_BODY.email)
+      .first<{ email_verified: number | boolean }>();
+    expect(row).not.toBeNull();
+    expect(row?.email_verified === 1 || row?.email_verified === true).toBe(true);
+  });
+
   it('returns 409 when a user already exists (second bootstrap attempt)', async () => {
     // Ensure there is a user in the DB by running a successful bootstrap first.
     await clearUsers();

@@ -16,8 +16,9 @@
  * Once any user exists in the master DB, this endpoint returns 409.
  */
 import { Hono } from 'hono';
+import { eq } from 'drizzle-orm';
 import { masterClient } from '../db/client.ts';
-import { organization, member } from '../db/master.ts';
+import { organization, member, user as userTable } from '../db/master.ts';
 import { createAuth } from '../auth/config.ts';
 import { errorResponse, HttpError } from '../errors.ts';
 import { makeId } from '../ids.ts';
@@ -79,14 +80,26 @@ bootstrap.post('/', async (c) => {
     }
     const userId = signUp.user.id;
 
+    // Step 1.5: Mark the bootstrap user as email-verified.
+    //
+    // The UI enables `requireEmailVerification: true`, which would otherwise
+    // block sign-in for this just-created user until they click a verification
+    // link. The operator running bootstrap holds MC_ADMIN_TOKEN, so the email
+    // they typed is presumed verified. Skip the round-trip.
+    const master = masterClient(env); // repo-escape: bootstrap runs before ctx exists
+    const now = new Date();
+
+    await master
+      .update(userTable)
+      .set({ emailVerified: true, updatedAt: now })
+      .where(eq(userTable.id, userId));
+
     // Step 2: Insert organization + member directly via Drizzle.
     //
     // See mintApiKey comment below for why we use masterClient directly here.
     // repo-escape: bootstrap bypasses better-auth's createOrganization adapter
     // to avoid a double-insert bug (adapter inserts member, endpoint calls
     // createMember again, violating UNIQUE(organization_id, user_id)).
-    const master = masterClient(env); // repo-escape: bootstrap runs before ctx exists
-    const now = new Date();
     const orgId = makeId('org');
     const memberId = makeId('mbr');
 

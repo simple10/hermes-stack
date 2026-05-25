@@ -1,13 +1,13 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { z } from 'zod';
-import { ResetPassword } from '@/components/auth/reset-password';
+import { createFileRoute } from '@tanstack/react-router'
+import { z } from 'zod'
+import { ResetPassword } from '@/components/auth/reset-password'
 
-const searchSchema = z.object({ token: z.string().optional() });
+const searchSchema = z.object({ token: z.string().optional() })
 
 export const Route = createFileRoute('/reset-password')({
   validateSearch: searchSchema,
   component: ResetPasswordRoute,
-});
+})
 
 function ResetPasswordRoute() {
   return (
@@ -16,5 +16,5 @@ function ResetPasswordRoute() {
         <ResetPassword />
       </div>
     </div>
-  );
+  )
 }

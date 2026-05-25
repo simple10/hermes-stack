@@ -1,8 +1,8 @@
-import { ReactNode } from 'react';
-import { TopBar } from './top-bar';
-import { Sidebar } from './sidebar';
-import { ThemeProvider } from './theme-provider';
-import { ErrorBoundary } from './error-boundary';
+import { ReactNode } from 'react'
+import { TopBar } from './top-bar'
+import { Sidebar } from './sidebar'
+import { ThemeProvider } from './theme-provider'
+import { ErrorBoundary } from './error-boundary'
 
 /**
  * AppShell — outer layout for all authenticated routes.
@@ -22,5 +22,5 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </div>
     </ThemeProvider>
-  );
+  )
 }

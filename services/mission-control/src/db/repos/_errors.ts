@@ -34,8 +34,8 @@ export class DuplicateError extends Error {
     public readonly details: Record<string, unknown> = {},
     public readonly code?: string,
   ) {
-    super(`${resource} already exists`);
-    this.name = 'DuplicateError';
+    super(`${resource} already exists`)
+    this.name = 'DuplicateError'
   }
 }
 
@@ -50,7 +50,7 @@ export class ForbiddenError extends Error {
     message: string,
     public readonly details: Record<string, unknown> = {},
   ) {
-    super(message);
-    this.name = 'ForbiddenError';
+    super(message)
+    this.name = 'ForbiddenError'
   }
 }

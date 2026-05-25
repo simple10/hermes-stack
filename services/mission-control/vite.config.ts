@@ -1,9 +1,9 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { cloudflare } from '@cloudflare/vite-plugin';
-import tsconfigPaths from 'vite-tsconfig-paths';
-import { tanstackRouter } from '@tanstack/router-plugin/vite';
-import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { cloudflare } from '@cloudflare/vite-plugin'
+import tsconfigPaths from 'vite-tsconfig-paths'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
+import tailwindcss from '@tailwindcss/vite'
 
 // Vite root = ./web so the SPA's index.html and src/ live under web/.
 // The Worker (src/index.ts) is discovered by @cloudflare/vite-plugin via
@@ -21,4 +21,4 @@ export default defineConfig({
     cloudflare(),
     tsconfigPaths(),
   ],
-});
+})

@@ -17,35 +17,35 @@
  *   mintApiKey(master, args) — full INSERT; returns { id, rawKey }
  *   disableApiKey(master, keyId, when?) — sets enabled=false (soft-disable)
  */
-import { eq } from 'drizzle-orm';
-import { apiKey as apiKeyTable } from '../db/master.ts';
-import { makeId } from '../ids.ts';
-import type { MasterClient } from '../db/client.ts';
+import { eq } from 'drizzle-orm'
+import { apiKey as apiKeyTable } from '../db/master.ts'
+import { makeId } from '../ids.ts'
+import type { MasterClient } from '../db/client.ts'
 
 // ---------------------------------------------------------------------------
 // Low-level primitives
 // ---------------------------------------------------------------------------
 
-const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const KEY_LENGTH = 64; // matches better-auth defaultKeyLength
+const KEY_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+const KEY_LENGTH = 64 // matches better-auth defaultKeyLength
 
 /** Generate a random API key string: `<prefix><64 random alpha chars>` */
 export function generateRawKey(prefix: string): string {
-  let key = prefix;
-  const arr = crypto.getRandomValues(new Uint8Array(KEY_LENGTH));
+  let key = prefix
+  const arr = crypto.getRandomValues(new Uint8Array(KEY_LENGTH))
   for (let i = 0; i < KEY_LENGTH; i++) {
-    key += KEY_CHARS[arr[i]! % KEY_CHARS.length];
+    key += KEY_CHARS[arr[i]! % KEY_CHARS.length]
   }
-  return key;
+  return key
 }
 
 /** SHA-256 hash → base64url (no padding), matching better-auth's storage format. */
 export async function hashKey(key: string): Promise<string> {
-  const data = new TextEncoder().encode(key);
-  const hashBuf = await crypto.subtle.digest('SHA-256', data);
-  const bytes = new Uint8Array(hashBuf);
-  let b64 = btoa(String.fromCharCode(...bytes));
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const data = new TextEncoder().encode(key)
+  const hashBuf = await crypto.subtle.digest('SHA-256', data)
+  const bytes = new Uint8Array(hashBuf)
+  let b64 = btoa(String.fromCharCode(...bytes))
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 // ---------------------------------------------------------------------------
@@ -53,13 +53,13 @@ export async function hashKey(key: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 export interface MintApiKeyArgs {
-  prefix: string;
-  name: string;
-  userId: string;
-  orgId: string;
-  principalType: 'pat' | 'agent' | 'connector';
-  metadata?: Record<string, unknown>;
-  permissions?: Record<string, string[]>;
+  prefix: string
+  name: string
+  userId: string
+  orgId: string
+  principalType: 'pat' | 'agent' | 'connector'
+  metadata?: Record<string, unknown>
+  permissions?: Record<string, string[]>
 }
 
 /**
@@ -72,10 +72,10 @@ export async function mintApiKey(
   master: MasterClient,
   args: MintApiKeyArgs,
 ): Promise<{ id: string; rawKey: string }> {
-  const rawKey = generateRawKey(args.prefix);
-  const hashedKey = await hashKey(rawKey);
-  const keyId = makeId('apiKey');
-  const now = new Date();
+  const rawKey = generateRawKey(args.prefix)
+  const hashedKey = await hashKey(rawKey)
+  const keyId = makeId('apiKey')
+  const now = new Date()
 
   await master.insert(apiKeyTable).values({
     id: keyId,
@@ -100,9 +100,9 @@ export async function mintApiKey(
     permissions: args.permissions !== undefined ? JSON.stringify(args.permissions) : null,
     createdAt: now,
     updatedAt: now,
-  });
+  })
 
-  return { id: keyId, rawKey };
+  return { id: keyId, rawKey }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ export async function disableApiKey(
   keyId: string,
   expiresAt?: number,
 ): Promise<void> {
-  const now = new Date();
+  const now = new Date()
   await master
     .update(apiKeyTable)
     .set(
@@ -132,5 +132,5 @@ export async function disableApiKey(
         ? { expiresAt: new Date(expiresAt), updatedAt: now }
         : { enabled: false, updatedAt: now },
     )
-    .where(eq(apiKeyTable.id, keyId));
+    .where(eq(apiKeyTable.id, keyId))
 }

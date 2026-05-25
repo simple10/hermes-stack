@@ -8,9 +8,9 @@
  * a repeat call with the same key but different body returns 409 idempotency.conflict.
  */
 
-import { and, eq } from 'drizzle-orm';
-import { idempotencyKeys } from './db/pool.ts';
-import type { PoolClient } from './db/client.ts';
+import { and, eq } from 'drizzle-orm'
+import { idempotencyKeys } from './db/pool.ts'
+import type { PoolClient } from './db/client.ts'
 
 // ---------------------------------------------------------------------------
 // hashBody
@@ -22,10 +22,10 @@ import type { PoolClient } from './db/client.ts';
  * values — good enough for dedup within a single request path.
  */
 export async function hashBody(body: unknown): Promise<string> {
-  const json = JSON.stringify(body);
-  const data = new TextEncoder().encode(json);
-  const buf = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+  const json = JSON.stringify(body)
+  const data = new TextEncoder().encode(json)
+  const buf = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 // ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ export async function hashBody(body: unknown): Promise<string> {
 export type IdempotencyCheckResult =
   | { hit: true; cached: { status: number; body: unknown } }
   | { hit: false }
-  | { hit: 'conflict' };
+  | { hit: 'conflict' }
 
 /**
  * Look up an idempotency key in the pool DB.
@@ -63,25 +63,25 @@ export async function checkIdempotency(
         eq(idempotencyKeys.key, key),
       ),
     )
-    .limit(1);
-  const row = rows[0];
+    .limit(1)
+  const row = rows[0]
 
-  if (!row) return { hit: false };
+  if (!row) return { hit: false }
 
   // Treat expired entries as a cache miss (the nightly purge hasn't run yet).
-  if (row.expiresAt < Date.now()) return { hit: false };
+  if (row.expiresAt < Date.now()) return { hit: false }
 
-  let parsed: { bodyHash: string; status: number; body: unknown };
+  let parsed: { bodyHash: string; status: number; body: unknown }
   try {
-    parsed = JSON.parse(row.responseBody) as { bodyHash: string; status: number; body: unknown };
+    parsed = JSON.parse(row.responseBody) as { bodyHash: string; status: number; body: unknown }
   } catch {
     // Corrupt entry — treat as miss.
-    return { hit: false };
+    return { hit: false }
   }
 
-  if (parsed.bodyHash !== requestBodyHash) return { hit: 'conflict' };
+  if (parsed.bodyHash !== requestBodyHash) return { hit: 'conflict' }
 
-  return { hit: true, cached: { status: parsed.status, body: parsed.body } };
+  return { hit: true, cached: { status: parsed.status, body: parsed.body } }
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ export async function recordIdempotency(
   responseBody: unknown,
   ttlSeconds = 86_400,
 ): Promise<void> {
-  const now = Date.now();
+  const now = Date.now()
   await pool.insert(idempotencyKeys).values({
     orgId,
     route,
@@ -118,5 +118,5 @@ export async function recordIdempotency(
     }),
     createdAt: now,
     expiresAt: now + ttlSeconds * 1000,
-  });
+  })
 }

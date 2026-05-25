@@ -1,5 +1,5 @@
-import { defineConfig } from 'vitest/config';
-import { cloudflarePool, cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { defineConfig } from 'vitest/config'
+import { cloudflarePool, cloudflareTest } from '@cloudflare/vitest-pool-workers'
 
 /**
  * Vitest config with TWO projects:
@@ -25,7 +25,7 @@ const poolOptions = {
       MC_ADMIN_TOKEN: 'test-admin-token',
     },
   },
-};
+}
 
 export default defineConfig({
   test: {
@@ -47,9 +47,7 @@ export default defineConfig({
           // Existing miniflare-dependent middleware tests stay in the
           // `workers` project; the broad include above is for future
           // unit-pure middleware tests.
-          exclude: [
-            'test/middleware/content-type-guard.test.ts',
-          ],
+          exclude: ['test/middleware/content-type-guard.test.ts'],
         },
       },
       {
@@ -77,4 +75,4 @@ export default defineConfig({
       },
     ],
   },
-});
+})

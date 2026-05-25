@@ -10,35 +10,35 @@
  * One beforeAll for the whole file applies migrations once; the per-repo
  * blocks share the migrated D1.
  */
-import { beforeAll, inject } from 'vitest';
-import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
+import { beforeAll, inject } from 'vitest'
+import { env } from 'cloudflare:workers'
+import { applyD1Migrations } from 'cloudflare:test'
+import type { D1Migration } from '@cloudflare/vitest-pool-workers'
 
-import { agentsRepoTests } from './repos/_agents.ts';
-import { apiKeysRepoTests } from './repos/_api-keys.ts';
-import { commentsRepoTests } from './repos/_comments.ts';
-import { connectorsRepoTests } from './repos/_connectors.ts';
-import { eventsRepoTests } from './repos/_events.ts';
-import { externalRefsRepoTests } from './repos/_external-refs.ts';
-import { membersRepoTests } from './repos/_members.ts';
-import { orgsRepoTests } from './repos/_orgs.ts';
-import { projectsRepoTests } from './repos/_projects.ts';
-import { tasksRepoTests } from './repos/_tasks.ts';
-import { usersRepoTests } from './repos/_users.ts';
+import { agentsRepoTests } from './repos/_agents.ts'
+import { apiKeysRepoTests } from './repos/_api-keys.ts'
+import { commentsRepoTests } from './repos/_comments.ts'
+import { connectorsRepoTests } from './repos/_connectors.ts'
+import { eventsRepoTests } from './repos/_events.ts'
+import { externalRefsRepoTests } from './repos/_external-refs.ts'
+import { membersRepoTests } from './repos/_members.ts'
+import { orgsRepoTests } from './repos/_orgs.ts'
+import { projectsRepoTests } from './repos/_projects.ts'
+import { tasksRepoTests } from './repos/_tasks.ts'
+import { usersRepoTests } from './repos/_users.ts'
 
 beforeAll(async () => {
-  await applyD1Migrations((env.DB as D1Database), inject('d1Migrations') as D1Migration[]);
-});
+  await applyD1Migrations(env.DB as D1Database, inject('d1Migrations') as D1Migration[])
+})
 
-agentsRepoTests();
-apiKeysRepoTests();
-commentsRepoTests();
-connectorsRepoTests();
-eventsRepoTests();
-externalRefsRepoTests();
-membersRepoTests();
-orgsRepoTests();
-projectsRepoTests();
-tasksRepoTests();
-usersRepoTests();
+agentsRepoTests()
+apiKeysRepoTests()
+commentsRepoTests()
+connectorsRepoTests()
+eventsRepoTests()
+externalRefsRepoTests()
+membersRepoTests()
+orgsRepoTests()
+projectsRepoTests()
+tasksRepoTests()
+usersRepoTests()

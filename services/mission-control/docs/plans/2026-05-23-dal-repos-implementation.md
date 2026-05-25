@@ -26,6 +26,7 @@
 ## Task 1: Brand the OrgId type
 
 **Files:**
+
 - Modify: `src/auth/types.ts`
 - Modify: `src/auth/middleware.ts` (cast string → OrgId at auth boundary)
 
@@ -33,11 +34,13 @@
 
 ```ts
 // src/auth/types.ts (add at top, alongside existing types)
-declare const orgIdBrand: unique symbol;
-export type OrgId = string & { readonly [orgIdBrand]: never };
+declare const orgIdBrand: unique symbol
+export type OrgId = string & { readonly [orgIdBrand]: never }
 /** Cast a string to OrgId. Use ONLY at the auth boundary after verifying the
  * value comes from a trusted source (verified bearer / session). */
-export function asOrgId(s: string): OrgId { return s as OrgId; }
+export function asOrgId(s: string): OrgId {
+  return s as OrgId
+}
 ```
 
 Change `AuthContext.orgId: string` → `AuthContext.orgId: OrgId`.
@@ -75,10 +78,11 @@ git commit -m "refactor(mission-control): brand OrgId type — applied at auth b
 ## Task 2: Repo scaffolding — shared base utilities
 
 **Files:**
+
 - Create: `src/db/repos/_base.ts`
 - Create: `src/db/repos/index.ts` (empty facade — will fill in later tasks)
 
-- [ ] **Step 1: Create _base.ts with shared helpers**
+- [ ] **Step 1: Create \_base.ts with shared helpers**
 
 ```ts
 // src/db/repos/_base.ts
@@ -90,14 +94,14 @@ git commit -m "refactor(mission-control): brand OrgId type — applied at auth b
  * object with named common operations + `.scoped()` / `.scope` / `.table`
  * escape hatches.
  */
-import { isNull } from 'drizzle-orm';
-import type { AuthContext } from '../../auth/types.ts';
+import { isNull } from 'drizzle-orm'
+import type { AuthContext } from '../../auth/types.ts'
 
-export type { AuthContext };
+export type { AuthContext }
 
 /** Drizzle predicate: WHERE deleted_at IS NULL */
 export function activeRows(t: { deletedAt: Parameters<typeof isNull>[0] }) {
-  return isNull(t.deletedAt);
+  return isNull(t.deletedAt)
 }
 ```
 
@@ -110,7 +114,7 @@ export function activeRows(t: { deletedAt: Parameters<typeof isNull>[0] }) {
 // Facade — exports `db.<table>(ctx)` factories.
 // Filled in as each repo is added.
 
-export const db = {} as Record<string, never>;
+export const db = {} as Record<string, never>
 ```
 
 - [ ] **Step 3: Typecheck**
@@ -133,6 +137,7 @@ git commit -m "refactor(mission-control): scaffold src/db/repos/ — base + faca
 ## Task 3: Build pool-DB repos — tasks, projects, agents, connectors
 
 **Files:**
+
 - Create: `src/db/repos/tasks.ts`
 - Create: `src/db/repos/projects.ts`
 - Create: `src/db/repos/agents.ts`
@@ -144,6 +149,7 @@ This task creates the four "primary entity" repos. Comments and external-refs co
 - [ ] **Step 1: Build src/db/repos/tasks.ts**
 
 Per the spec's "Repo example — tasks (full)" section. Key requirements:
+
 - `tasksRepo(ctx)` returns object with `findById`, `list`, `insert`, `update`, `softDelete`, `countActiveByAgent`, `scoped`, `scope`, `table`
 - Scope = `and(eq(tasks.orgId, ctx.orgId), active(tasks), principalFilter)` where principalFilter is `eq(tasks.agentId, ctx.principal.id)` when `ctx.principal.type === 'agent'`
 - `insert` payload type: `Omit<InsertInput, 'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'deletedByType' | 'deletedById'>`
@@ -156,6 +162,7 @@ Per the spec's "Repo example — tasks (full)" section. Key requirements:
 - [ ] **Step 2: Build src/db/repos/projects.ts**
 
 Similar shape to tasks. Differences:
+
 - No per-principal filter (everyone in the org sees all projects)
 - `insert` may throw on slug-uniqueness; catch with `isUniqueViolation` → `HttpError(409, 'project.duplicate_slug', { existing_project_id })`. Repo does the conflict lookup to populate `existing_project_id` from a follow-up `select`.
 - Standard `findById`, `list`, `update`, `softDelete`
@@ -177,20 +184,20 @@ Mirror agents. The "active refs" check is `db.externalRefs(ctx).countBySource('c
 
 ```ts
 // src/db/repos/index.ts
-import type { AuthContext } from '../../auth/types.ts';
-import { tasksRepo } from './tasks.ts';
-import { projectsRepo } from './projects.ts';
-import { agentsRepo } from './agents.ts';
-import { connectorsRepo } from './connectors.ts';
+import type { AuthContext } from '../../auth/types.ts'
+import { tasksRepo } from './tasks.ts'
+import { projectsRepo } from './projects.ts'
+import { agentsRepo } from './agents.ts'
+import { connectorsRepo } from './connectors.ts'
 
 export const db = {
   tasks: tasksRepo,
   projects: projectsRepo,
   agents: agentsRepo,
   connectors: connectorsRepo,
-};
+}
 
-export type DB = typeof db;
+export type DB = typeof db
 ```
 
 - [ ] **Step 6: Typecheck + test**
@@ -214,6 +221,7 @@ git commit -m "refactor(mission-control): pool-DB repos — tasks/projects/agent
 ## Task 4: Build remaining pool-DB repos — comments, external_refs, events
 
 **Files:**
+
 - Create: `src/db/repos/comments.ts`
 - Create: `src/db/repos/external-refs.ts`
 - Create: `src/db/repos/events.ts`
@@ -241,7 +249,7 @@ git commit -m "refactor(mission-control): pool-DB repos — tasks/projects/agent
 
   ```ts
   // src/events/emit.ts (after refactor)
-  export { emitEvent } from '../db/repos/events.ts';
+  export { emitEvent } from '../db/repos/events.ts'
   ```
 
   The repo's `insert` becomes the actual implementation; `emitEvent` is just an alias for `db.events(ctx).insert(...)` shaped per the existing call signature. Concretely, expose a method `emit(args)` on the repo that takes the existing emitEvent's args.
@@ -266,6 +274,7 @@ git commit -m "refactor(mission-control): pool-DB repos — comments/external-re
 ## Task 5: Build master-DB repos — users, orgs, members, api-keys
 
 **Files:**
+
 - Create: `src/db/repos/users.ts`
 - Create: `src/db/repos/orgs.ts`
 - Create: `src/db/repos/members.ts`
@@ -301,7 +310,7 @@ Master-DB repos use `masterClient(ctx.env)` internally; handlers don't see the m
   ```ts
   // src/auth/api-keys.ts (after refactor)
   // Backward-compat re-exports — the real implementation lives in db/repos/api-keys.ts
-  export { mintApiKey, disableApiKey, generateRawKey, hashKey } from '../db/repos/api-keys.ts';
+  export { mintApiKey, disableApiKey, generateRawKey, hashKey } from '../db/repos/api-keys.ts'
   ```
 
   Or alternatively, leave the low-level primitives (`generateRawKey`, `hashKey`) in `src/auth/api-keys.ts` and have the repo import them. Either is fine; the choice is about whose file owns the SHA-256+base64url logic.
@@ -324,7 +333,7 @@ export const db = {
   orgs: orgsRepo,
   members: membersRepo,
   apiKeys: apiKeysRepo,
-};
+}
 ```
 
 - [ ] **Step 6: Typecheck + test**
@@ -343,6 +352,7 @@ git commit -m "refactor(mission-control): master-DB repos — users/orgs/members
 ## Task 6: System namespace — admin/cron unscoped ops
 
 **Files:**
+
 - Create: `src/db/repos/system.ts`
 - Modify: `src/db/repos/index.ts` (export `system`)
 
@@ -357,45 +367,49 @@ git commit -m "refactor(mission-control): master-DB repos — users/orgs/members
  * Callers must include a `// system: <reason>` comment justifying use. The
  * ESLint rule flags any call to `system.*` without that comment.
  */
-import { lt } from 'drizzle-orm';
-import { events, idempotencyKeys } from '../pool.ts';
-import { verification } from '../master.ts';
-import { masterClient, poolClient } from '../client.ts';
-import type { Env } from '../client.ts';
+import { lt } from 'drizzle-orm'
+import { events, idempotencyKeys } from '../pool.ts'
+import { verification } from '../master.ts'
+import { masterClient, poolClient } from '../client.ts'
+import type { Env } from '../client.ts'
 
 export const system = {
   events: {
     /** Purge events older than the cutoff (ms epoch). */
     async purgeOlderThan(env: Env, cutoff: number, binding: D1Database) {
-      const pool = poolClient(binding);
-      await pool.delete(events).where(lt(events.createdAt, cutoff));
+      const pool = poolClient(binding)
+      await pool.delete(events).where(lt(events.createdAt, cutoff))
     },
   },
   idempotencyKeys: {
     async purgeExpired(env: Env, now: number, binding: D1Database) {
-      const pool = poolClient(binding);
-      await pool.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now));
+      const pool = poolClient(binding)
+      await pool.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now))
     },
   },
   verification: {
     async purgeExpired(env: Env, now: number) {
-      const master = masterClient(env);
-      await master.delete(verification).where(lt(verification.expiresAt, new Date(now)));
+      const master = masterClient(env)
+      await master.delete(verification).where(lt(verification.expiresAt, new Date(now)))
     },
   },
-};
+}
 ```
 
 (The pool functions take an explicit `binding` because cron may iterate across pools when sharded — single-pool today, but the signature is forward-compatible.)
 
-- [ ] **Step 2: Update src/jobs/cron.ts to use system.* (with the // system: comment)**
+- [ ] **Step 2: Update src/jobs/cron.ts to use system.\* (with the // system: comment)**
 
 ```ts
 // src/jobs/cron.ts (changes)
-import { system } from '../db/repos/system.ts';
+import { system } from '../db/repos/system.ts'
 // …
 // system: scheduled retention purge (events grow unbounded otherwise)
-await system.events.purgeOlderThan(env, cutoff, env.DB_MODE === 'split' ? env.POOL_DEFAULT! : env.DB!);
+await system.events.purgeOlderThan(
+  env,
+  cutoff,
+  env.DB_MODE === 'split' ? env.POOL_DEFAULT! : env.DB!,
+)
 ```
 
 - [ ] **Step 3: Typecheck + test (cron test still passes)**
@@ -419,6 +433,7 @@ git commit -m "refactor(mission-control): system namespace + migrate cron jobs"
 ## Task 7: Migrate routes — projects + comments + external-refs
 
 **Files:**
+
 - Modify: `src/routes/projects.ts`
 - Modify: `src/routes/comments.ts`
 - Modify: `src/routes/external-refs.ts`
@@ -431,12 +446,12 @@ For each file:
 
 Match each query to the corresponding repo method. When no method fits the case, ADD the method to the repo (don't escape unless truly necessary). Common patterns:
 
-| Current shape | Replacement |
-|---|---|
-| `ctx.pool.select().from(t).where(and(eq(t.orgId, ctx.orgId), eq(t.id, id), active(t))).limit(1)` | `db.X(ctx).findById(id)` |
-| `ctx.pool.insert(t).values({...})` | `db.X(ctx).insert({...})` (omit orgId — stamped) |
-| `ctx.pool.update(t).set({...}).where(and(eq(t.orgId, ctx.orgId), eq(t.id, id))).returning()` | `db.X(ctx).update(id, {...})` |
-| `ctx.pool.update(t).set({ deletedAt: now, ... }).where(...)` | `db.X(ctx).softDelete(id)` |
+| Current shape                                                                                    | Replacement                                      |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `ctx.pool.select().from(t).where(and(eq(t.orgId, ctx.orgId), eq(t.id, id), active(t))).limit(1)` | `db.X(ctx).findById(id)`                         |
+| `ctx.pool.insert(t).values({...})`                                                               | `db.X(ctx).insert({...})` (omit orgId — stamped) |
+| `ctx.pool.update(t).set({...}).where(and(eq(t.orgId, ctx.orgId), eq(t.id, id))).returning()`     | `db.X(ctx).update(id, {...})`                    |
+| `ctx.pool.update(t).set({ deletedAt: now, ... }).where(...)`                                     | `db.X(ctx).softDelete(id)`                       |
 
 - [ ] **Step 2: Verify each migrated file's test suite passes**
 
@@ -464,6 +479,7 @@ git commit -m "refactor(mission-control): migrate projects + comments + external
 ## Task 8: Migrate routes — tasks + agents + connectors
 
 **Files:**
+
 - Modify: `src/routes/tasks.ts`
 - Modify: `src/routes/agents.ts`
 - Modify: `src/routes/connectors.ts`
@@ -475,6 +491,7 @@ These are larger and have sagas. Take them one at a time.
 Tasks has the state machine + idempotency + heavy filtering. Map each query to repo methods. The state machine validation stays in the handler; the repo just does the writes.
 
 Tests:
+
 ```sh
 pnpm test test/routes/tasks.test.ts test/state-machine/tasks.test.ts
 ```
@@ -482,6 +499,7 @@ pnpm test test/routes/tasks.test.ts test/state-machine/tasks.test.ts
 - [ ] **Step 2: Migrate src/routes/agents.ts**
 
 Saga: insert agent + mint apiKey + compensating delete. Each step is now a repo call:
+
 ```ts
 const agent = await db.agents(ctx).insert({ name, kind, description, createdByUserId: ctx.viaUserId });
 try {
@@ -496,6 +514,7 @@ try {
 Active-tasks gate on delete: `await db.tasks(ctx).countActiveByAgent(agent.id)` → 409 if > 0.
 
 Tests:
+
 ```sh
 pnpm test test/routes/agents.test.ts
 ```
@@ -505,6 +524,7 @@ pnpm test test/routes/agents.test.ts
 Mirror of agents. Active-refs gate: `await db.externalRefs(ctx).countBySource('connector-of-some-kind', connector.id)` — actually a connector's "active refs" probably means any external_ref whose source_id matches the connector id (regardless of source_kind). Check current behavior; mirror it.
 
 Tests:
+
 ```sh
 pnpm test test/routes/connectors.test.ts
 ```
@@ -530,6 +550,7 @@ git commit -m "refactor(mission-control): migrate tasks + agents + connectors to
 ## Task 9: Migrate identity routes — bootstrap, /me, auth middleware
 
 **Files:**
+
 - Modify: `src/routes/bootstrap.ts`
 - Modify: `src/routes/me.ts`
 - Modify: `src/auth/middleware.ts`
@@ -541,6 +562,7 @@ Uses better-auth + direct inserts on user/organization/member. The "no users exi
 PAT minting becomes `await db.apiKeys.mintForUserBootstrap(env, userId, orgId, name)` — another static (env-only) variant.
 
 Tests:
+
 ```sh
 pnpm test test/routes/bootstrap.test.ts
 ```
@@ -548,20 +570,26 @@ pnpm test test/routes/bootstrap.test.ts
 - [ ] **Step 2: Migrate me.ts**
 
 ```ts
-const ctx = c.var.auth;
-const base = { org_id: ctx.orgId, role: ctx.role, principal_type: ctx.principal.type, principal_id: ctx.principal.id };
+const ctx = c.var.auth
+const base = {
+  org_id: ctx.orgId,
+  role: ctx.role,
+  principal_type: ctx.principal.type,
+  principal_id: ctx.principal.id,
+}
 if (ctx.principal.type === 'agent') {
-  const agent = await db.agents(ctx).findById(ctx.principal.id);
-  if (agent) base.agent = serializeTimestamps(agent);
+  const agent = await db.agents(ctx).findById(ctx.principal.id)
+  if (agent) base.agent = serializeTimestamps(agent)
 }
 if (ctx.principal.type === 'connector') {
-  const connector = await db.connectors(ctx).findById(ctx.principal.id);
-  if (connector) base.connector = serializeTimestamps(connector);
+  const connector = await db.connectors(ctx).findById(ctx.principal.id)
+  if (connector) base.connector = serializeTimestamps(connector)
 }
-return c.json(base);
+return c.json(base)
 ```
 
 Tests:
+
 ```sh
 pnpm test test/routes/me.test.ts
 ```
@@ -571,6 +599,7 @@ pnpm test test/routes/me.test.ts
 The middleware reads the `member` table and `apiKey` table BEFORE ctx exists. Use the static lookups: `lookupMemberRole(env, userId, orgId)` and `lookupApiKey(env, hashedToken)` (add the latter to `apiKeysRepo` as another env-only static).
 
 Tests:
+
 ```sh
 pnpm test test/auth/
 ```
@@ -591,6 +620,7 @@ git commit -m "refactor(mission-control): migrate bootstrap/me/auth-middleware t
 ## Task 10: Per-repo unit tests
 
 **Files:**
+
 - Create: `test/db/repos/tasks.test.ts`
 - Create: `test/db/repos/projects.test.ts`
 - Create: `test/db/repos/agents.test.ts`
@@ -667,11 +697,13 @@ git commit -m "test(mission-control): per-repo unit tests for the new DAL"
 ## Task 11: ESLint rule banning raw ctx.pool in routes
 
 **Files:**
+
 - Create: `eslint-rules/no-raw-pool-in-routes.cjs` (or `.js` — depending on existing eslint setup)
 - Modify: `package.json` (add eslint + the local rule)
 - Modify: `.eslintrc.cjs` or `eslint.config.js` (whichever exists; check repo)
 
 **Investigation first** — what eslint setup, if any, currently exists in the repo? Run:
+
 ```sh
 ls .eslintrc* eslint.config* 2>/dev/null
 grep -n "lint" package.json
@@ -704,28 +736,29 @@ module.exports = {
           ['select', 'insert', 'update', 'delete'].includes(node.property?.name)
         ) {
           // Allow if prior line has `// repo-escape:` comment
-          const sourceCode = ctx.getSourceCode();
-          const comments = sourceCode.getCommentsBefore(node);
-          const hasEscape = comments.some(c => /repo-escape:/.test(c.value));
+          const sourceCode = ctx.getSourceCode()
+          const comments = sourceCode.getCommentsBefore(node)
+          const hasEscape = comments.some((c) => /repo-escape:/.test(c.value))
           if (!hasEscape) {
             ctx.report({
               node,
               message:
                 'Direct ctx.pool.* call in route handler. Use src/db/repos instead, or add `// repo-escape: <reason>` above this line.',
-            });
+            })
           }
         }
       },
-    };
+    }
   },
-};
+}
 ```
 
 - [ ] **Step 2: Add eslint config**
 
 If a config doesn't exist, create `eslint.config.js`:
+
 ```js
-import noRawPool from './eslint-rules/no-raw-pool-in-routes.cjs';
+import noRawPool from './eslint-rules/no-raw-pool-in-routes.cjs'
 
 export default [
   {
@@ -737,7 +770,7 @@ export default [
       'mc-local/no-raw-pool-in-routes': 'error',
     },
   },
-];
+]
 ```
 
 Add to package.json scripts: `"lint": "eslint src/routes/"`.
@@ -821,6 +854,7 @@ Add a new file containing the typed domain errors (`DuplicateError`, `ForbiddenE
 The `db.events(ctx).emit({resourceType, resourceId, kind, payload})` method takes only kind-specific args. `orgId` + `actor` come from ctx.
 
 **Add migration step:** find every `emitEvent(pool, {...})` callsite and rewrite to `db.events(ctx).emit({...})`. Concrete files to update (verified via grep):
+
 - `src/routes/agents.ts`
 - `src/routes/connectors.ts`
 - `src/routes/projects.ts`
@@ -852,14 +886,14 @@ Drop the `env` arg; callers pass the binding explicitly. `src/jobs/cron.ts` reso
 Every route handler now needs:
 
 ```ts
-import { DuplicateError, ForbiddenError } from '../db/repos/_errors.ts';
+import { DuplicateError, ForbiddenError } from '../db/repos/_errors.ts'
 
 // at the catch site (or in errorResponse helper):
 if (e instanceof DuplicateError) {
-  return errorResponse(c, new HttpError(409, `${e.resource}.duplicate`, e.message, e.details));
+  return errorResponse(c, new HttpError(409, `${e.resource}.duplicate`, e.message, e.details))
 }
 if (e instanceof ForbiddenError) {
-  return errorResponse(c, new HttpError(403, e.code, e.message, e.details));
+  return errorResponse(c, new HttpError(403, e.code, e.message, e.details))
 }
 ```
 
@@ -868,6 +902,7 @@ Cleaner: extend `errorResponse()` itself in `src/errors.ts` to handle these auto
 ### Amendment G: Task 8 — agent/connector saga semantics preserved
 
 The compensating delete on apiKey-mint failure must keep using `deleted_by_type = 'system'` (matches current behavior; the agent never went live, so the deletion isn't a user-initiated soft-delete). Two options:
+
 - Repo's `softDelete` accepts an optional `actor` override; saga passes `{type:'system', id:'compensating-action'}`.
 - Bypass `softDelete` for the compensating path and write `deleted_at` directly via `.scoped().update({...}).where(...)`.
 
@@ -878,9 +913,10 @@ Pick option 1 — keeps all mutations going through the repo.
 The middleware also looks up apiKey rows before ctx exists. Add a static lookup (`apiKeysRepo`'s env-only variant) the middleware can call.
 
 Concrete: `apiKeysRepo` exports both:
+
 - `apiKeysRepo(ctx)` — for handlers
 - `apiKeysRepoStatic.lookupByHash(env, hashedToken)` — for middleware
-Same pattern as `members`.
+  Same pattern as `members`.
 
 ### Amendment I: Task 10 — Add `test/helpers/orgs.ts` to the files list
 
@@ -889,6 +925,7 @@ After OrgId is branded, `createOrgFixture` returns `{userId, orgId, pat}` where 
 ### Amendment J: Task 11 — ESLint rule expanded scope
 
 Rule must flag:
+
 - `ctx.pool.{select|insert|update|delete}` (current)
 - `masterClient(...).{select|insert|update|delete}` (any call returning a Drizzle client followed by a write/read)
 - `c.env.DB`, `c.env.MASTER_DB`, `c.env.POOL_*` direct access in route handlers

@@ -12,17 +12,17 @@
  */
 
 const PREFIX_BY_KIND: Record<string, string> = {
-  agent:       'agt',
-  connector:   'cnn',
-  project:     'prj',
-  task:        't',
-  comment:     'cmt',
-  event:       'evt',
+  agent: 'agt',
+  connector: 'cnn',
+  project: 'prj',
+  task: 't',
+  comment: 'cmt',
+  event: 'evt',
   externalRef: 'xrf',
-  org:         'org',
-  user:        'usr',
-  apiKey:      'apk',
-};
+  org: 'org',
+  user: 'usr',
+  apiKey: 'apk',
+}
 
 /**
  * Generate a unique slug-prefixed ID for the given resource kind.
@@ -32,8 +32,8 @@ const PREFIX_BY_KIND: Record<string, string> = {
  * updating the table while still producing readable output.
  */
 export function makeId(kind: keyof typeof PREFIX_BY_KIND | string): string {
-  const prefix = PREFIX_BY_KIND[kind] ?? kind;
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-  return `${prefix}_${hex}`;
+  const prefix = PREFIX_BY_KIND[kind] ?? kind
+  const bytes = crypto.getRandomValues(new Uint8Array(12))
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${prefix}_${hex}`
 }

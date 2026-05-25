@@ -1,6 +1,6 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import { api } from '@/lib/api';
+import { useInfiniteQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { api } from '@/lib/api'
 import {
   Table,
   TableBody,
@@ -8,8 +8,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
+} from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
 
 export function ConnectorsTable() {
   const q = useInfiniteQuery({
@@ -17,13 +17,13 @@ export function ConnectorsTable() {
     queryFn: ({ pageParam }) => api.connectors.list({ cursor: pageParam as string | undefined }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
-  });
+  })
 
-  if (q.isLoading) return <p className="text-muted-foreground">Loading…</p>;
-  if (q.error) throw q.error;
+  if (q.isLoading) return <p className="text-muted-foreground">Loading…</p>
+  if (q.error) throw q.error
 
-  const rows = q.data?.pages.flatMap((p) => p.connectors) ?? [];
-  if (rows.length === 0) return <p className="text-muted-foreground">No connectors yet.</p>;
+  const rows = q.data?.pages.flatMap((p) => p.connectors) ?? []
+  if (rows.length === 0) return <p className="text-muted-foreground">No connectors yet.</p>
 
   return (
     <>
@@ -62,5 +62,5 @@ export function ConnectorsTable() {
         </Button>
       )}
     </>
-  );
+  )
 }

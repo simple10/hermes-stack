@@ -13,10 +13,10 @@
  *   system.idempotencyKeys   — pool DB (idempotency_keys table)
  *   system.verification      — master DB (better-auth verification table)
  */
-import { lt } from 'drizzle-orm';
-import { events, idempotencyKeys } from '../pool.ts';
-import { verification } from '../master.ts';
-import { masterClient, poolClient } from '../client.ts';
+import { lt } from 'drizzle-orm'
+import { events, idempotencyKeys } from '../pool.ts'
+import { verification } from '../master.ts'
+import { masterClient, poolClient } from '../client.ts'
 
 export const system = {
   events: {
@@ -27,8 +27,8 @@ export const system = {
      * @param cutoff   Millisecond epoch timestamp; rows with createdAt < cutoff are deleted.
      */
     async purgeOlderThan(binding: D1Database, cutoff: number): Promise<void> {
-      const pool = poolClient(binding);
-      await pool.delete(events).where(lt(events.createdAt, cutoff));
+      const pool = poolClient(binding)
+      await pool.delete(events).where(lt(events.createdAt, cutoff))
     },
   },
 
@@ -40,8 +40,8 @@ export const system = {
      * @param now      Current time as ms epoch; rows with expiresAt < now are deleted.
      */
     async purgeExpired(binding: D1Database, now: number): Promise<void> {
-      const pool = poolClient(binding);
-      await pool.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now));
+      const pool = poolClient(binding)
+      await pool.delete(idempotencyKeys).where(lt(idempotencyKeys.expiresAt, now))
     },
   },
 
@@ -58,8 +58,8 @@ export const system = {
     async purgeExpired(masterBinding: D1Database, now: number): Promise<void> {
       // Wrap the binding in a synthetic env so masterClient can resolve it.
       // DB_MODE='single' means masterClient uses env.DB (no split).
-      const master = masterClient({ DB: masterBinding } as Env);
-      await master.delete(verification).where(lt(verification.expiresAt, new Date(now)));
+      const master = masterClient({ DB: masterBinding } as Env)
+      await master.delete(verification).where(lt(verification.expiresAt, new Date(now)))
     },
   },
-};
+}

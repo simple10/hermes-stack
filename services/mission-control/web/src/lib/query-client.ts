@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query'
 
 /** Singleton QueryClient — see UI design spec §10 for defaults rationale. */
 export const queryClient = new QueryClient({
@@ -9,4 +9,4 @@ export const queryClient = new QueryClient({
       retry: 1,
     },
   },
-});
+})

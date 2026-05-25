@@ -1,34 +1,34 @@
-import { authMutationKeys } from "@better-auth-ui/core"
+import { authMutationKeys } from '@better-auth-ui/core'
 import {
   useAuth,
   useFetchOptions,
   useSendVerificationEmail,
-  useSignInEmail
-} from "@better-auth-ui/react"
-import { useIsMutating } from "@tanstack/react-query"
-import { type SyntheticEvent, useState } from "react"
-import { toast } from "sonner"
+  useSignInEmail,
+} from '@better-auth-ui/react'
+import { useIsMutating } from '@tanstack/react-query'
+import { type SyntheticEvent, useState } from 'react'
+import { toast } from 'sonner'
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldGroup,
-  FieldSeparator
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@/lib/utils"
-import { ProviderButtons, type SocialLayout } from "./provider-buttons"
+  FieldSeparator,
+} from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Spinner } from '@/components/ui/spinner'
+import { cn } from '@/lib/utils'
+import { ProviderButtons, type SocialLayout } from './provider-buttons'
 
 export type SignInProps = {
   className?: string
   socialLayout?: SocialLayout
-  socialPosition?: "top" | "bottom"
+  socialPosition?: 'top' | 'bottom'
 }
 
 /**
@@ -39,11 +39,7 @@ export type SignInProps = {
  * @param socialPosition - Position of social provider buttons; `"top"` or `"bottom"`. Defaults to `"bottom"`.
  * @returns The rendered sign-in UI as a JSX element
  */
-export function SignIn({
-  className,
-  socialLayout,
-  socialPosition = "bottom"
-}: SignInProps) {
+export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: SignInProps) {
   const {
     authClient,
     basePaths,
@@ -55,58 +51,50 @@ export function SignIn({
     socialProviders,
     viewPaths,
     navigate,
-    Link
+    Link,
   } = useAuth()
 
   const { fetchOptions, resetFetchOptions } = useFetchOptions()
 
-  const [password, setPassword] = useState("")
+  const [password, setPassword] = useState('')
 
-  const { mutate: sendVerificationEmail } = useSendVerificationEmail(
-    authClient,
-    {
-      onSuccess: () => toast.success(localization.auth.verificationEmailSent)
-    }
-  )
+  const { mutate: sendVerificationEmail } = useSendVerificationEmail(authClient, {
+    onSuccess: () => toast.success(localization.auth.verificationEmailSent),
+  })
 
-  const { mutate: signInEmail, isPending: signInEmailPending } = useSignInEmail(
-    authClient,
-    {
-      onError: (error, { email }) => {
-        setPassword("")
+  const { mutate: signInEmail, isPending: signInEmailPending } = useSignInEmail(authClient, {
+    onError: (error, { email }) => {
+      setPassword('')
 
-        if (error.error?.code === "EMAIL_NOT_VERIFIED") {
-          toast.error(error.error?.message || error.message, {
-            action: {
-              label: localization.auth.resend,
-              onClick: () =>
-                sendVerificationEmail({
-                  email,
-                  callbackURL: `${baseURL}${redirectTo}`
-                })
-            }
-          })
-        } else {
-          toast.error(error.error?.message || error.message)
-        }
+      if (error.error?.code === 'EMAIL_NOT_VERIFIED') {
+        toast.error(error.error?.message || error.message, {
+          action: {
+            label: localization.auth.resend,
+            onClick: () =>
+              sendVerificationEmail({
+                email,
+                callbackURL: `${baseURL}${redirectTo}`,
+              }),
+          },
+        })
+      } else {
+        toast.error(error.error?.message || error.message)
+      }
 
-        resetFetchOptions()
-      },
-      onSuccess: () => navigate({ to: redirectTo })
-    }
-  )
+      resetFetchOptions()
+    },
+    onSuccess: () => navigate({ to: redirectTo }),
+  })
 
   const signInMutating = useIsMutating({
-    mutationKey: authMutationKeys.signIn.all
+    mutationKey: authMutationKeys.signIn.all,
   })
   const signUpMutating = useIsMutating({
-    mutationKey: authMutationKeys.signUp.all
+    mutationKey: authMutationKeys.signUp.all,
   })
   const isPending = signInMutating + signUpMutating > 0
 
-  const Captcha = plugins.find(
-    (plugin) => plugin.captchaComponent
-  )?.captchaComponent
+  const Captcha = plugins.find((plugin) => plugin.captchaComponent)?.captchaComponent
 
   const [fieldErrors, setFieldErrors] = useState<{
     email?: string
@@ -117,31 +105,28 @@ export function SignIn({
     e.preventDefault()
 
     const formData = new FormData(e.currentTarget)
-    const email = formData.get("email") as string
-    const rememberMe = formData.get("rememberMe") === "on"
+    const email = formData.get('email') as string
+    const rememberMe = formData.get('rememberMe') === 'on'
 
     signInEmail({
       email,
       password,
       ...(emailAndPassword?.rememberMe ? { rememberMe } : {}),
-      fetchOptions
+      fetchOptions,
     })
   }
 
-  const showSeparator =
-    emailAndPassword?.enabled && socialProviders && socialProviders.length > 0
+  const showSeparator = emailAndPassword?.enabled && socialProviders && socialProviders.length > 0
 
   return (
-    <Card className={cn("w-full max-w-sm", className)}>
+    <Card className={cn('w-full max-w-sm', className)}>
       <CardHeader>
-        <CardTitle className="text-xl font-semibold">
-          {localization.auth.signIn}
-        </CardTitle>
+        <CardTitle className="text-xl font-semibold">{localization.auth.signIn}</CardTitle>
       </CardHeader>
 
       <CardContent>
         <div className="flex flex-col gap-6">
-          {socialPosition === "top" && (
+          {socialPosition === 'top' && (
             <>
               {socialProviders && socialProviders.length > 0 && (
                 <ProviderButtons socialLayout={socialLayout} />
@@ -172,7 +157,7 @@ export function SignIn({
                     onChange={() => {
                       setFieldErrors((prev) => ({
                         ...prev,
-                        email: undefined
+                        email: undefined,
                       }))
                     }}
                     onInvalid={(e) => {
@@ -180,7 +165,7 @@ export function SignIn({
 
                       setFieldErrors((prev) => ({
                         ...prev,
-                        email: (e.target as HTMLInputElement).validationMessage
+                        email: (e.target as HTMLInputElement).validationMessage,
                       }))
                     }}
                     aria-invalid={!!fieldErrors.email}
@@ -203,7 +188,7 @@ export function SignIn({
 
                       setFieldErrors((prev) => ({
                         ...prev,
-                        password: undefined
+                        password: undefined,
                       }))
                     }}
                     placeholder={localization.auth.passwordPlaceholder}
@@ -216,8 +201,7 @@ export function SignIn({
 
                       setFieldErrors((prev) => ({
                         ...prev,
-                        password: (e.target as HTMLInputElement)
-                          .validationMessage
+                        password: (e.target as HTMLInputElement).validationMessage,
                       }))
                     }}
                     aria-invalid={!!fieldErrors.password}
@@ -229,25 +213,16 @@ export function SignIn({
                 {emailAndPassword.rememberMe && (
                   <Field className="my-1">
                     <div className="flex items-center gap-3">
-                      <Checkbox
-                        id="rememberMe"
-                        name="rememberMe"
-                        disabled={isPending}
-                      />
+                      <Checkbox id="rememberMe" name="rememberMe" disabled={isPending} />
 
-                      <Label
-                        htmlFor="rememberMe"
-                        className="cursor-pointer text-sm font-normal"
-                      >
+                      <Label htmlFor="rememberMe" className="cursor-pointer text-sm font-normal">
                         {localization.auth.rememberMe}
                       </Label>
                     </div>
                   </Field>
                 )}
 
-                {Captcha && (
-                  <div className="flex justify-center">{Captcha}</div>
-                )}
+                {Captcha && <div className="flex justify-center">{Captcha}</div>}
 
                 <div className="flex flex-col gap-3">
                   <Button type="submit" disabled={isPending}>
@@ -258,18 +233,15 @@ export function SignIn({
 
                   {plugins.flatMap((plugin) =>
                     (plugin.authButtons ?? []).map((AuthButton, index) => (
-                      <AuthButton
-                        key={`${plugin.id}-${index.toString()}`}
-                        view="signIn"
-                      />
-                    ))
+                      <AuthButton key={`${plugin.id}-${index.toString()}`} view="signIn" />
+                    )),
                   )}
                 </div>
               </FieldGroup>
             </form>
           )}
 
-          {socialPosition === "bottom" && (
+          {socialPosition === 'bottom' && (
             <>
               {showSeparator && (
                 <FieldSeparator className="*:data-[slot=field-separator-content]:bg-card text-xs flex items-center">
@@ -296,7 +268,7 @@ export function SignIn({
 
           {emailAndPassword?.enabled && (
             <FieldDescription className="text-center">
-              {localization.auth.needToCreateAnAccount}{" "}
+              {localization.auth.needToCreateAnAccount}{' '}
               <Link
                 href={`${basePaths.auth}/${viewPaths.auth.signUp}`}
                 className="underline underline-offset-4"

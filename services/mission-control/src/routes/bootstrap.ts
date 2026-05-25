@@ -15,70 +15,77 @@
  *
  * Once any user exists in the master DB, this endpoint returns 409.
  */
-import { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
-import { masterClient } from '../db/client.ts';
-import { organization, member, user as userTable } from '../db/master.ts';
-import { createAuth } from '../auth/config.ts';
-import { errorResponse, HttpError } from '../errors.ts';
-import { makeId } from '../ids.ts';
-import { mintApiKey } from '../auth/api-keys.ts';
-import { lookupAnyUserExists } from '../db/repos/users.ts';
-import { BootstrapBody as bodySchema } from '../schemas/bootstrap.ts';
+import { Hono } from 'hono'
+import { eq } from 'drizzle-orm'
+import { masterClient } from '../db/client.ts'
+import { organization, member, user as userTable } from '../db/master.ts'
+import { createAuth } from '../auth/config.ts'
+import { errorResponse, HttpError } from '../errors.ts'
+import { makeId } from '../ids.ts'
+import { mintApiKey } from '../auth/api-keys.ts'
+import { lookupAnyUserExists } from '../db/repos/users.ts'
+import { BootstrapBody as bodySchema } from '../schemas/bootstrap.ts'
 
-export const bootstrap = new Hono<{ Bindings: Env }>();
+export const bootstrap = new Hono<{ Bindings: Env }>()
 
 // ---------------------------------------------------------------------------
 
 bootstrap.post('/', async (c) => {
   try {
-    const env = c.env;
+    const env = c.env
 
     // Gate 1: MC_ADMIN_TOKEN must be configured.
     if (!env.MC_ADMIN_TOKEN) {
-      return errorResponse(c, new HttpError(403, 'bootstrap.disabled', 'MC_ADMIN_TOKEN not configured'));
+      return errorResponse(
+        c,
+        new HttpError(403, 'bootstrap.disabled', 'MC_ADMIN_TOKEN not configured'),
+      )
     }
 
     // Gate 2: caller must present the correct token.
-    const adminToken = c.req.header('x-mc-admin-token');
+    const adminToken = c.req.header('x-mc-admin-token')
     if (adminToken !== env.MC_ADMIN_TOKEN) {
-      return errorResponse(c, new HttpError(403, 'bootstrap.unauthorized', 'Invalid admin token'));
+      return errorResponse(c, new HttpError(403, 'bootstrap.unauthorized', 'Invalid admin token'))
     }
 
     // Gate 3: no users may exist yet.
-    const anyUserExists = await lookupAnyUserExists(env);
+    const anyUserExists = await lookupAnyUserExists(env)
     if (anyUserExists) {
       return errorResponse(
         c,
-        new HttpError(409, 'bootstrap.already_done', 'A user already exists; bootstrap endpoint is closed'),
-      );
+        new HttpError(
+          409,
+          'bootstrap.already_done',
+          'A user already exists; bootstrap endpoint is closed',
+        ),
+      )
     }
 
     // Validate body.
     const raw = await c.req.json().catch(() => {
-      throw new HttpError(400, 'bootstrap.bad_request', 'Request body must be valid JSON');
-    });
-    const input = bodySchema.safeParse(raw);
+      throw new HttpError(400, 'bootstrap.bad_request', 'Request body must be valid JSON')
+    })
+    const input = bodySchema.safeParse(raw)
     if (!input.success) {
       throw new HttpError(
         400,
         'bootstrap.validation_error',
         input.error.issues[0]?.message ?? 'Validation failed',
         input.error.issues,
-      );
+      )
     }
-    const { email, password, name, orgName, orgSlug } = input.data;
+    const { email, password, name, orgName, orgSlug } = input.data
 
-    const auth = createAuth(env);
+    const auth = createAuth(env)
 
     // Step 1: Sign up the user via better-auth (creates user + account rows).
     const signUp = await auth.api.signUpEmail({
       body: { email, password, name },
-    });
+    })
     if (!signUp || !signUp.user) {
-      throw new HttpError(500, 'bootstrap.signup_failed', 'sign-up failed');
+      throw new HttpError(500, 'bootstrap.signup_failed', 'sign-up failed')
     }
-    const userId = signUp.user.id;
+    const userId = signUp.user.id
 
     // Step 1.5: Mark the bootstrap user as email-verified.
     //
@@ -86,13 +93,13 @@ bootstrap.post('/', async (c) => {
     // block sign-in for this just-created user until they click a verification
     // link. The operator running bootstrap holds MC_ADMIN_TOKEN, so the email
     // they typed is presumed verified. Skip the round-trip.
-    const master = masterClient(env); // repo-escape: bootstrap runs before ctx exists
-    const now = new Date();
+    const master = masterClient(env) // repo-escape: bootstrap runs before ctx exists
+    const now = new Date()
 
     await master
       .update(userTable)
       .set({ emailVerified: true, updatedAt: now })
-      .where(eq(userTable.id, userId));
+      .where(eq(userTable.id, userId))
 
     // Step 2: Insert organization + member directly via Drizzle.
     //
@@ -100,8 +107,8 @@ bootstrap.post('/', async (c) => {
     // repo-escape: bootstrap bypasses better-auth's createOrganization adapter
     // to avoid a double-insert bug (adapter inserts member, endpoint calls
     // createMember again, violating UNIQUE(organization_id, user_id)).
-    const orgId = makeId('org');
-    const memberId = makeId('mbr');
+    const orgId = makeId('org')
+    const memberId = makeId('mbr')
 
     await master.insert(organization).values({
       id: orgId,
@@ -109,7 +116,7 @@ bootstrap.post('/', async (c) => {
       slug: orgSlug,
       createdAt: now,
       updatedAt: now,
-    });
+    })
 
     await master.insert(member).values({
       id: memberId,
@@ -117,7 +124,7 @@ bootstrap.post('/', async (c) => {
       userId,
       role: 'owner',
       createdAt: now,
-    });
+    })
 
     // Step 3: Mint a PAT directly via mintApiKey helper.
     //
@@ -130,7 +137,7 @@ bootstrap.post('/', async (c) => {
       userId,
       orgId,
       principalType: 'pat',
-    });
+    })
 
     return c.json(
       {
@@ -139,8 +146,8 @@ bootstrap.post('/', async (c) => {
         pat: rawKey,
       },
       201,
-    );
+    )
   } catch (e) {
-    return errorResponse(c, e);
+    return errorResponse(c, e)
   }
-});
+})

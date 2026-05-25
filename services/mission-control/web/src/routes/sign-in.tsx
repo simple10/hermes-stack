@@ -1,13 +1,13 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { z } from 'zod';
-import { SignIn } from '@/components/auth/sign-in';
+import { createFileRoute } from '@tanstack/react-router'
+import { z } from 'zod'
+import { SignIn } from '@/components/auth/sign-in'
 
-const searchSchema = z.object({ redirect: z.string().optional() });
+const searchSchema = z.object({ redirect: z.string().optional() })
 
 export const Route = createFileRoute('/sign-in')({
   validateSearch: searchSchema,
   component: SignInRoute,
-});
+})
 
 function SignInRoute() {
   return (
@@ -16,5 +16,5 @@ function SignInRoute() {
         <SignIn />
       </div>
     </div>
-  );
+  )
 }

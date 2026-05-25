@@ -29,13 +29,16 @@ Today every route handler builds its own Drizzle query with hand-rolled `eq(tabl
 
 ```ts
 // src/routes/projects.ts — typical pattern, repeated ~50 times across handlers
-const rows = await ctx.pool.select().from(projects)
+const rows = await ctx.pool
+  .select()
+  .from(projects)
   .where(and(eq(projects.orgId, ctx.orgId), eq(projects.id, id), active(projects)))
-  .limit(1);
-const project = rows[0];
+  .limit(1)
+const project = rows[0]
 ```
 
 Failure modes:
+
 1. **Forgetting `eq(table.orgId, ctx.orgId)`** — returns rows across orgs in the same pool. Silent leak.
 2. **Forgetting `active(table)`** — returns soft-deleted rows. Subtle bug.
 3. **Wrong org id passed (URL param vs auth context)** — TS can't catch; both are `string`.
@@ -73,18 +76,18 @@ Each `xxxRepo(ctx: AuthContext)` returns an object with:
 ```ts
 type Repo<T extends SQLiteTable> = {
   // Named common operations — pre-baked, return typed rows
-  findById(id: string): Promise<Row<T> | null>;
-  list(filter?: FilterOptions): Promise<Row<T>[]>;
-  insert(values: InsertInput<T>): Promise<Row<T>>;
-  update(id: string, patch: UpdateInput<T>): Promise<Row<T> | null>;
-  softDelete(id: string): Promise<Row<T> | null>;
+  findById(id: string): Promise<Row<T> | null>
+  list(filter?: FilterOptions): Promise<Row<T>[]>
+  insert(values: InsertInput<T>): Promise<Row<T>>
+  update(id: string, patch: UpdateInput<T>): Promise<Row<T> | null>
+  softDelete(id: string): Promise<Row<T> | null>
 
   // Escape hatches for ad-hoc queries — the scope WHERE is exposed
   // so callers can reuse it (e.g., joins from another repo).
-  scoped(): SelectBuilder;   // returns `pool.select().from(table).where(scope)`
-  scope: SQL;                // the SQL fragment (org_id + active + principal filter)
-  table: T;                  // the Drizzle table object — for joins
-};
+  scoped(): SelectBuilder // returns `pool.select().from(table).where(scope)`
+  scope: SQL // the SQL fragment (org_id + active + principal filter)
+  table: T // the Drizzle table object — for joins
+}
 ```
 
 Per-resource repos add bespoke methods where useful (e.g., `tasks.byAgentReady()`, `agents.hasActiveTasks(id)`, `apiKeys.mintForAgent(...)`).
@@ -94,6 +97,7 @@ Per-resource repos add bespoke methods where useful (e.g., `tasks.byAgentReady()
 `scope` = `and(eq(table.orgId, ctx.orgId), active(table), principalFilter)`
 
 Where `principalFilter` is:
+
 - For `tasks` when `ctx.principal.type === 'agent'`: `eq(tasks.agentId, ctx.principal.id)`
 - For `external_refs` when `ctx.principal.type === 'agent'`: `eq(externalRefs.sourceId, ctx.principal.id)` — only refs the agent itself posted
 - For `external_refs` when `ctx.principal.type === 'connector'`: `eq(externalRefs.sourceId, ctx.principal.id)`
@@ -113,9 +117,9 @@ Update payload types are `Omit<Update<T>, 'id' | 'orgId' | 'createdAt' | 'delete
 
 ```ts
 // src/auth/types.ts
-declare const orgIdBrand: unique symbol;
-export type OrgId = string & { readonly [orgIdBrand]: never };
-export const OrgId = (s: string): OrgId => s as OrgId;
+declare const orgIdBrand: unique symbol
+export type OrgId = string & { readonly [orgIdBrand]: never }
+export const OrgId = (s: string): OrgId => s as OrgId
 ```
 
 `AuthContext.orgId: OrgId` (was `string`). Anywhere that accepts an `orgId` parameter from URL/body params is typed as `string` and must explicitly cast via a validator — preventing "I'll just pass `req.body.org_id`" footguns.
@@ -171,114 +175,128 @@ Tests don't change. They hit HTTP routes; the underlying DAL is invisible to the
 
 ```ts
 // src/db/repos/tasks.ts
-import { eq, and, gt, lt, desc, asc, sql, type SQL } from 'drizzle-orm';
-import { tasks } from '../pool.ts';
-import { active } from '../helpers.ts';
-import type { AuthContext } from '../../auth/types.ts';
-import { emitEvent } from '../../events/emit.ts';
-import { makeId } from '../../ids.ts';
-import type { TaskStatus } from '../../state-machine/tasks.ts';
+import { eq, and, gt, lt, desc, asc, sql, type SQL } from 'drizzle-orm'
+import { tasks } from '../pool.ts'
+import { active } from '../helpers.ts'
+import type { AuthContext } from '../../auth/types.ts'
+import { emitEvent } from '../../events/emit.ts'
+import { makeId } from '../../ids.ts'
+import type { TaskStatus } from '../../state-machine/tasks.ts'
 
-type TaskRow = typeof tasks.$inferSelect;
-type TaskInsertInput = Omit<typeof tasks.$inferInsert,
-  'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'deletedByType' | 'deletedById'>;
-type TaskUpdateInput = Partial<Omit<typeof tasks.$inferInsert,
-  'id' | 'orgId' | 'createdAt' | 'deletedAt' | 'deletedByType' | 'deletedById'>>;
+type TaskRow = typeof tasks.$inferSelect
+type TaskInsertInput = Omit<
+  typeof tasks.$inferInsert,
+  'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'deletedByType' | 'deletedById'
+>
+type TaskUpdateInput = Partial<
+  Omit<
+    typeof tasks.$inferInsert,
+    'id' | 'orgId' | 'createdAt' | 'deletedAt' | 'deletedByType' | 'deletedById'
+  >
+>
 
 export interface TaskListFilter {
-  projectId?: string;
-  agentId?: string;
-  statuses?: TaskStatus[];
-  updatedSince?: number;
-  limit?: number;
-  cursor?: { updatedAt: number; id: string };  // already decoded by caller
+  projectId?: string
+  agentId?: string
+  statuses?: TaskStatus[]
+  updatedSince?: number
+  limit?: number
+  cursor?: { updatedAt: number; id: string } // already decoded by caller
 }
 
 export function tasksRepo(ctx: AuthContext) {
   // Per-principal filter — agent role only sees its own tasks
-  const principalFilter = ctx.principal.type === 'agent'
-    ? eq(tasks.agentId, ctx.principal.id)
-    : undefined;
+  const principalFilter =
+    ctx.principal.type === 'agent' ? eq(tasks.agentId, ctx.principal.id) : undefined
 
-  const scope = and(eq(tasks.orgId, ctx.orgId), active(tasks), principalFilter);
+  const scope = and(eq(tasks.orgId, ctx.orgId), active(tasks), principalFilter)
 
   return {
     async findById(id: string): Promise<TaskRow | null> {
-      const rows = await ctx.pool.select().from(tasks)
-        .where(and(scope, eq(tasks.id, id))).limit(1);
-      return rows[0] ?? null;
+      const rows = await ctx.pool
+        .select()
+        .from(tasks)
+        .where(and(scope, eq(tasks.id, id)))
+        .limit(1)
+      return rows[0] ?? null
     },
 
     async list(filter: TaskListFilter = {}): Promise<TaskRow[]> {
-      const conditions: SQL[] = [scope!];
-      if (filter.projectId)   conditions.push(eq(tasks.projectId, filter.projectId));
-      if (filter.agentId)     conditions.push(eq(tasks.agentId, filter.agentId));
-      if (filter.statuses?.length)
-        conditions.push(sql`${tasks.status} IN ${filter.statuses}`);
-      if (filter.updatedSince)
-        conditions.push(gt(tasks.updatedAt, filter.updatedSince));
-      if (filter.cursor) conditions.push(
-        // keyset: (updatedAt, id) < cursor
-        sql`(${tasks.updatedAt}, ${tasks.id}) < (${filter.cursor.updatedAt}, ${filter.cursor.id})`,
-      );
-      return ctx.pool.select().from(tasks)
+      const conditions: SQL[] = [scope!]
+      if (filter.projectId) conditions.push(eq(tasks.projectId, filter.projectId))
+      if (filter.agentId) conditions.push(eq(tasks.agentId, filter.agentId))
+      if (filter.statuses?.length) conditions.push(sql`${tasks.status} IN ${filter.statuses}`)
+      if (filter.updatedSince) conditions.push(gt(tasks.updatedAt, filter.updatedSince))
+      if (filter.cursor)
+        conditions.push(
+          // keyset: (updatedAt, id) < cursor
+          sql`(${tasks.updatedAt}, ${tasks.id}) < (${filter.cursor.updatedAt}, ${filter.cursor.id})`,
+        )
+      return ctx.pool
+        .select()
+        .from(tasks)
         .where(and(...conditions))
         .orderBy(desc(tasks.updatedAt), desc(tasks.id))
-        .limit(filter.limit ?? 50);
+        .limit(filter.limit ?? 50)
     },
 
     async insert(values: TaskInsertInput): Promise<TaskRow> {
-      const id = makeId('task');
-      const now = Date.now();
+      const id = makeId('task')
+      const now = Date.now()
       const row = {
         ...values,
         id,
-        orgId: ctx.orgId,    // STAMPED
+        orgId: ctx.orgId, // STAMPED
         createdAt: now,
         updatedAt: now,
-      };
-      const inserted = await ctx.pool.insert(tasks).values(row).returning();
-      return inserted[0]!;
+      }
+      const inserted = await ctx.pool.insert(tasks).values(row).returning()
+      return inserted[0]!
     },
 
     async update(id: string, patch: TaskUpdateInput): Promise<TaskRow | null> {
-      const updated = await ctx.pool.update(tasks)
+      const updated = await ctx.pool
+        .update(tasks)
         .set({ ...patch, updatedAt: Date.now() })
         .where(and(scope, eq(tasks.id, id)))
-        .returning();
-      return updated[0] ?? null;
+        .returning()
+      return updated[0] ?? null
     },
 
     async softDelete(id: string): Promise<TaskRow | null> {
-      const updated = await ctx.pool.update(tasks)
+      const updated = await ctx.pool
+        .update(tasks)
         .set({
           deletedAt: Date.now(),
           deletedByType: ctx.principal.type,
           deletedById: ctx.principal.id,
         })
         .where(and(scope, eq(tasks.id, id)))
-        .returning();
-      return updated[0] ?? null;
+        .returning()
+      return updated[0] ?? null
     },
 
     // Resource-specific: count active tasks for an agent (used by agent.delete)
     async countActiveByAgent(agentId: string): Promise<number> {
-      const result = await ctx.pool.select({ count: sql<number>`count(*)` })
+      const result = await ctx.pool
+        .select({ count: sql<number>`count(*)` })
         .from(tasks)
-        .where(and(
-          eq(tasks.orgId, ctx.orgId),
-          eq(tasks.agentId, agentId),
-          active(tasks),
-          sql`${tasks.status} IN ('ready','in_progress','blocked')`,
-        ));
-      return result[0]?.count ?? 0;
+        .where(
+          and(
+            eq(tasks.orgId, ctx.orgId),
+            eq(tasks.agentId, agentId),
+            active(tasks),
+            sql`${tasks.status} IN ('ready','in_progress','blocked')`,
+          ),
+        )
+      return result[0]?.count ?? 0
     },
 
     // Escape hatch — raw builder pre-scoped to the org
     scoped: () => ctx.pool.select().from(tasks).where(scope),
     scope: scope!,
     table: tasks,
-  };
+  }
 }
 ```
 
@@ -331,21 +349,29 @@ Repos throw **typed domain errors** — never HTTP-aware. Route handlers catch t
 ```ts
 // src/db/repos/_errors.ts
 export class DuplicateError extends Error {
-  constructor(public resource: string, public details: Record<string, unknown> = {}) {
-    super(`${resource} already exists`);
-    this.name = 'DuplicateError';
+  constructor(
+    public resource: string,
+    public details: Record<string, unknown> = {},
+  ) {
+    super(`${resource} already exists`)
+    this.name = 'DuplicateError'
   }
 }
 
 export class ForbiddenError extends Error {
-  constructor(public code: string, message: string, public details: Record<string, unknown> = {}) {
-    super(message);
-    this.name = 'ForbiddenError';
+  constructor(
+    public code: string,
+    message: string,
+    public details: Record<string, unknown> = {},
+  ) {
+    super(message)
+    this.name = 'ForbiddenError'
   }
 }
 ```
 
 How each layer signals:
+
 - **Not found**: repos return `null` (or `[]`). Handler maps null → 404 with the right error code (`task.not_found`, etc.).
 - **Duplicate**: repos throw `DuplicateError('task', { existing_task_id })`. Handler maps → `HttpError(409, 'task.duplicate_idempotency_key', ...)`.
 - **Forbidden** (machine principal trying to act outside its scope, e.g. agent posting external_ref with someone else's source_id): repo throws `ForbiddenError('external_ref.source_id_forbidden', ...)`. Handler maps → `HttpError(403, ...)`.
@@ -355,16 +381,19 @@ Pattern in handlers:
 
 ```ts
 try {
-  const task = await db.tasks(ctx).insert(values);
-  return c.json({ task: serializeRow(task) }, 201);
+  const task = await db.tasks(ctx).insert(values)
+  return c.json({ task: serializeRow(task) }, 201)
 } catch (e) {
   if (e instanceof DuplicateError) {
-    return errorResponse(c, new HttpError(409, 'task.duplicate_idempotency_key', e.message, e.details));
+    return errorResponse(
+      c,
+      new HttpError(409, 'task.duplicate_idempotency_key', e.message, e.details),
+    )
   }
   if (e instanceof ForbiddenError) {
-    return errorResponse(c, new HttpError(403, e.code, e.message, e.details));
+    return errorResponse(c, new HttpError(403, e.code, e.message, e.details))
   }
-  throw e;
+  throw e
 }
 ```
 
@@ -374,34 +403,35 @@ Repos stay HTTP-agnostic; handlers translate domain errors into HTTP. Same `Http
 
 ## What stays out of repos
 
-| Concern | Stays in |
-|---|---|
-| Auth (resolving the bearer, building `ctx`) | `src/auth/middleware.ts` |
-| Role gates (`requireMember`, `requireMachine`) | `src/auth/middleware.ts` |
-| Body validation | Per-route, with Zod |
-| State machine validation | `src/state-machine/tasks.ts` + tasks route |
-| Saga orchestration (cross-DB / cross-resource) | Route handlers |
-| Event emission | Route handlers (call `emitEvent` after the repo write) |
-| HTTP response shaping (status codes, headers, ISO timestamps) | Route handlers + `serializeRow` |
-| Idempotency-key cache layer | `src/idempotency.ts` (separate concern) |
+| Concern                                                       | Stays in                                               |
+| ------------------------------------------------------------- | ------------------------------------------------------ |
+| Auth (resolving the bearer, building `ctx`)                   | `src/auth/middleware.ts`                               |
+| Role gates (`requireMember`, `requireMachine`)                | `src/auth/middleware.ts`                               |
+| Body validation                                               | Per-route, with Zod                                    |
+| State machine validation                                      | `src/state-machine/tasks.ts` + tasks route             |
+| Saga orchestration (cross-DB / cross-resource)                | Route handlers                                         |
+| Event emission                                                | Route handlers (call `emitEvent` after the repo write) |
+| HTTP response shaping (status codes, headers, ISO timestamps) | Route handlers + `serializeRow`                        |
+| Idempotency-key cache layer                                   | `src/idempotency.ts` (separate concern)                |
 
 ---
 
 ## Migration risk register
 
-| Risk | Mitigation |
-|---|---|
-| Subtle behavior change between hand-rolled query and repo method | Per-route tests run after each migration; any failure investigated before moving on |
-| Repo adds an inadvertent extra filter (e.g., principal filter applied where it shouldn't) | Per-repo unit tests cover each principal type explicitly |
-| Escape hatch overused, eroding the benefit | ESLint rule + code review; "if you escape, write a method instead" |
-| Cross-repo transactions / joins become awkward | Repos expose `.table` and `.scope` so joins can be hand-rolled when needed; system repo handles cross-cutting bulk |
-| Branded OrgId breaks existing call sites | Compiler errors will point to every site; mechanical fix (cast at the auth boundary, propagate brand from there) |
+| Risk                                                                                      | Mitigation                                                                                                         |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Subtle behavior change between hand-rolled query and repo method                          | Per-route tests run after each migration; any failure investigated before moving on                                |
+| Repo adds an inadvertent extra filter (e.g., principal filter applied where it shouldn't) | Per-repo unit tests cover each principal type explicitly                                                           |
+| Escape hatch overused, eroding the benefit                                                | ESLint rule + code review; "if you escape, write a method instead"                                                 |
+| Cross-repo transactions / joins become awkward                                            | Repos expose `.table` and `.scope` so joins can be hand-rolled when needed; system repo handles cross-cutting bulk |
+| Branded OrgId breaks existing call sites                                                  | Compiler errors will point to every site; mechanical fix (cast at the auth boundary, propagate brand from there)   |
 
 ---
 
 ## What v1 ships
 
 After this refactor:
+
 - ✅ `src/db/repos/{tasks,projects,agents,connectors,comments,external-refs,events,api-keys,users,orgs,members,system}.ts`
 - ✅ `src/db/index.ts` facade
 - ✅ Every route handler under `src/routes/` uses `db.X(ctx).Y(...)` exclusively — no `ctx.pool.*` calls
@@ -411,6 +441,7 @@ After this refactor:
 - ✅ All 378 existing integration tests still pass
 
 Deferred to follow-up:
+
 - Repo-level audit logging (every mutation logged with principal + table + op)
 - Repo-level query telemetry (latency per method)
 - Per-request memoization (`findById` dedupe within one request)
@@ -452,7 +483,7 @@ A pre-implementation sub-agent review surfaced concrete issues. Resolutions:
    - `ctx.pool.{select|insert|update|delete}`
    - `masterClient(...).{select|insert|update|delete}` (regardless of arg shape)
    - `c.env.DB`, `c.env.MASTER_DB`, `c.env.POOL_*` (direct binding access)
-   `// repo-escape: <reason>` comment exempts the next line. Health check exempted via path-level allowlist.
+     `// repo-escape: <reason>` comment exempts the next line. Health check exempted via path-level allowlist.
 
 7. **`test/helpers/orgs.ts` needs `OrgId` ripple in Task 10.**
    **Resolution:** Add to Task 10's file list. `createOrgFixture` returns `{userId: string, orgId: OrgId, pat: string}`; tests using the orgId in repo calls get the brand automatically.
@@ -462,12 +493,14 @@ A pre-implementation sub-agent review surfaced concrete issues. Resolutions:
 
 9. **`users` repo `findById` JOIN through `member`.**
    **Resolution:** Repo's `findById(userId)` does:
+
    ```ts
    select user.* from user
    inner join member on member.user_id = user.id
    where member.organization_id = ctx.orgId AND user.id = userId
    limit 1
    ```
+
    Documented in the repo file.
 
 10. **Per-repo unit tests will add 30-60s to CI.**

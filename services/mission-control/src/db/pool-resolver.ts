@@ -11,17 +11,17 @@
  * Cloudflare Workers.  In self-host / wrangler-dev mode it's effectively
  * per-process.
  */
-import { eq } from 'drizzle-orm';
-import { organization } from './master.ts';
-import { masterClient, poolClient } from './client.ts';
-import { HttpError } from '../errors.ts';
+import { eq } from 'drizzle-orm'
+import { organization } from './master.ts'
+import { masterClient, poolClient } from './client.ts'
+import { HttpError } from '../errors.ts'
 
 // ---------------------------------------------------------------------------
 // In-isolate TTL cache: orgId → { tenantPoolId, expiresAt }
 // ---------------------------------------------------------------------------
 
-const cache = new Map<string, { tenantPoolId: string; expiresAt: number }>();
-const TTL_MS = 60_000; // 60 seconds
+const cache = new Map<string, { tenantPoolId: string; expiresAt: number }>()
+const TTL_MS = 60_000 // 60 seconds
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -35,33 +35,33 @@ const TTL_MS = 60_000; // 60 seconds
  *   503 pool.binding_missing — wrangler.toml / env doesn't have the binding
  */
 export async function resolvePoolForOrg(env: Env, orgId: string) {
-  const now = Date.now();
-  let entry = cache.get(orgId);
+  const now = Date.now()
+  let entry = cache.get(orgId)
 
   if (!entry || entry.expiresAt < now) {
     const orgRows = await masterClient(env)
       .select({ tenantPoolId: organization.tenantPoolId })
       .from(organization)
       .where(eq(organization.id, orgId))
-      .limit(1);
-    const org = orgRows[0];
+      .limit(1)
+    const org = orgRows[0]
     if (!org) {
-      throw new HttpError(404, 'auth.org_not_found', `Organization ${orgId} not found`);
+      throw new HttpError(404, 'auth.org_not_found', `Organization ${orgId} not found`)
     }
-    entry = { tenantPoolId: org.tenantPoolId, expiresAt: now + TTL_MS };
-    cache.set(orgId, entry);
+    entry = { tenantPoolId: org.tenantPoolId, expiresAt: now + TTL_MS }
+    cache.set(orgId, entry)
   }
 
-  const binding = resolveBinding(env, entry.tenantPoolId);
+  const binding = resolveBinding(env, entry.tenantPoolId)
   if (!binding) {
     throw new HttpError(
       503,
       'pool.binding_missing',
       `Pool binding for tenantPoolId '${entry.tenantPoolId}' is not configured. ` +
         'Add the binding to wrangler.toml and redeploy.',
-    );
+    )
   }
-  return poolClient(binding);
+  return poolClient(binding)
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ export async function resolvePoolForOrg(env: Env, orgId: string) {
 // ---------------------------------------------------------------------------
 
 /** Env plus runtime POOL_* bindings (not all are listed in wrangler types). */
-type EnvWithPoolBindings = Env & Record<string, D1Database | undefined>;
+type EnvWithPoolBindings = Env & Record<string, D1Database | undefined>
 
 /**
  * Maps a tenantPoolId to the D1 binding on env.
@@ -83,11 +83,11 @@ type EnvWithPoolBindings = Env & Record<string, D1Database | undefined>;
 function resolveBinding(env: Env, tenantPoolId: string): D1Database | null {
   if (env.DB_MODE !== 'split') {
     // Single-DB mode: master and pool are the same binding.
-    return env.DB ?? null;
+    return env.DB ?? null
   }
-  const key = 'POOL_' + tenantPoolId.toUpperCase().replace(/-/g, '_');
-  const bindings = env as EnvWithPoolBindings;
-  return bindings[key] ?? null;
+  const key = 'POOL_' + tenantPoolId.toUpperCase().replace(/-/g, '_')
+  const bindings = env as EnvWithPoolBindings
+  return bindings[key] ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -96,5 +96,5 @@ function resolveBinding(env: Env, tenantPoolId: string): D1Database | null {
 
 /** Wipe the in-isolate cache. Call in beforeEach in pool-resolver tests. */
 export function _clearPoolCache(): void {
-  cache.clear();
+  cache.clear()
 }

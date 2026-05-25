@@ -1,6 +1,6 @@
-import { Link } from '@tanstack/react-router';
-import { Separator } from '@/components/ui/separator';
-import { ListTodo, Activity, FolderKanban, Bot, Plug, Settings } from 'lucide-react';
+import { Link } from '@tanstack/react-router'
+import { Separator } from '@/components/ui/separator'
+import { ListTodo, Activity, FolderKanban, Bot, Plug, Settings } from 'lucide-react'
 
 const NAV = [
   { to: '/tasks', label: 'Tasks', icon: ListTodo },
@@ -8,14 +8,14 @@ const NAV = [
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/connectors', label: 'Connectors', icon: Plug },
-];
+]
 
 export function Sidebar() {
   return (
     <aside className="w-56 border-r bg-muted/30">
       <nav className="p-4 space-y-1">
         {NAV.map((l) => {
-          const Icon = l.icon;
+          const Icon = l.icon
           return (
             <Link
               key={l.to}
@@ -26,7 +26,7 @@ export function Sidebar() {
               <Icon className="h-4 w-4" />
               {l.label}
             </Link>
-          );
+          )
         })}
         <Separator className="my-2" />
         <Link
@@ -38,5 +38,5 @@ export function Sidebar() {
         </Link>
       </nav>
     </aside>
-  );
+  )
 }

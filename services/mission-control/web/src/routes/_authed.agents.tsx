@@ -1,10 +1,10 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { AgentsTable } from '@/components/agents/agents-table';
-import { RegisterAgentDialog } from '@/components/agents/register-agent-dialog';
+import { createFileRoute } from '@tanstack/react-router'
+import { AgentsTable } from '@/components/agents/agents-table'
+import { RegisterAgentDialog } from '@/components/agents/register-agent-dialog'
 
 export const Route = createFileRoute('/_authed/agents')({
   component: AgentsRoute,
-});
+})
 
 function AgentsRoute() {
   return (
@@ -15,5 +15,5 @@ function AgentsRoute() {
       </div>
       <AgentsTable />
     </div>
-  );
+  )
 }

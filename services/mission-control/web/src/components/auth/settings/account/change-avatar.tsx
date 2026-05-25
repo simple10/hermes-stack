@@ -1,21 +1,21 @@
-"use client"
+'use client'
 
-import { fileToBase64 } from "@better-auth-ui/core"
-import { useAuth, useSession, useUpdateUser } from "@better-auth-ui/react"
-import { Trash2, Upload } from "lucide-react"
-import { type ChangeEvent, useRef, useState } from "react"
-import { toast } from "sonner"
-import { UserAvatar } from "@/components/auth/user/user-avatar"
-import { Button } from "@/components/ui/button"
+import { fileToBase64 } from '@better-auth-ui/core'
+import { useAuth, useSession, useUpdateUser } from '@better-auth-ui/react'
+import { Trash2, Upload } from 'lucide-react'
+import { type ChangeEvent, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { UserAvatar } from '@/components/auth/user/user-avatar'
+import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu"
-import { Field } from "@/components/ui/field"
-import { Label } from "@/components/ui/label"
-import { Spinner } from "@/components/ui/spinner"
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Field } from '@/components/ui/field'
+import { Label } from '@/components/ui/label'
+import { Spinner } from '@/components/ui/spinner'
 
 export type ChangeAvatarProps = {
   className?: string
@@ -25,8 +25,7 @@ export function ChangeAvatar({ className }: ChangeAvatarProps) {
   const { authClient, localization, avatar } = useAuth()
   const { data: session } = useSession(authClient)
 
-  const { mutate: updateUser, isPending: updatePending } =
-    useUpdateUser(authClient)
+  const { mutate: updateUser, isPending: updatePending } = useUpdateUser(authClient)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -38,23 +37,20 @@ export function ChangeAvatar({ className }: ChangeAvatarProps) {
     const file = e.target.files?.[0]
     if (!file) return
 
-    e.target.value = ""
+    e.target.value = ''
 
     setIsUploading(true)
 
     try {
-      const resized =
-        (await avatar.resize?.(file, avatar.size, avatar.extension)) || file
+      const resized = (await avatar.resize?.(file, avatar.size, avatar.extension)) || file
 
-      const image =
-        (await avatar.upload?.(resized)) || (await fileToBase64(resized))
+      const image = (await avatar.upload?.(resized)) || (await fileToBase64(resized))
 
       updateUser(
         { image },
         {
-          onSuccess: () =>
-            toast.success(localization.settings.avatarChangedSuccess)
-        }
+          onSuccess: () => toast.success(localization.settings.avatarChangedSuccess),
+        },
       )
     } catch (error) {
       if (error instanceof Error) {
@@ -82,8 +78,8 @@ export function ChangeAvatar({ className }: ChangeAvatarProps) {
           }
 
           toast.success(localization.settings.avatarDeletedSuccess)
-        }
-      }
+        },
+      },
     )
   }
 
@@ -112,11 +108,7 @@ export function ChangeAvatar({ className }: ChangeAvatarProps) {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={!session || isPending}
-            >
+            <Button variant="secondary" size="sm" disabled={!session || isPending}>
               {isPending && <Spinner />}
 
               {localization.settings.changeAvatar}

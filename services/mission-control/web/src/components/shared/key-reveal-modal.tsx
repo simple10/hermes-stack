@@ -5,9 +5,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
 
 /**
  * Shown exactly once when a fresh bearer token (agent / connector / PAT) is
@@ -15,23 +15,23 @@ import { toast } from 'sonner';
  * modal's lifetime — closing it loses the value forever.
  */
 export function KeyRevealModal(props: {
-  open: boolean;
-  onClose: () => void;
-  keyValue: string;
-  title?: string;
+  open: boolean
+  onClose: () => void
+  keyValue: string
+  title?: string
 }) {
   const copy = async () => {
-    await navigator.clipboard.writeText(props.keyValue);
-    toast.success('Copied to clipboard');
-  };
+    await navigator.clipboard.writeText(props.keyValue)
+    toast.success('Copied to clipboard')
+  }
   return (
     <Dialog open={props.open} onOpenChange={(o) => !o && props.onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{props.title ?? 'Save this key now'}</DialogTitle>
           <DialogDescription>
-            This is the <strong>only time</strong> you will see the full key value.
-            Copy it now — once you close this dialog it's gone.
+            This is the <strong>only time</strong> you will see the full key value. Copy it now —
+            once you close this dialog it's gone.
           </DialogDescription>
         </DialogHeader>
         <div className="bg-muted p-3 rounded font-mono text-sm break-all select-all">
@@ -45,5 +45,5 @@ export function KeyRevealModal(props: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
+  )
 }

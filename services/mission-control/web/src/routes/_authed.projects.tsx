@@ -1,10 +1,10 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { ProjectsTable } from '@/components/projects/projects-table';
-import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
+import { createFileRoute } from '@tanstack/react-router'
+import { ProjectsTable } from '@/components/projects/projects-table'
+import { CreateProjectDialog } from '@/components/projects/create-project-dialog'
 
 export const Route = createFileRoute('/_authed/projects')({
   component: ProjectsRoute,
-});
+})
 
 function ProjectsRoute() {
   return (
@@ -15,5 +15,5 @@ function ProjectsRoute() {
       </div>
       <ProjectsTable />
     </div>
-  );
+  )
 }

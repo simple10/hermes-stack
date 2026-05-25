@@ -1,14 +1,14 @@
 // services/mission-control/src/schemas/external-refs.ts
 //
 // Browser-safe. ONLY imports allowed: zod + sibling schema files (also browser-safe).
-import { z } from 'zod';
-import { IdSlug, IsoTimestamp, SoftDeleteFields } from './common.ts';
+import { z } from 'zod'
+import { IdSlug, IsoTimestamp, SoftDeleteFields } from './common.ts'
 
 // external_refs.resource_type doesn't include 'external_ref' (you don't have
 // an external_ref TO an external_ref). The Event schema has a broader
 // ResourceType that includes 'external_ref' for kind references.
-export const ExternalRefResourceType = z.enum(['task', 'project', 'agent', 'connector', 'comment']);
-export type ExternalRefResourceType = z.infer<typeof ExternalRefResourceType>;
+export const ExternalRefResourceType = z.enum(['task', 'project', 'agent', 'connector', 'comment'])
+export type ExternalRefResourceType = z.infer<typeof ExternalRefResourceType>
 
 /** POST /v1/external_refs body (per createBody in routes/external-refs.ts). */
 export const ExternalRefCreateBody = z.object({
@@ -19,8 +19,8 @@ export const ExternalRefCreateBody = z.object({
   external_id: z.string().min(1).max(500),
   external_url: z.url().max(2000).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-});
-export type ExternalRefCreateBody = z.infer<typeof ExternalRefCreateBody>;
+})
+export type ExternalRefCreateBody = z.infer<typeof ExternalRefCreateBody>
 
 export const ExternalRef = z
   .object({
@@ -36,12 +36,12 @@ export const ExternalRef = z
     created_at: IsoTimestamp,
     updated_at: IsoTimestamp,
   })
-  .extend(SoftDeleteFields.shape);
-export type ExternalRef = z.infer<typeof ExternalRef>;
+  .extend(SoftDeleteFields.shape)
+export type ExternalRef = z.infer<typeof ExternalRef>
 
 /** POST /v1/external_refs → `{ external_ref: row }`. */
-export const ExternalRefCreateResponse = z.object({ external_ref: ExternalRef });
-export type ExternalRefCreateResponse = z.infer<typeof ExternalRefCreateResponse>;
+export const ExternalRefCreateResponse = z.object({ external_ref: ExternalRef })
+export type ExternalRefCreateResponse = z.infer<typeof ExternalRefCreateResponse>
 
 /** GET /v1/external_refs query (per listQuery in routes/external-refs.ts).  */
 export const ExternalRefListQuery = z.object({
@@ -54,12 +54,12 @@ export const ExternalRefListQuery = z.object({
   // The handler uses z.string() here (not number) and coerces internally;
   // mirror that to keep the schema 1:1 with handler behavior.
   limit: z.string().optional(),
-});
-export type ExternalRefListQuery = z.infer<typeof ExternalRefListQuery>;
+})
+export type ExternalRefListQuery = z.infer<typeof ExternalRefListQuery>
 
 /** GET /v1/external_refs → `{ external_refs: [...], next_cursor }`. */
 export const ExternalRefListResponse = z.object({
   external_refs: z.array(ExternalRef),
   next_cursor: z.string().nullable(),
-});
-export type ExternalRefListResponse = z.infer<typeof ExternalRefListResponse>;
+})
+export type ExternalRefListResponse = z.infer<typeof ExternalRefListResponse>

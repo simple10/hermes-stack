@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, Link } from '@tanstack/react-router';
-import { api, ApiError } from '@/lib/api';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, Link } from '@tanstack/react-router'
+import { api, ApiError } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,22 +15,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import { KeyRevealModal } from '@/components/shared/key-reveal-modal';
-import { messageFor } from '@/lib/error-messages';
-import { toast } from 'sonner';
+} from '@/components/ui/alert-dialog'
+import { KeyRevealModal } from '@/components/shared/key-reveal-modal'
+import { messageFor } from '@/lib/error-messages'
+import { toast } from 'sonner'
 
 export function AgentDetail({ agentId }: { agentId: string }) {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const [keyReveal, setKeyReveal] = useState<string | null>(null);
-  const [name, setName] = useState<string | undefined>();
-  const [description, setDescription] = useState<string | undefined>();
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [keyReveal, setKeyReveal] = useState<string | null>(null)
+  const [name, setName] = useState<string | undefined>()
+  const [description, setDescription] = useState<string | undefined>()
 
   const { data, isLoading } = useQuery({
     queryKey: ['agents', agentId],
     queryFn: () => api.agents.get(agentId),
-  });
+  })
 
   const saveMut = useMutation({
     mutationFn: () =>
@@ -39,41 +39,41 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         description: description ?? undefined,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] });
-      qc.invalidateQueries({ queryKey: ['agents', agentId] });
-      toast.success('Agent updated');
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      qc.invalidateQueries({ queryKey: ['agents', agentId] })
+      toast.success('Agent updated')
     },
     onError: (err) => toast.error(messageFor(err)),
-  });
+  })
 
   const rotateMut = useMutation({
     mutationFn: () => api.agents.rotateKey(agentId),
     onSuccess: (res) => setKeyReveal(res.key),
     onError: (err) => toast.error(messageFor(err)),
-  });
+  })
 
   const deleteMut = useMutation({
     mutationFn: () => api.agents.delete(agentId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] });
-      toast.success('Agent deleted');
-      navigate({ to: '/agents' as any });
+      qc.invalidateQueries({ queryKey: ['agents'] })
+      toast.success('Agent deleted')
+      navigate({ to: '/agents' as any })
     },
     onError: (err) => {
       if (err instanceof ApiError && err.code === 'agent.has_active_tasks') {
-        const ids = (err.details as any)?.task_ids as string[] | undefined;
+        const ids = (err.details as any)?.task_ids as string[] | undefined
         toast.error(
           `Cannot delete — agent has active tasks${ids?.length ? `: ${ids.join(', ')}` : ''}.`,
-        );
+        )
       } else {
-        toast.error(messageFor(err));
+        toast.error(messageFor(err))
       }
     },
-  });
+  })
 
-  if (isLoading) return <p className="text-muted-foreground">Loading…</p>;
-  if (!data) return <p>Not found.</p>;
-  const agent = data.agent;
+  if (isLoading) return <p className="text-muted-foreground">Loading…</p>
+  if (!data) return <p>Not found.</p>
+  const agent = data.agent
 
   return (
     <div className="space-y-8 max-w-2xl">
@@ -82,7 +82,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <p className="text-muted-foreground text-sm mt-1">
           Kind: {agent.kind} • Created {new Date(agent.created_at).toLocaleString()}
         </p>
-        <p className="text-xs text-muted-foreground mt-1">ID: <code>{agent.id}</code></p>
+        <p className="text-xs text-muted-foreground mt-1">
+          ID: <code>{agent.id}</code>
+        </p>
       </header>
 
       <section className="space-y-4">
@@ -133,7 +135,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           </AlertDialog>
         </div>
         <p className="text-xs text-muted-foreground">
-          <Link to="/agents" className="underline">← Back to agents</Link>
+          <Link to="/agents" className="underline">
+            ← Back to agents
+          </Link>
         </p>
       </section>
 
@@ -144,5 +148,5 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         title="New agent key (old key remains valid briefly during grace window)"
       />
     </div>
-  );
+  )
 }

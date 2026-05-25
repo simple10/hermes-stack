@@ -25,36 +25,36 @@
  * The mintApiKey / disableApiKey helpers in src/auth/api-keys.ts are re-exported
  * here for callers that need them directly (e.g., bootstrap route, tests).
  */
-import { and, eq } from 'drizzle-orm';
-import { apiKey as apiKeyTable } from '../master.ts';
-import { masterClient } from '../client.ts';
-import { generateRawKey, hashKey, mintApiKey, disableApiKey } from '../../auth/api-keys.ts';
-import { makeId } from '../../ids.ts';
-import type { AuthContext } from '../../auth/types.ts';
+import { and, eq } from 'drizzle-orm'
+import { apiKey as apiKeyTable } from '../master.ts'
+import { masterClient } from '../client.ts'
+import { generateRawKey, hashKey, mintApiKey, disableApiKey } from '../../auth/api-keys.ts'
+import { makeId } from '../../ids.ts'
+import type { AuthContext } from '../../auth/types.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type ApiKeyRow = typeof apiKeyTable.$inferSelect;
+type ApiKeyRow = typeof apiKeyTable.$inferSelect
 
 export interface MintForUserArgs {
-  prefix: string;
-  name: string;
-  metadata?: Record<string, unknown>;
-  permissions?: Record<string, string[]>;
+  prefix: string
+  name: string
+  metadata?: Record<string, unknown>
+  permissions?: Record<string, string[]>
 }
 
 export interface MintForAgentArgs {
-  name?: string;
-  metadata?: Record<string, unknown>;
-  permissions?: Record<string, string[]>;
+  name?: string
+  metadata?: Record<string, unknown>
+  permissions?: Record<string, string[]>
 }
 
 export interface MintForConnectorArgs {
-  name?: string;
-  metadata?: Record<string, unknown>;
-  permissions?: Record<string, string[]>;
+  name?: string
+  metadata?: Record<string, unknown>
+  permissions?: Record<string, string[]>
 }
 
 // ---------------------------------------------------------------------------
@@ -72,13 +72,13 @@ export interface MintForConnectorArgs {
  * that verifyApiKey does not surface.
  */
 export async function lookupApiKey(env: Env, hashedToken: string): Promise<ApiKeyRow | null> {
-  const master = masterClient(env);
+  const master = masterClient(env)
   const rows = await master
     .select()
     .from(apiKeyTable)
     .where(eq(apiKeyTable.key, hashedToken))
-    .limit(1);
-  return rows[0] ?? null;
+    .limit(1)
+  return rows[0] ?? null
 }
 
 /**
@@ -88,13 +88,9 @@ export async function lookupApiKey(env: Env, hashedToken: string): Promise<ApiKe
  * Returns the full row (including orgId, principalType, metadata) or null.
  */
 export async function lookupApiKeyById(env: Env, keyId: string): Promise<ApiKeyRow | null> {
-  const master = masterClient(env);
-  const rows = await master
-    .select()
-    .from(apiKeyTable)
-    .where(eq(apiKeyTable.id, keyId))
-    .limit(1);
-  return rows[0] ?? null;
+  const master = masterClient(env)
+  const rows = await master.select().from(apiKeyTable).where(eq(apiKeyTable.id, keyId)).limit(1)
+  return rows[0] ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -102,8 +98,8 @@ export async function lookupApiKeyById(env: Env, keyId: string): Promise<ApiKeyR
 // ---------------------------------------------------------------------------
 
 export function apiKeysRepo(ctx: AuthContext) {
-  const master = masterClient(ctx.env);
-  const scope = eq(apiKeyTable.orgId, ctx.orgId);
+  const master = masterClient(ctx.env)
+  const scope = eq(apiKeyTable.orgId, ctx.orgId)
 
   return {
     async findById(id: string): Promise<ApiKeyRow | null> {
@@ -111,15 +107,15 @@ export function apiKeysRepo(ctx: AuthContext) {
         .select()
         .from(apiKeyTable)
         .where(and(scope, eq(apiKeyTable.id, id)))
-        .limit(1);
-      return rows[0] ?? null;
+        .limit(1)
+      return rows[0] ?? null
     },
 
     async listForUser(userId: string): Promise<ApiKeyRow[]> {
       return master
         .select()
         .from(apiKeyTable)
-        .where(and(scope, eq(apiKeyTable.userId, userId)));
+        .where(and(scope, eq(apiKeyTable.userId, userId)))
     },
 
     /**
@@ -131,7 +127,7 @@ export function apiKeysRepo(ctx: AuthContext) {
      *                  grace window before they stop working.
      */
     async revoke(id: string, expiresAt?: number): Promise<void> {
-      await disableApiKey(master, id, expiresAt);
+      await disableApiKey(master, id, expiresAt)
     },
 
     /**
@@ -147,7 +143,7 @@ export function apiKeysRepo(ctx: AuthContext) {
         principalType: 'pat',
         metadata: args.metadata,
         permissions: args.permissions,
-      });
+      })
     },
 
     /**
@@ -165,7 +161,7 @@ export function apiKeysRepo(ctx: AuthContext) {
         principalType: 'agent',
         metadata: { agent_id: agentId, ...args.metadata },
         permissions: args.permissions,
-      });
+      })
     },
 
     /**
@@ -183,7 +179,7 @@ export function apiKeysRepo(ctx: AuthContext) {
         principalType: 'connector',
         metadata: { connector_id: connectorId, ...args.metadata },
         permissions: args.permissions,
-      });
+      })
     },
 
     /**
@@ -204,18 +200,20 @@ export function apiKeysRepo(ctx: AuthContext) {
       const rows = await master
         .select()
         .from(apiKeyTable)
-        .where(and(scope, eq(apiKeyTable.principalType, 'agent')));
-      return rows.find((k) => {
-        try {
-          const meta =
-            typeof k.metadata === 'string'
-              ? (JSON.parse(k.metadata) as { agent_id?: string })
-              : (k.metadata as { agent_id?: string } | null);
-          return meta?.agent_id === agentId && k.enabled !== false;
-        } catch {
-          return false;
-        }
-      }) ?? null;
+        .where(and(scope, eq(apiKeyTable.principalType, 'agent')))
+      return (
+        rows.find((k) => {
+          try {
+            const meta =
+              typeof k.metadata === 'string'
+                ? (JSON.parse(k.metadata) as { agent_id?: string })
+                : (k.metadata as { agent_id?: string } | null)
+            return meta?.agent_id === agentId && k.enabled !== false
+          } catch {
+            return false
+          }
+        }) ?? null
+      )
     },
 
     /**
@@ -226,18 +224,20 @@ export function apiKeysRepo(ctx: AuthContext) {
       const rows = await master
         .select()
         .from(apiKeyTable)
-        .where(and(scope, eq(apiKeyTable.principalType, 'connector')));
-      return rows.find((k) => {
-        try {
-          const meta =
-            typeof k.metadata === 'string'
-              ? (JSON.parse(k.metadata) as { connector_id?: string })
-              : (k.metadata as { connector_id?: string } | null);
-          return meta?.connector_id === connectorId && k.enabled !== false;
-        } catch {
-          return false;
-        }
-      }) ?? null;
+        .where(and(scope, eq(apiKeyTable.principalType, 'connector')))
+      return (
+        rows.find((k) => {
+          try {
+            const meta =
+              typeof k.metadata === 'string'
+                ? (JSON.parse(k.metadata) as { connector_id?: string })
+                : (k.metadata as { connector_id?: string } | null)
+            return meta?.connector_id === connectorId && k.enabled !== false
+          } catch {
+            return false
+          }
+        }) ?? null
+      )
     },
 
     async mintAndExpireExisting(
@@ -245,11 +245,11 @@ export function apiKeysRepo(ctx: AuthContext) {
       oldKeyId: string,
       expiresAt: number,
     ): Promise<{ newKey: string; oldExpiresAt: Date }> {
-      const { rawKey } = await newKeyFactory();
-      await disableApiKey(master, oldKeyId, expiresAt);
-      return { newKey: rawKey, oldExpiresAt: new Date(expiresAt) };
+      const { rawKey } = await newKeyFactory()
+      await disableApiKey(master, oldKeyId, expiresAt)
+      return { newKey: rawKey, oldExpiresAt: new Date(expiresAt) }
     },
 
     table: apiKeyTable,
-  };
+  }
 }

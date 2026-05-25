@@ -9,16 +9,16 @@
  * Writes (insert/update) are delegated to better-auth's own API — this repo
  * is read-only from the application perspective.
  */
-import { and, eq } from 'drizzle-orm';
-import { user, member } from '../master.ts';
-import { masterClient } from '../client.ts';
-import type { AuthContext } from '../../auth/types.ts';
+import { and, eq } from 'drizzle-orm'
+import { user, member } from '../master.ts'
+import { masterClient } from '../client.ts'
+import type { AuthContext } from '../../auth/types.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type UserRow = typeof user.$inferSelect;
+type UserRow = typeof user.$inferSelect
 
 // ---------------------------------------------------------------------------
 // Static lookup — for bootstrap (no ctx available)
@@ -31,9 +31,9 @@ type UserRow = typeof user.$inferSelect;
  * one-time setup flow.  Returns true if at least one user row exists.
  */
 export async function lookupAnyUserExists(env: Env): Promise<boolean> {
-  const master = masterClient(env);
-  const rows = await master.select({ id: user.id }).from(user).limit(1);
-  return rows.length > 0;
+  const master = masterClient(env)
+  const rows = await master.select({ id: user.id }).from(user).limit(1)
+  return rows.length > 0
 }
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ export async function lookupAnyUserExists(env: Env): Promise<boolean> {
 // ---------------------------------------------------------------------------
 
 export function usersRepo(ctx: AuthContext) {
-  const master = masterClient(ctx.env);
+  const master = masterClient(ctx.env)
 
   return {
     /**
@@ -58,13 +58,10 @@ export function usersRepo(ctx: AuthContext) {
       const rows = await master
         .select({ user: user })
         .from(user)
-        .innerJoin(member, and(
-          eq(member.userId, user.id),
-          eq(member.organizationId, ctx.orgId),
-        ))
+        .innerJoin(member, and(eq(member.userId, user.id), eq(member.organizationId, ctx.orgId)))
         .where(eq(user.id, userId))
-        .limit(1);
-      return rows[0]?.user ?? null;
+        .limit(1)
+      return rows[0]?.user ?? null
     },
 
     /**
@@ -74,13 +71,10 @@ export function usersRepo(ctx: AuthContext) {
       const rows = await master
         .select({ user: user })
         .from(user)
-        .innerJoin(member, and(
-          eq(member.userId, user.id),
-          eq(member.organizationId, ctx.orgId),
-        ));
-      return rows.map((r) => r.user);
+        .innerJoin(member, and(eq(member.userId, user.id), eq(member.organizationId, ctx.orgId)))
+      return rows.map((r) => r.user)
     },
 
     table: user,
-  };
+  }
 }

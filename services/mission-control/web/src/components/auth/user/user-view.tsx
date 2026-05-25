@@ -1,15 +1,11 @@
-"use client"
+'use client'
 
-import {
-  type UsernameAuthClient,
-  useAuth,
-  useSession
-} from "@better-auth-ui/react"
-import type { User } from "better-auth"
+import { type UsernameAuthClient, useAuth, useSession } from '@better-auth-ui/react'
+import type { User } from 'better-auth'
 
-import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
-import { UserAvatar } from "./user-avatar"
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+import { UserAvatar } from './user-avatar'
 
 export type UserViewProps = {
   className?: string
@@ -30,14 +26,14 @@ export function UserView({ className, isPending, user }: UserViewProps) {
   const { authClient } = useAuth()
   const { data: session, isPending: sessionPending } = useSession(
     authClient as UsernameAuthClient,
-    { enabled: !user && !isPending }
+    { enabled: !user && !isPending },
   )
 
   const resolvedUser = user ?? session?.user
 
   if ((isPending || sessionPending) && !user) {
     return (
-      <div className={cn("flex items-center gap-2", className)}>
+      <div className={cn('flex items-center gap-2', className)}>
         <UserAvatar isPending />
 
         <div className="grid flex-1 gap-1 text-left text-sm">
@@ -49,20 +45,16 @@ export function UserView({ className, isPending, user }: UserViewProps) {
   }
 
   return (
-    <div className={cn("flex items-center gap-2", className)}>
+    <div className={cn('flex items-center gap-2', className)}>
       <UserAvatar user={resolvedUser} />
 
       <div className="grid flex-1 text-left text-sm leading-tight">
         <span className="truncate font-medium text-foreground">
-          {resolvedUser?.displayUsername ||
-            resolvedUser?.name ||
-            resolvedUser?.email}
+          {resolvedUser?.displayUsername || resolvedUser?.name || resolvedUser?.email}
         </span>
 
         {(resolvedUser?.displayUsername || resolvedUser?.name) && (
-          <span className="text-muted-foreground truncate text-xs">
-            {resolvedUser?.email}
-          </span>
+          <span className="text-muted-foreground truncate text-xs">{resolvedUser?.email}</span>
         )}
       </div>
     </div>

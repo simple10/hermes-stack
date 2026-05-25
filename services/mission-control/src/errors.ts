@@ -6,9 +6,9 @@
  *   return errorResponse(c, err);
  */
 
-import { DuplicateError, ForbiddenError } from './db/repos/_errors.ts';
+import { DuplicateError, ForbiddenError } from './db/repos/_errors.ts'
 
-export { DuplicateError, ForbiddenError };
+export { DuplicateError, ForbiddenError }
 
 export class HttpError extends Error {
   constructor(
@@ -17,15 +17,15 @@ export class HttpError extends Error {
     message?: string,
     public readonly details?: unknown,
   ) {
-    super(message ?? code);
-    this.name = 'HttpError';
+    super(message ?? code)
+    this.name = 'HttpError'
   }
 }
 
 /** Hono-compatible context shape needed by errorResponse. */
 type MinimalCtx = {
-  json: (body: unknown, status?: number) => Response;
-};
+  json: (body: unknown, status?: number) => Response
+}
 
 /**
  * Converts any error into a JSON error response following the spec's envelope:
@@ -41,7 +41,7 @@ export function errorResponse(c: MinimalCtx, err: unknown): Response {
     return c.json(
       { error: { code: err.code, message: err.message, details: err.details } },
       err.status,
-    );
+    )
   }
   if (err instanceof DuplicateError) {
     return c.json(
@@ -53,7 +53,7 @@ export function errorResponse(c: MinimalCtx, err: unknown): Response {
         },
       },
       409,
-    );
+    )
   }
   if (err instanceof ForbiddenError) {
     return c.json(
@@ -65,8 +65,8 @@ export function errorResponse(c: MinimalCtx, err: unknown): Response {
         },
       },
       403,
-    );
+    )
   }
-  console.error('unhandled error:', err);
-  return c.json({ error: { code: 'internal', message: 'Internal server error' } }, 500);
+  console.error('unhandled error:', err)
+  return c.json({ error: { code: 'internal', message: 'Internal server error' } }, 500)
 }

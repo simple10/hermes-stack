@@ -21,24 +21,24 @@ export type TaskStatus =
   | 'blocked'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
 
 /** Set of terminal statuses — no transitions out. */
-export const TERMINAL = new Set<TaskStatus>(['completed', 'failed', 'cancelled']);
+export const TERMINAL = new Set<TaskStatus>(['completed', 'failed', 'cancelled'])
 
 /**
  * Allowed forward transitions from each status.
  * Keys are source statuses; values are sets of reachable target statuses.
  */
 const TRANSITIONS: Record<TaskStatus, Set<TaskStatus>> = {
-  pending:     new Set(['ready', 'cancelled', 'failed']),
-  ready:       new Set(['in_progress', 'cancelled', 'failed']),
+  pending: new Set(['ready', 'cancelled', 'failed']),
+  ready: new Set(['in_progress', 'cancelled', 'failed']),
   in_progress: new Set(['blocked', 'completed', 'failed', 'cancelled']),
-  blocked:     new Set(['in_progress', 'failed', 'cancelled']),
-  completed:   new Set(),
-  failed:      new Set(),
-  cancelled:   new Set(),
-};
+  blocked: new Set(['in_progress', 'failed', 'cancelled']),
+  completed: new Set(),
+  failed: new Set(),
+  cancelled: new Set(),
+}
 
 /**
  * Returns true when transitioning from `from` to `to` is permitted.
@@ -48,8 +48,8 @@ const TRANSITIONS: Record<TaskStatus, Set<TaskStatus>> = {
  * we don't want to emit spurious status_changed events.
  */
 export function validateTransition(from: string, to: string): boolean {
-  if (from === to) return false;
-  const allowed = TRANSITIONS[from as TaskStatus];
-  if (!allowed) return false;
-  return allowed.has(to as TaskStatus);
+  if (from === to) return false
+  const allowed = TRANSITIONS[from as TaskStatus]
+  if (!allowed) return false
+  return allowed.has(to as TaskStatus)
 }

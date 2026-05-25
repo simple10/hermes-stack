@@ -1,8 +1,8 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/magic-link')({
   component: MagicLinkRoute,
-});
+})
 
 /**
  * Landing page for magic-link sign-in. The link in the email handles auth
@@ -17,9 +17,13 @@ function MagicLinkRoute() {
           We sent you a sign-in link. Click the link in the email to continue.
         </p>
         <p className="text-sm text-muted-foreground">
-          Already signed in? <Link to={'/' as any} className="underline">Go to MissionControl</Link>.
+          Already signed in?{' '}
+          <Link to={'/' as any} className="underline">
+            Go to MissionControl
+          </Link>
+          .
         </p>
       </div>
     </div>
-  );
+  )
 }

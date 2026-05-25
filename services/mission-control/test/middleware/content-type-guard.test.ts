@@ -6,18 +6,18 @@
  *   - application/json passes through (may return 401/400/etc.)
  *   - GET requests are never rejected regardless of content-type
  */
-import { describe, it, expect, beforeAll, inject } from 'vitest';
-import { env } from 'cloudflare:workers';
-import { applyD1Migrations } from 'cloudflare:test';
-import type { D1Migration } from '@cloudflare/vitest-pool-workers';
-import app from '../../src/index.ts';
+import { describe, it, expect, beforeAll, inject } from 'vitest'
+import { env } from 'cloudflare:workers'
+import { applyD1Migrations } from 'cloudflare:test'
+import type { D1Migration } from '@cloudflare/vitest-pool-workers'
+import app from '../../src/index.ts'
 
-const TEST_ENV = { ...env, MC_ADMIN_TOKEN: 'ct-guard-test-token' } as any;
+const TEST_ENV = { ...env, MC_ADMIN_TOKEN: 'ct-guard-test-token' } as any
 
 beforeAll(async () => {
-  const migrations = inject('d1Migrations') as D1Migration[];
-  await applyD1Migrations((env.DB as D1Database), migrations);
-});
+  const migrations = inject('d1Migrations') as D1Migration[]
+  await applyD1Migrations(env.DB as D1Database, migrations)
+})
 
 describe('requireJsonOnWrites middleware', () => {
   it('POST /api/v1/projects with application/x-www-form-urlencoded → 415', async () => {
@@ -26,17 +26,17 @@ describe('requireJsonOnWrites middleware', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
-          'authorization': 'Bearer fake-token',
+          authorization: 'Bearer fake-token',
         },
         body: 'name=test&slug=test',
       }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
-    );
-    expect(res.status).toBe(415);
-    const body = await res.json() as { error: { code: string } };
-    expect(body.error.code).toBe('unsupported_media_type');
-  });
+    )
+    expect(res.status).toBe(415)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('unsupported_media_type')
+  })
 
   it('POST /api/v1/projects with multipart/form-data → 415', async () => {
     const res = await app.fetch(
@@ -44,15 +44,15 @@ describe('requireJsonOnWrites middleware', () => {
         method: 'POST',
         headers: {
           'content-type': 'multipart/form-data; boundary=----WebKitFormBoundary',
-          'authorization': 'Bearer fake-token',
+          authorization: 'Bearer fake-token',
         },
         body: '------WebKitFormBoundary\r\nContent-Disposition: form-data; name="name"\r\n\r\ntest\r\n------WebKitFormBoundary--',
       }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
-    );
-    expect(res.status).toBe(415);
-  });
+    )
+    expect(res.status).toBe(415)
+  })
 
   it('POST /api/v1/projects with application/json → not 415 (may be 401/400)', async () => {
     const res = await app.fetch(
@@ -60,16 +60,16 @@ describe('requireJsonOnWrites middleware', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'authorization': 'Bearer fake-token',
+          authorization: 'Bearer fake-token',
         },
         body: JSON.stringify({ name: 'test', slug: 'test' }),
       }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
-    );
+    )
     // Must not be 415; will be 401 (invalid token) or similar.
-    expect(res.status).not.toBe(415);
-  });
+    expect(res.status).not.toBe(415)
+  })
 
   it('GET /api/v1/projects with any content-type → not 415', async () => {
     const res = await app.fetch(
@@ -77,15 +77,15 @@ describe('requireJsonOnWrites middleware', () => {
         method: 'GET',
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
-          'authorization': 'Bearer fake-token',
+          authorization: 'Bearer fake-token',
         },
       }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
-    );
+    )
     // GET is not state-changing; content-type should not trigger 415.
-    expect(res.status).not.toBe(415);
-  });
+    expect(res.status).not.toBe(415)
+  })
 
   it('PATCH /api/v1/agents/:id with form-urlencoded → 415', async () => {
     const res = await app.fetch(
@@ -93,28 +93,28 @@ describe('requireJsonOnWrites middleware', () => {
         method: 'PATCH',
         headers: {
           'content-type': 'application/x-www-form-urlencoded',
-          'authorization': 'Bearer fake-token',
+          authorization: 'Bearer fake-token',
         },
         body: 'name=hacked',
       }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
-    );
-    expect(res.status).toBe(415);
-  });
+    )
+    expect(res.status).toBe(415)
+  })
 
   it('DELETE /api/v1/projects/:id with no content-type → not 415', async () => {
     const res = await app.fetch(
       new Request('http://x/api/v1/projects/prj_fake', {
         method: 'DELETE',
         headers: {
-          'authorization': 'Bearer fake-token',
+          authorization: 'Bearer fake-token',
         },
       }),
       TEST_ENV,
       { passThroughOnException: () => {} } as any,
-    );
+    )
     // DELETE with no body should not be rejected by the guard.
-    expect(res.status).not.toBe(415);
-  });
-});
+    expect(res.status).not.toBe(415)
+  })
+})

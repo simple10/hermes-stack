@@ -32,26 +32,26 @@ module.exports = {
      */
     function hasEscapeComment(node) {
       // ESLint 9 flat config: prefer context.sourceCode, fall back to getSourceCode for v8.
-      const src = context.sourceCode ?? context.getSourceCode();
-      const nodeLine = node.loc?.start?.line;
-      if (nodeLine == null) return false;
+      const src = context.sourceCode ?? context.getSourceCode()
+      const nodeLine = node.loc?.start?.line
+      if (nodeLine == null) return false
       // Scan ALL comments in the file for `repo-escape:` markers on the SAME line
       // as the node or on the line IMMEDIATELY ABOVE. Robust against multi-line
       // chained expressions (e.g. `await ctx.pool // repo-escape: ...\n  .select()...`)
       // where the comment sits between tokens of the same expression.
-      const all = src.getAllComments();
+      const all = src.getAllComments()
       for (const c of all) {
-        if (!/repo-escape:/.test(c.value)) continue;
-        const commentLine = c.loc?.start?.line;
-        if (commentLine == null) continue;
-        if (commentLine === nodeLine || commentLine === nodeLine - 1) return true;
+        if (!/repo-escape:/.test(c.value)) continue
+        const commentLine = c.loc?.start?.line
+        if (commentLine == null) continue
+        if (commentLine === nodeLine || commentLine === nodeLine - 1) return true
       }
-      return false;
+      return false
     }
 
     function report(node, message) {
       if (!hasEscapeComment(node)) {
-        context.report({ node, message });
+        context.report({ node, message })
       }
     }
 
@@ -74,7 +74,7 @@ module.exports = {
           report(
             node,
             'Direct ctx.pool.* call in route handler. Use src/db/repos instead, or add `// repo-escape: <reason>` above or on this line.',
-          );
+          )
         }
 
         // Match c.env.DB or c.env.MASTER_DB
@@ -94,7 +94,7 @@ module.exports = {
           report(
             node,
             'Direct c.env.DB / c.env.MASTER_DB access in route handler. Use src/db/repos instead, or add `// repo-escape: <reason>` above or on this line.',
-          );
+          )
         }
 
         // Match c.env.POOL_<anything>
@@ -114,7 +114,7 @@ module.exports = {
           report(
             node,
             'Direct c.env.POOL_* access in route handler. Use src/db/repos instead, or add `// repo-escape: <reason>` above or on this line.',
-          );
+          )
         }
       },
 
@@ -128,9 +128,9 @@ module.exports = {
           report(
             node,
             'masterClient(...) call in route handler. Use src/db/repos (e.g. db.users(ctx), db.apiKeys(ctx)) instead, or add `// repo-escape: <reason>` above or on this line.',
-          );
+          )
         }
       },
-    };
+    }
   },
-};
+}

@@ -13,24 +13,24 @@
  * Uses the Web Crypto API (crypto.subtle) — available on Workers and Node 20+.
  */
 
-const enc = new TextEncoder();
+const enc = new TextEncoder()
 
 /** Encode and sign a pagination cursor. */
 export async function encodeCursor(
   payload: { updatedAt: number; id: string; orgId: string },
   secret: string,
 ): Promise<string> {
-  const body = JSON.stringify(payload);
+  const body = JSON.stringify(payload)
   const key = await crypto.subtle.importKey(
     'raw',
     enc.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(body));
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
-  return btoa(body) + '.' + sigB64;
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(body))
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
+  return btoa(body) + '.' + sigB64
 }
 
 /**
@@ -43,17 +43,17 @@ export async function decodeCursor(
   cursor: string,
   secret: string,
 ): Promise<{ updatedAt: number; id: string; orgId: string } | null> {
-  const dot = cursor.indexOf('.');
-  if (dot === -1) return null;
-  const bodyB64 = cursor.slice(0, dot);
-  const sigB64 = cursor.slice(dot + 1);
-  if (!bodyB64 || !sigB64) return null;
+  const dot = cursor.indexOf('.')
+  if (dot === -1) return null
+  const bodyB64 = cursor.slice(0, dot)
+  const sigB64 = cursor.slice(dot + 1)
+  if (!bodyB64 || !sigB64) return null
 
-  let body: string;
+  let body: string
   try {
-    body = atob(bodyB64);
+    body = atob(bodyB64)
   } catch {
-    return null;
+    return null
   }
 
   const key = await crypto.subtle.importKey(
@@ -62,22 +62,22 @@ export async function decodeCursor(
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['verify'],
-  );
+  )
 
-  let sigBytes: Uint8Array;
+  let sigBytes: Uint8Array
   try {
-    sigBytes = Uint8Array.from(atob(sigB64), (c) => c.charCodeAt(0));
+    sigBytes = Uint8Array.from(atob(sigB64), (c) => c.charCodeAt(0))
   } catch {
-    return null;
+    return null
   }
 
-  const valid = await crypto.subtle.verify('HMAC', key, sigBytes, enc.encode(body));
-  if (!valid) return null;
+  const valid = await crypto.subtle.verify('HMAC', key, sigBytes, enc.encode(body))
+  if (!valid) return null
 
   try {
-    return JSON.parse(body) as { updatedAt: number; id: string; orgId: string };
+    return JSON.parse(body) as { updatedAt: number; id: string; orgId: string }
   } catch {
-    return null;
+    return null
   }
 }
 
@@ -88,7 +88,7 @@ export async function decodeCursor(
  * Callers never see an error for a bad limit — just the clamped value.
  */
 export function clampLimit(raw: unknown, dflt = 50, max = 100): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return dflt;
-  return Math.min(Math.floor(n), max);
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 1) return dflt
+  return Math.min(Math.floor(n), max)
 }

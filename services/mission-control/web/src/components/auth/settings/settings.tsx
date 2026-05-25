@@ -1,13 +1,13 @@
-"use client"
+'use client'
 
-import type { SettingsView } from "@better-auth-ui/core"
-import { useAuth, useAuthenticate } from "@better-auth-ui/react"
-import { useMemo } from "react"
+import type { SettingsView } from '@better-auth-ui/core'
+import { useAuth, useAuthenticate } from '@better-auth-ui/react'
+import { useMemo } from 'react'
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { cn } from "@/lib/utils"
-import { AccountSettings } from "./account/account-settings"
-import { SecuritySettings } from "./security/security-settings"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
+import { AccountSettings } from './account/account-settings'
+import { SecuritySettings } from './security/security-settings'
 
 export type SettingsProps = {
   className?: string
@@ -31,25 +31,23 @@ export function Settings({ className, view, path, hideNav }: SettingsProps) {
   useAuthenticate(authClient)
 
   if (!view && !path) {
-    throw new Error("[Better Auth UI] Either `view` or `path` must be provided")
+    throw new Error('[Better Auth UI] Either `view` or `path` must be provided')
   }
 
   const settingsPathViews = useMemo(
     () =>
-      Object.fromEntries(
-        Object.entries(viewPaths.settings).map(([k, v]) => [v, k])
-      ) as Record<string, SettingsView>,
-    [viewPaths.settings]
+      Object.fromEntries(Object.entries(viewPaths.settings).map(([k, v]) => [v, k])) as Record<
+        string,
+        SettingsView
+      >,
+    [viewPaths.settings],
   )
 
   const currentView = view || (path ? settingsPathViews[path] : undefined)
 
   return (
-    <Tabs
-      value={currentView}
-      className={cn("w-full gap-4 md:gap-6", className)}
-    >
-      <div className={cn(hideNav && "hidden")}>
+    <Tabs value={currentView} className={cn('w-full gap-4 md:gap-6', className)}>
+      <div className={cn(hideNav && 'hidden')}>
         <TabsList aria-label={localization.settings.settings}>
           <TabsTrigger value="account" asChild>
             <Link href={`${basePaths.settings}/${viewPaths.settings.account}`}>

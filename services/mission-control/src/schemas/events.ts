@@ -1,13 +1,20 @@
 // services/mission-control/src/schemas/events.ts
 //
 // Browser-safe. ONLY imports allowed: zod + sibling schema files (also browser-safe).
-import { z } from 'zod';
-import { IsoTimestamp } from './common.ts';
+import { z } from 'zod'
+import { IsoTimestamp } from './common.ts'
 
 // Per VALID_KINDS in src/routes/events.ts — includes 'external_ref' even
 // though the master spec table lists only the 5 main resource types.
-export const ResourceType = z.enum(['task', 'project', 'agent', 'connector', 'comment', 'external_ref']);
-export type ResourceType = z.infer<typeof ResourceType>;
+export const ResourceType = z.enum([
+  'task',
+  'project',
+  'agent',
+  'connector',
+  'comment',
+  'external_ref',
+])
+export type ResourceType = z.infer<typeof ResourceType>
 
 /**
  * GET /v1/events query.
@@ -25,8 +32,8 @@ export const EventListQuery = z.object({
   cursor: z.string().optional(),
   /** 'desc' for head-lookup (registrar bootstrap); 'asc' is the pagination default. */
   order: z.enum(['asc', 'desc']).default('asc'),
-});
-export type EventListQuery = z.infer<typeof EventListQuery>;
+})
+export type EventListQuery = z.infer<typeof EventListQuery>
 
 /**
  * Event row shape. The handler JSON.parses `payload` on the way out, so
@@ -42,12 +49,12 @@ export const Event = z.object({
   actor_id: z.string().nullable(),
   payload: z.unknown().nullable(),
   created_at: IsoTimestamp,
-});
-export type Event = z.infer<typeof Event>;
+})
+export type Event = z.infer<typeof Event>
 
 /** GET /v1/events → `{ events: [...], next_cursor }`. */
 export const EventListResponse = z.object({
   events: z.array(Event),
   next_cursor: z.string().nullable(),
-});
-export type EventListResponse = z.infer<typeof EventListResponse>;
+})
+export type EventListResponse = z.infer<typeof EventListResponse>

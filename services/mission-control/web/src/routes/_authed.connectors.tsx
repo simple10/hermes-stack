@@ -1,10 +1,10 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { ConnectorsTable } from '@/components/connectors/connectors-table';
-import { RegisterConnectorDialog } from '@/components/connectors/register-connector-dialog';
+import { createFileRoute } from '@tanstack/react-router'
+import { ConnectorsTable } from '@/components/connectors/connectors-table'
+import { RegisterConnectorDialog } from '@/components/connectors/register-connector-dialog'
 
 export const Route = createFileRoute('/_authed/connectors')({
   component: ConnectorsRoute,
-});
+})
 
 function ConnectorsRoute() {
   return (
@@ -15,5 +15,5 @@ function ConnectorsRoute() {
       </div>
       <ConnectorsTable />
     </div>
-  );
+  )
 }

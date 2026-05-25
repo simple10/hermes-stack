@@ -5,7 +5,7 @@ import type {
   AgentPatchBody,
   AgentCreateResponse,
   AgentRotateKeyResponse,
-} from '@mc/schemas/agents';
+} from '@mc/schemas/agents'
 import type {
   Connector,
   ConnectorListResponse,
@@ -13,22 +13,18 @@ import type {
   ConnectorPatchBody,
   ConnectorCreateResponse,
   ConnectorRotateKeyResponse,
-} from '@mc/schemas/connectors';
+} from '@mc/schemas/connectors'
 import type {
   Project,
   ProjectListResponse,
   ProjectCreateBody,
   ProjectPatchBody,
-} from '@mc/schemas/projects';
-import type {
-  TaskListResponse,
-  TaskDetailResponse,
-  TaskListQuery,
-} from '@mc/schemas/tasks';
-import type { CommentListResponse } from '@mc/schemas/comments';
-import type { EventListResponse, EventListQuery } from '@mc/schemas/events';
-import type { ExternalRefListResponse } from '@mc/schemas/external-refs';
-import type { MeResponse } from '@mc/schemas/me';
+} from '@mc/schemas/projects'
+import type { TaskListResponse, TaskDetailResponse, TaskListQuery } from '@mc/schemas/tasks'
+import type { CommentListResponse } from '@mc/schemas/comments'
+import type { EventListResponse, EventListQuery } from '@mc/schemas/events'
+import type { ExternalRefListResponse } from '@mc/schemas/external-refs'
+import type { MeResponse } from '@mc/schemas/me'
 
 /**
  * Surfaced HTTP error. Carries the API's structured error code + request id
@@ -41,33 +37,33 @@ export class ApiError extends Error {
     public details?: unknown,
     public requestId?: string,
   ) {
-    super(`${status} ${code}`);
+    super(`${status} ${code}`)
   }
 }
 
 function qs(params: Record<string, unknown>): string {
-  const sp = new URLSearchParams();
+  const sp = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null) continue;
-    if (Array.isArray(v)) v.forEach((x) => sp.append(k, String(x)));
-    else sp.set(k, String(v));
+    if (v === undefined || v === null) continue
+    if (Array.isArray(v)) v.forEach((x) => sp.append(k, String(x)))
+    else sp.set(k, String(v))
   }
-  const s = sp.toString();
-  return s ? `?${s}` : '';
+  const s = sp.toString()
+  return s ? `?${s}` : ''
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  const requestId = res.headers.get('x-request-id') ?? undefined;
+  })
+  const requestId = res.headers.get('x-request-id') ?? undefined
   if (!res.ok) {
-    const body: any = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body?.error?.code ?? 'unknown', body?.error?.details, requestId);
+    const body: any = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, body?.error?.code ?? 'unknown', body?.error?.details, requestId)
   }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  if (res.status === 204) return undefined as T
+  return res.json() as Promise<T>
 }
 
 export const api = {
@@ -93,7 +89,10 @@ export const api = {
     create: (b: ConnectorCreateBody) =>
       request<ConnectorCreateResponse>('/connectors', { method: 'POST', body: JSON.stringify(b) }),
     patch: (id: string, b: ConnectorPatchBody) =>
-      request<{ connector: Connector }>(`/connectors/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+      request<{ connector: Connector }>(`/connectors/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(b),
+      }),
     rotateKey: (id: string) =>
       request<ConnectorRotateKeyResponse>(`/connectors/${id}/rotate-key`, { method: 'POST' }),
     delete: (id: string) => request<void>(`/connectors/${id}`, { method: 'DELETE' }),
@@ -106,7 +105,10 @@ export const api = {
     create: (b: ProjectCreateBody) =>
       request<{ project: Project }>('/projects', { method: 'POST', body: JSON.stringify(b) }),
     patch: (id: string, b: ProjectPatchBody) =>
-      request<{ project: Project }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(b) }),
+      request<{ project: Project }>(`/projects/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(b),
+      }),
     delete: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
   },
 
@@ -125,4 +127,4 @@ export const api = {
     list: (q: { resource_type?: string; resource_id?: string } = {}) =>
       request<ExternalRefListResponse>(`/external_refs${qs(q)}`),
   },
-};
+}

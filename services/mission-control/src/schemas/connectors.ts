@@ -4,8 +4,8 @@
 //
 // Mirrors src/routes/connectors.ts. Connectors and agents share an almost-identical
 // shape (different id prefix + different role gates); the wire format is symmetrical.
-import { z } from 'zod';
-import { IdSlug, IsoTimestamp, SoftDeleteFields } from './common.ts';
+import { z } from 'zod'
+import { IdSlug, IsoTimestamp, SoftDeleteFields } from './common.ts'
 
 // ---------------------------------------------------------------------------
 // Request bodies — mirror inline `createSchema` / `updateSchema` in
@@ -16,14 +16,14 @@ export const ConnectorCreateBody = z.object({
   name: z.string().min(1).max(100),
   kind: z.string().min(1).max(50),
   description: z.string().max(1000).optional(),
-});
-export type ConnectorCreateBody = z.infer<typeof ConnectorCreateBody>;
+})
+export type ConnectorCreateBody = z.infer<typeof ConnectorCreateBody>
 
 export const ConnectorPatchBody = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(1000).nullable().optional(),
-});
-export type ConnectorPatchBody = z.infer<typeof ConnectorPatchBody>;
+})
+export type ConnectorPatchBody = z.infer<typeof ConnectorPatchBody>
 
 // ---------------------------------------------------------------------------
 // Query params for GET /v1/connectors.
@@ -32,8 +32,8 @@ export type ConnectorPatchBody = z.infer<typeof ConnectorPatchBody>;
 export const ConnectorListQuery = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
-});
-export type ConnectorListQuery = z.infer<typeof ConnectorListQuery>;
+})
+export type ConnectorListQuery = z.infer<typeof ConnectorListQuery>
 
 // ---------------------------------------------------------------------------
 // Connector row — serializeTimestamps() output of src/db/pool.ts `connectors`.
@@ -52,8 +52,8 @@ export const Connector = z
     created_at: IsoTimestamp,
     updated_at: IsoTimestamp,
   })
-  .extend(SoftDeleteFields.shape);
-export type Connector = z.infer<typeof Connector>;
+  .extend(SoftDeleteFields.shape)
+export type Connector = z.infer<typeof Connector>
 
 // ---------------------------------------------------------------------------
 // Response wrappers.
@@ -63,22 +63,22 @@ export type Connector = z.infer<typeof Connector>;
 export const ConnectorListResponse = z.object({
   connectors: z.array(Connector),
   next_cursor: z.string().nullable(),
-});
-export type ConnectorListResponse = z.infer<typeof ConnectorListResponse>;
+})
+export type ConnectorListResponse = z.infer<typeof ConnectorListResponse>
 
 /** POST /v1/connectors → `{ connector, key }` (201). Raw key shown exactly once. */
 export const ConnectorCreateResponse = z.object({
   connector: Connector,
   /** Full bearer token — shown to the caller exactly once. */
   key: z.string(),
-});
-export type ConnectorCreateResponse = z.infer<typeof ConnectorCreateResponse>;
+})
+export type ConnectorCreateResponse = z.infer<typeof ConnectorCreateResponse>
 
 /** GET /v1/connectors/:id and PATCH /v1/connectors/:id → `{ connector }`. */
 export const ConnectorDetailResponse = z.object({
   connector: Connector,
-});
-export type ConnectorDetailResponse = z.infer<typeof ConnectorDetailResponse>;
+})
+export type ConnectorDetailResponse = z.infer<typeof ConnectorDetailResponse>
 
 /**
  * POST /v1/connectors/:id/rotate-key → `{ key, expires_old_at }`.
@@ -87,9 +87,9 @@ export type ConnectorDetailResponse = z.infer<typeof ConnectorDetailResponse>;
 export const ConnectorRotateKeyResponse = z.object({
   key: z.string(),
   expires_old_at: IsoTimestamp.nullable(),
-});
-export type ConnectorRotateKeyResponse = z.infer<typeof ConnectorRotateKeyResponse>;
+})
+export type ConnectorRotateKeyResponse = z.infer<typeof ConnectorRotateKeyResponse>
 
 /** DELETE /v1/connectors/:id → `{}` (200). */
-export const ConnectorDeleteResponse = z.object({}).strict();
-export type ConnectorDeleteResponse = z.infer<typeof ConnectorDeleteResponse>;
+export const ConnectorDeleteResponse = z.object({}).strict()
+export type ConnectorDeleteResponse = z.infer<typeof ConnectorDeleteResponse>

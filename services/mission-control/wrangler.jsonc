@@ -9,8 +9,8 @@
   "compatibility_flags": ["nodejs_compat"],
 
   "observability": {
-		"enabled": true
-	},
+    "enabled": true,
+  },
 
   // Workers Assets — serves the SPA built into web/dist/ by Vite. The Cloudflare
   // Vite plugin auto-populates `directory` and `binding` at build time, so we
@@ -21,7 +21,7 @@
   //     check entirely and hits the Hono router directly.
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*"],
   },
 
   // Single DB in dev (single-DB mode); SaaS prod overrides via env-specific blocks.
@@ -32,13 +32,13 @@
       "binding": "DB",
       "database_name": "mission-control-dev",
       "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations/combined"
-    }
+      "migrations_dir": "migrations/combined",
+    },
   ],
 
   "vars": {
     "DB_MODE": "single",
-    "BETTER_AUTH_URL": "http://localhost:8787"
+    "BETTER_AUTH_URL": "http://localhost:8787",
     // EMAIL_FROM intentionally unset in dev → sendEmail() no-ops (logs only).
     // To actually send mail in dev, set EMAIL_FROM and add a send_email binding.
   },
@@ -51,32 +51,30 @@
     "production": {
       "vars": {
         "DB_MODE": "split",
-        "EMAIL_FROM": "no-reply@mc.example.com"
+        "EMAIL_FROM": "no-reply@mc.example.com",
       },
-      "send_email": [
-        { "name": "EMAIL", "remote": true }
-      ],
+      "send_email": [{ "name": "EMAIL", "remote": true }],
       "d1_databases": [
         {
           "binding": "MASTER_DB",
           "database_name": "mc-master-prod",
           "database_id": "REPLACE_WITH_PROD_MASTER_ID",
-          "migrations_dir": "migrations/master"
+          "migrations_dir": "migrations/master",
         },
         {
           "binding": "POOL_DEFAULT",
           "database_name": "mc-pool-default-prod",
           "database_id": "REPLACE_WITH_PROD_POOL_DEFAULT_ID",
-          "migrations_dir": "migrations/pool"
-        }
+          "migrations_dir": "migrations/pool",
+        },
       ],
       "triggers": {
         "crons": [
-          "0 3 * * *",      // events purge — see src/jobs/cron.ts
-          "0 4 * * *",      // idempotency purge
-          "*/15 * * * *"    // verification purge
-        ]
-      }
-    }
-  }
+          "0 3 * * *", // events purge — see src/jobs/cron.ts
+          "0 4 * * *", // idempotency purge
+          "*/15 * * * *", // verification purge
+        ],
+      },
+    },
+  },
 }

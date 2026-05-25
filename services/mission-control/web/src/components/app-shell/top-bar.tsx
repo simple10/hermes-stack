@@ -1,6 +1,6 @@
-import { OrgSwitcher } from './org-switcher';
-import { ThemeToggle } from './theme-toggle';
-import { UserButton } from '@/components/auth/user/user-button';
+import { OrgSwitcher } from './org-switcher'
+import { ThemeToggle } from './theme-toggle'
+import { UserButton } from '@/components/auth/user/user-button'
 
 export function TopBar() {
   return (
@@ -16,5 +16,5 @@ export function TopBar() {
         </div>
       </div>
     </header>
-  );
+  )
 }

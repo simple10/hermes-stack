@@ -13,34 +13,40 @@
  *
  * UNIQUE violation on insert (name per org) → throws DuplicateError('agent', {}).
  */
-import { and, eq, desc, sql, type SQL } from 'drizzle-orm';
-import { agents } from '../pool.ts';
-import { active, isUniqueViolation } from '../helpers.ts';
-import { makeId } from '../../ids.ts';
-import { DuplicateError } from './_errors.ts';
-import type { AuthContext } from '../../auth/types.ts';
+import { and, eq, desc, sql, type SQL } from 'drizzle-orm'
+import { agents } from '../pool.ts'
+import { active, isUniqueViolation } from '../helpers.ts'
+import { makeId } from '../../ids.ts'
+import { DuplicateError } from './_errors.ts'
+import type { AuthContext } from '../../auth/types.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type AgentRow = typeof agents.$inferSelect;
+type AgentRow = typeof agents.$inferSelect
 
-type AgentInsertInput = Omit<typeof agents.$inferInsert,
-  'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'deletedByType' | 'deletedById'>;
+type AgentInsertInput = Omit<
+  typeof agents.$inferInsert,
+  'id' | 'orgId' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'deletedByType' | 'deletedById'
+>
 
-type AgentUpdateInput = Partial<Omit<typeof agents.$inferInsert,
-  'id' | 'orgId' | 'createdAt' | 'deletedAt' | 'deletedByType' | 'deletedById'>>;
+type AgentUpdateInput = Partial<
+  Omit<
+    typeof agents.$inferInsert,
+    'id' | 'orgId' | 'createdAt' | 'deletedAt' | 'deletedByType' | 'deletedById'
+  >
+>
 
 export interface AgentListFilter {
-  limit?: number;
-  cursor?: { updatedAt: number; id: string };
+  limit?: number
+  cursor?: { updatedAt: number; id: string }
 }
 
 /** Optional actor override for softDelete (for compensating actions). */
 export interface SoftDeleteActor {
-  type: string;
-  id: string | null;
+  type: string
+  id: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -48,55 +54,61 @@ export interface SoftDeleteActor {
 // ---------------------------------------------------------------------------
 
 export function agentsRepo(ctx: AuthContext) {
-  const scope = and(eq(agents.orgId, ctx.orgId), active(agents));
+  const scope = and(eq(agents.orgId, ctx.orgId), active(agents))
 
   return {
     async findById(id: string): Promise<AgentRow | null> {
-      const rows = await ctx.pool.select().from(agents)
-        .where(and(scope, eq(agents.id, id))).limit(1);
-      return rows[0] ?? null;
+      const rows = await ctx.pool
+        .select()
+        .from(agents)
+        .where(and(scope, eq(agents.id, id)))
+        .limit(1)
+      return rows[0] ?? null
     },
 
     async list(filter: AgentListFilter = {}): Promise<AgentRow[]> {
-      const conditions: SQL[] = [scope!];
+      const conditions: SQL[] = [scope!]
       if (filter.cursor) {
         conditions.push(
           sql`(${agents.updatedAt}, ${agents.id}) > (${filter.cursor.updatedAt}, ${filter.cursor.id})`,
-        );
+        )
       }
-      return ctx.pool.select().from(agents)
+      return ctx.pool
+        .select()
+        .from(agents)
         .where(and(...conditions))
         .orderBy(agents.updatedAt, agents.id)
-        .limit(filter.limit ?? 50);
+        .limit(filter.limit ?? 50)
     },
 
     async insert(values: AgentInsertInput): Promise<AgentRow> {
-      const id = makeId('agent');
-      const now = Date.now();
+      const id = makeId('agent')
+      const now = Date.now()
       const row = {
         ...values,
         id,
         orgId: ctx.orgId,
         createdAt: now,
         updatedAt: now,
-      };
+      }
       try {
-        const inserted = await ctx.pool.insert(agents).values(row).returning();
-        return inserted[0]!;
+        const inserted = await ctx.pool.insert(agents).values(row).returning()
+        return inserted[0]!
       } catch (e) {
         if (isUniqueViolation(e)) {
-          throw new DuplicateError('agent', {}, 'agent.duplicate_name');
+          throw new DuplicateError('agent', {}, 'agent.duplicate_name')
         }
-        throw e;
+        throw e
       }
     },
 
     async update(id: string, patch: AgentUpdateInput): Promise<AgentRow | null> {
-      const updated = await ctx.pool.update(agents)
+      const updated = await ctx.pool
+        .update(agents)
         .set({ ...patch, updatedAt: Date.now() })
         .where(and(scope, eq(agents.id, id)))
-        .returning();
-      return updated[0] ?? null;
+        .returning()
+      return updated[0] ?? null
     },
 
     /**
@@ -109,9 +121,10 @@ export function agentsRepo(ctx: AuthContext) {
      *              matches existing behavior.
      */
     async softDelete(id: string, actor?: SoftDeleteActor): Promise<AgentRow | null> {
-      const now = Date.now();
-      const deleter = actor ?? { type: ctx.principal.type, id: ctx.principal.id };
-      const updated = await ctx.pool.update(agents)
+      const now = Date.now()
+      const deleter = actor ?? { type: ctx.principal.type, id: ctx.principal.id }
+      const updated = await ctx.pool
+        .update(agents)
         .set({
           deletedAt: now,
           deletedByType: deleter.type,
@@ -120,16 +133,18 @@ export function agentsRepo(ctx: AuthContext) {
         })
         // For compensating deletes (actor override) don't apply the principal scope.
         // For normal deletes, apply scope to prevent cross-org accidents.
-        .where(actor
-          ? and(eq(agents.id, id), eq(agents.orgId, ctx.orgId))
-          : and(scope, eq(agents.id, id)))
-        .returning();
-      return updated[0] ?? null;
+        .where(
+          actor
+            ? and(eq(agents.id, id), eq(agents.orgId, ctx.orgId))
+            : and(scope, eq(agents.id, id)),
+        )
+        .returning()
+      return updated[0] ?? null
     },
 
     // Escape hatches
     scoped: () => ctx.pool.select().from(agents).where(scope),
     scope: scope!,
     table: agents,
-  };
+  }
 }

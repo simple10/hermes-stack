@@ -14,16 +14,16 @@
  * resolution, when there is no AuthContext yet.  Any code that has a ctx
  * should use membersRepo(ctx).roleForCurrentUser() instead.
  */
-import { and, eq } from 'drizzle-orm';
-import { member } from '../master.ts';
-import { masterClient } from '../client.ts';
-import type { AuthContext } from '../../auth/types.ts';
+import { and, eq } from 'drizzle-orm'
+import { member } from '../master.ts'
+import { masterClient } from '../client.ts'
+import type { AuthContext } from '../../auth/types.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type MemberRow = typeof member.$inferSelect;
+type MemberRow = typeof member.$inferSelect
 
 // ---------------------------------------------------------------------------
 // Static lookup — for middleware (no ctx available)
@@ -40,13 +40,13 @@ export async function lookupMemberRole(
   userId: string,
   orgId: string,
 ): Promise<{ role: string } | null> {
-  const master = masterClient(env);
+  const master = masterClient(env)
   const rows = await master
     .select({ role: member.role })
     .from(member)
     .where(and(eq(member.userId, userId), eq(member.organizationId, orgId)))
-    .limit(1);
-  return rows[0] ?? null;
+    .limit(1)
+  return rows[0] ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ export async function lookupMemberRole(
 // ---------------------------------------------------------------------------
 
 export function membersRepo(ctx: AuthContext) {
-  const master = masterClient(ctx.env);
+  const master = masterClient(ctx.env)
 
   return {
     /**
@@ -62,20 +62,17 @@ export function membersRepo(ctx: AuthContext) {
      * Returns null if the current user (ctx.viaUserId) is not a member.
      */
     async roleForCurrentUser(): Promise<{ role: string } | null> {
-      if (!ctx.viaUserId) return null;
-      return lookupMemberRole(ctx.env, ctx.viaUserId, ctx.orgId);
+      if (!ctx.viaUserId) return null
+      return lookupMemberRole(ctx.env, ctx.viaUserId, ctx.orgId)
     },
 
     /**
      * List all members of ctx.orgId.
      */
     async list(): Promise<MemberRow[]> {
-      return master
-        .select()
-        .from(member)
-        .where(eq(member.organizationId, ctx.orgId));
+      return master.select().from(member).where(eq(member.organizationId, ctx.orgId))
     },
 
     table: member,
-  };
+  }
 }

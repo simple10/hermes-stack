@@ -12,7 +12,7 @@ This spec covers the central task-coordination API only. Notion connector, herme
 
 A single API that lets a user create projects and tasks, assigns them to **agent instances** (Hermes VMs, Claude sessions, OpenClaw runs, …), tracks status as agents work, and exposes a unified change log that external systems (Notion, Linear, custom dashboards) can sync against bidirectionally.
 
-The user's mental model: *"I'm creating a task in Notion (or our UI) and assigning it to one of my agents. I want to see the status update in Notion as the agent works."* How the agent decomposes and executes the work internally (subagents, swarms, local kanban) is not the master's concern.
+The user's mental model: _"I'm creating a task in Notion (or our UI) and assigning it to one of my agents. I want to see the status update in Notion as the agent works."_ How the agent decomposes and executes the work internally (subagents, swarms, local kanban) is not the master's concern.
 
 **Architectural principle:** integration happens from the agent up, not the API down. The API stays agent-agnostic; each agent type owns its own adapter. This way, adding a new agent type (or a new connector) doesn't churn API code.
 
@@ -30,12 +30,12 @@ The user's mental model: *"I'm creating a task in Notion (or our UI) and assigni
 
 ## Deployment model
 
-| | Production (SaaS) | Self-hosted (OSS) | Contributor dev |
-|---|---|---|---|
-| Runtime | Cloudflare Workers | `wrangler dev` (Docker container) | `wrangler dev` directly |
-| Database | D1 (sharded — see below) | Local SQLite via D1 (`wrangler dev --persist-to /data`) | Local SQLite via wrangler |
-| Cron | Cloudflare Cron Triggers | Wrangler cron simulation | n/a v1 |
-| Push (v1.1) | Streaming Response (SSE) | Same | Same |
+|             | Production (SaaS)        | Self-hosted (OSS)                                       | Contributor dev           |
+| ----------- | ------------------------ | ------------------------------------------------------- | ------------------------- |
+| Runtime     | Cloudflare Workers       | `wrangler dev` (Docker container)                       | `wrangler dev` directly   |
+| Database    | D1 (sharded — see below) | Local SQLite via D1 (`wrangler dev --persist-to /data`) | Local SQLite via wrangler |
+| Cron        | Cloudflare Cron Triggers | Wrangler cron simulation                                | n/a v1                    |
+| Push (v1.1) | Streaming Response (SSE) | Same                                                    | Same                      |
 
 One Hono codebase, one runtime (Cloudflare Workers / wrangler). Driver selection removed; all paths use `drizzle-orm/d1`.
 
@@ -78,7 +78,7 @@ Future:
   POOL_SHARDED_001  (D1 #3)   ← spillover for new free-tier signups
 ```
 
-**Why two tiers:** the api-key lookup must happen *before* we know which pool to query, so identity & routing have to live in a fixed-location master. Everything else is pool-scoped task data and can be sharded.
+**Why two tiers:** the api-key lookup must happen _before_ we know which pool to query, so identity & routing have to live in a fixed-location master. Everything else is pool-scoped task data and can be sharded.
 
 **Why pre-declared bindings (not dynamic D1 HTTP API):** Workers can't create bindings at runtime, but a small registry mapping `tenantPoolId → env.POOL_X` lets us pick the right binding per request at native-binding latency. Adding a new pool = `wrangler d1 create` + add to `wrangler.toml` + deploy. Ops event, not hot path.
 
@@ -89,12 +89,14 @@ Future:
 For OSS self-hosters and local contributors, **DB_MODE is always `single`**. SaaS production is always `split`. We do not support a self-hoster running split-mode or a SaaS deployment running single-mode — that drift gets messy fast.
 
 In `single` mode:
+
 - One D1 binding named `DB` (local SQLite file managed by `wrangler dev`).
 - Both `migrations/master/*` and `migrations/pool/*` apply to the same `DB`, in numeric order interleaved per source. Since table names don't collide (no `tasks` in master, no `organization` in pool), they coexist cleanly.
 - `POOL_BINDING_MAP['default']` resolves to `env.DB` — same binding the master client uses. Pool resolver returns the same Drizzle client. Zero branching in handlers.
 - `tenant_pools` registry table still exists; it's seeded with a single row `('default', 'DB')` and isn't user-extensible self-host. No-op for OSS but keeps schema parity with SaaS.
 
 In `split` mode:
+
 - Bindings: `MASTER_DB`, `POOL_DEFAULT`, and (later) `POOL_PREMIUM_*`, etc.
 - `migrations/master/*` applies to `MASTER_DB`. `migrations/pool/*` applies independently to each `POOL_*` binding.
 - The resolver maps `organization.tenantPoolId → env.POOL_X` per request.
@@ -105,16 +107,16 @@ The `db/client.ts` resolver returns `{ master, pool }` Drizzle clients per reque
 
 ## Stack
 
-| Concern | Choice |
-|---|---|
-| HTTP framework | Hono — runs on Workers, Node, Bun, Deno |
-| Database | D1 (Workers) — local SQLite via wrangler for self-host |
-| ORM | Drizzle (`drizzle-orm/d1`) |
-| Migrations | SQL files via `wrangler d1 migrations` + Drizzle's migrator |
-| Validation | Zod (on every request body and query param) |
-| Auth | **better-auth** with `organization` + `apiKey` plugins (Drizzle adapter, master DB only) |
-| Logging | Hono's logger middleware + structured JSON to stderr (CF gives us this for free) |
-| Testing | Vitest + `@cloudflare/vitest-pool-workers` |
+| Concern        | Choice                                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| HTTP framework | Hono — runs on Workers, Node, Bun, Deno                                                  |
+| Database       | D1 (Workers) — local SQLite via wrangler for self-host                                   |
+| ORM            | Drizzle (`drizzle-orm/d1`)                                                               |
+| Migrations     | SQL files via `wrangler d1 migrations` + Drizzle's migrator                              |
+| Validation     | Zod (on every request body and query param)                                              |
+| Auth           | **better-auth** with `organization` + `apiKey` plugins (Drizzle adapter, master DB only) |
+| Logging        | Hono's logger middleware + structured JSON to stderr (CF gives us this for free)         |
+| Testing        | Vitest + `@cloudflare/vitest-pool-workers`                                               |
 
 ---
 
@@ -146,13 +148,13 @@ The prefix is **informational only**. The source of truth for authorization is `
 
 ### Principal model
 
-The credential (api key) is **always owned by a user** (better-auth requires `userId`). The *actor* the system reasons about is determined by `metadata.type`:
+The credential (api key) is **always owned by a user** (better-auth requires `userId`). The _actor_ the system reasons about is determined by `metadata.type`:
 
-| `metadata.type` | Acts as | Bound to entity |
-|---|---|---|
-| `'pat'` | The human user themselves (full role from `member.role`) | — |
-| `'agent'` | An agent in the `agents` table | `metadata.agent_id` |
-| `'connector'` | A connector (registered via `POST /v1/connectors`) | `metadata.connector_id` |
+| `metadata.type` | Acts as                                                  | Bound to entity         |
+| --------------- | -------------------------------------------------------- | ----------------------- |
+| `'pat'`         | The human user themselves (full role from `member.role`) | —                       |
+| `'agent'`       | An agent in the `agents` table                           | `metadata.agent_id`     |
+| `'connector'`   | A connector (registered via `POST /v1/connectors`)       | `metadata.connector_id` |
 
 This is the GitHub-Apps / Slack-bots / Notion-integrations pattern: the credential happens to be owned by a user for audit + revocation, but the actor recorded in events / accessible to handlers is the agent or connector. **Agents are not users.** Agent identity lives in the `agents` table (in pool DB); the api key in master is just the credential.
 
@@ -160,20 +162,21 @@ This is the GitHub-Apps / Slack-bots / Notion-integrations pattern: the credenti
 
 Human roles come from better-auth's organization plugin (per `member.role`):
 
-| role | Scope |
-|---|---|
-| `owner` | Everything in their org. Manage members, billing, api_keys, agents, projects, all tasks. |
-| `admin` | Same as owner except no billing, no removing other admins/owners. |
-| `member` | Create/edit projects, tasks, comments. Mint agent keys. No org admin. |
+| role     | Scope                                                                                    |
+| -------- | ---------------------------------------------------------------------------------------- |
+| `owner`  | Everything in their org. Manage members, billing, api_keys, agents, projects, all tasks. |
+| `admin`  | Same as owner except no billing, no removing other admins/owners.                        |
+| `member` | Create/edit projects, tasks, comments. Mint agent keys. No org admin.                    |
 
 Machine roles (set via `metadata.type` on the api key):
 
-| role | Scope |
-|---|---|
-| `agent` | Read tasks where `agent_id == metadata.agent_id`. Update those tasks (status + metadata only). Post `external_refs` where `source_id == metadata.agent_id`. Post comments on own tasks. Heartbeats (v1.1). |
-| `connector` | Full task & project CRUD across the org. Read `events`. Write `external_refs` where `source_id == metadata.connector_id`. |
+| role        | Scope                                                                                                                                                                                                      |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`     | Read tasks where `agent_id == metadata.agent_id`. Update those tasks (status + metadata only). Post `external_refs` where `source_id == metadata.agent_id`. Post comments on own tasks. Heartbeats (v1.1). |
+| `connector` | Full task & project CRUD across the org. Read `events`. Write `external_refs` where `source_id == metadata.connector_id`.                                                                                  |
 
 Enforcement lives in Hono middleware:
+
 - `requireMember('owner'|'admin'|'member')` for human-scoped routes (uses better-auth session OR PAT)
 - `requireMachine('agent'|'connector')` for M2M routes
 - `requireOwnAgent` for agent routes that touch a specific task (checks `tasks.agent_id === ctx.principal.id`)
@@ -232,21 +235,23 @@ Better-auth queries only master. Our custom resolver maps `orgId → pool bindin
 
 ```typescript
 const POOL_BINDING_MAP: Record<string, keyof Env> = {
-  'default':       'POOL_DEFAULT',
-  'premium-acme':  'POOL_PREMIUM_ACME',
+  default: 'POOL_DEFAULT',
+  'premium-acme': 'POOL_PREMIUM_ACME',
   // … added per provisioning event; deployed via wrangler.toml + this map
-};
+}
 
 async function resolvePoolForOrg(env: Env, orgId: string): Promise<DrizzleClient> {
   const tenantPoolId = await orgPoolCache.get(orgId, async () => {
-    const org = await master(env).query.organization
-      .findFirst({ where: eq(organization.id, orgId), columns: { tenantPoolId: true } });
-    if (!org) throw new HttpError(404, 'auth.org_not_found');
-    return org.tenantPoolId;
-  });
-  const binding = env[POOL_BINDING_MAP[tenantPoolId]];
-  if (!binding) throw new HttpError(500, 'pool.binding_missing');
-  return drizzle(binding, { schema: poolSchema });
+    const org = await master(env).query.organization.findFirst({
+      where: eq(organization.id, orgId),
+      columns: { tenantPoolId: true },
+    })
+    if (!org) throw new HttpError(404, 'auth.org_not_found')
+    return org.tenantPoolId
+  })
+  const binding = env[POOL_BINDING_MAP[tenantPoolId]]
+  if (!binding) throw new HttpError(500, 'pool.binding_missing')
+  return drizzle(binding, { schema: poolSchema })
 }
 ```
 
@@ -257,6 +262,7 @@ In single-DB mode: `POOL_BINDING_MAP['default'] === 'DB'` — same binding maste
 For SaaS: better-auth's signup flow handles first-user creation; the first user creates their org via the organization plugin's API; better-auth assigns `member.role='owner'` automatically. From there they mint agent keys via `POST /v1/agents`.
 
 For self-host: an **in-process startup hook** runs on every Worker boot:
+
 1. Check if any `user` row exists in master. If yes → no-op, continue.
 2. If no users AND `MC_ADMIN_TOKEN` env var is set → expose a one-time `POST /v1/bootstrap` endpoint that takes `{email, password, org_name}` + the admin token in header, creates the first user + first org via better-auth's server-side API, returns the user's first PAT.
 3. The endpoint disables itself once any user exists (the same first-check shuts the gate).
@@ -267,7 +273,8 @@ This avoids the chicken-and-egg "no user can sign up without a UI" without needi
 For local dev: `pnpm seed:dev` calls the same `/v1/bootstrap` against `wrangler dev` + sets up a demo org with example agents/connectors/projects.
 
 **Amendment 2026-05-24 (MC UI v1):**
-1. The API mount prefix moved from `/v1/*` to `/api/v1/*` so the `/api/` prefix can form a clean boundary with the SPA fallthrough served by Workers Assets. Every endpoint listed below — including `/v1/bootstrap`, `/v1/auth/*`, etc. — now lives under `/api/v1/...`. The Hermes plugin's `HERMES_MC_URL` env var convention is the base URL *up to but excluding* `/v1/` (so combined-deploy values become `https://mc.example.com/api`; subdomain-deploy values stay `https://api.example.com`).
+
+1. The API mount prefix moved from `/v1/*` to `/api/v1/*` so the `/api/` prefix can form a clean boundary with the SPA fallthrough served by Workers Assets. Every endpoint listed below — including `/v1/bootstrap`, `/v1/auth/*`, etc. — now lives under `/api/v1/...`. The Hermes plugin's `HERMES_MC_URL` env var convention is the base URL _up to but excluding_ `/v1/` (so combined-deploy values become `https://mc.example.com/api`; subdomain-deploy values stay `https://api.example.com`).
 2. The `/api/v1/bootstrap` handler now marks the user it creates as `emailVerified: true`. The UI enables `requireEmailVerification: true` in better-auth's config, so a non-pre-verified bootstrap user would be locked out of sign-in. Operators presenting `MC_ADMIN_TOKEN` are implicitly verifying the email they type.
 
 Both changes ship with the MC UI v1 work; see [`docs/specs/2026-05-24-mc-ui-design.md`](../../../../docs/specs/2026-05-24-mc-ui-design.md).
@@ -277,16 +284,19 @@ Both changes ship with the MC UI v1 work; see [`docs/specs/2026-05-24-mc-ui-desi
 ## Schema (v1)
 
 **Standard columns** (apply to all tables EXCEPT where noted in the exemptions below):
+
 - `id` (string, slug-prefixed: `org_…`, `usr_…`, `t_…`, `prj_…`, etc.)
 - `created_at` (integer, ms since epoch)
 - `updated_at` (integer, ms since epoch; bumped on every mutation via Drizzle `$onUpdate` AND by a SQLite trigger so raw SQL paths bump too)
 
 **User-mutable tables additionally include** (soft-delete columns):
+
 - `deleted_at` (integer nullable; NULL = active)
 - `deleted_by_type` (`'user'|'agent'|'connector'|'system'`)
 - `deleted_by_id` (string)
 
 **Exemptions from soft-delete (and standard-column variations):**
+
 - `events` — append-only audit log; no `updated_at`, no `deleted_at`. Retention purged on schedule (v1: 365d default, configurable).
 - `idempotency_keys` — composite PK `(org_id, route, key)` instead of `id`; no `updated_at`; TTL-purged via `expires_at` instead of soft-delete.
 - `apiKey`, `session`, `account`, `verification`, `invitation` — better-auth-managed; use their own lifecycle fields (see auth section).
@@ -323,11 +333,11 @@ plugins: [
       organization: {
         additionalFields: {
           tenantPoolId: { type: 'string', required: true, defaultValue: 'default' },
-          plan:         { type: 'string', required: true, defaultValue: 'free' },
-          deletedAt:    { type: 'date',   required: false },
-        }
-      }
-    }
+          plan: { type: 'string', required: true, defaultValue: 'free' },
+          deletedAt: { type: 'date', required: false },
+        },
+      },
+    },
   }),
   apiKey({
     schema: {
@@ -335,11 +345,11 @@ plugins: [
         additionalFields: {
           // Promoted from metadata to typed columns for indexed lookups + admin
           // queries. agent_id / connector_id stay in metadata (low cardinality).
-          orgId:         { type: 'string', required: true },
+          orgId: { type: 'string', required: true },
           principalType: { type: 'string', required: true }, // 'pat'|'agent'|'connector'
-        }
-      }
-    }
+        },
+      },
+    },
   }),
 ]
 ```
@@ -348,8 +358,8 @@ plugins: [
 
 ```json
 {
-  "agent_id":     "agt_xxx",   // when principalType='agent'
-  "connector_id": "cnn_xxx"    // when principalType='connector'
+  "agent_id": "agt_xxx", // when principalType='agent'
+  "connector_id": "cnn_xxx" // when principalType='connector'
 }
 ```
 
@@ -361,7 +371,7 @@ Every pool DB query MUST be scoped by `org_id`. We enforce this through three la
 
 1. **Strong: a typed query helper** (`withOrg(ctx).from(tasks)…`) that auto-injects `WHERE org_id = ctx.orgId` on selects and rejects inserts missing `org_id`. Used for 100% of route-handler queries.
 2. **Medium: mandatory multi-tenant isolation tests.** Every route handler test inserts two orgs, performs the operation in one, asserts the other org sees nothing. Lifted to a Vitest matcher (`expect(handler).toBeIsolated()`) so it's enforced by the test runner, not by discipline.
-3. **Weak but real: a CI lint rule** that flags raw `db.run(sql\`…\`)` or `db.select().from(t).where(…)` calls that don't go through the helper. Allowlisted exceptions for migration scripts and admin tools.
+3. **Weak but real: a CI lint rule** that flags raw `db.run(sql\`…\`)`or`db.select().from(t).where(…)` calls that don't go through the helper. Allowlisted exceptions for migration scripts and admin tools.
 
 We do NOT promise compile-time guarantees that org leakage is impossible — Drizzle's query builder is dynamic enough that a determined developer can bypass the helper. The combination of helper + tests + lint catches the realistic mistake patterns.
 
@@ -378,6 +388,7 @@ CREATE TABLE tenant_pools (
 Tenant_pools is a simple registry — the routing table the Worker consults to map `organization.tenantPoolId` to a binding name. Seeded with `('default', 'POOL_DEFAULT')` at install.
 
 Note: organization soft-delete uses the `deletedAt` custom field above. Better-auth's session/account/verification/apiKey/invitation tables don't get soft-delete — they use their built-in lifecycle fields:
+
 - `apiKey.enabled` (boolean) + `apiKey.expiresAt` together cover revocation. To "revoke" a key, set `enabled=false`.
 - `session.expiresAt` covers session invalidation.
 - `verification.expiresAt` covers expiring email-verification / password-reset tokens.
@@ -558,7 +569,7 @@ CREATE INDEX idempotency_keys_expires ON idempotency_keys(expires_at);
 
 1. **App-level cascade** — every resource delete (soft or hard) goes through a typed helper:
    ```ts
-   await deleteResource(db, ctx, { type: 'task', id });
+   await deleteResource(db, ctx, { type: 'task', id })
    // → tx: soft-delete task, soft-delete its comments, soft-delete its external_refs,
    //   emit task.deleted event
    ```
@@ -579,10 +590,12 @@ CREATE INDEX idempotency_keys_expires ON idempotency_keys(expires_at);
 A single helper makes `WHERE deleted_at IS NULL` impossible to forget:
 
 ```ts
-import { isNull, and, eq } from 'drizzle-orm';
-export const active = <T extends { deletedAt: Column }>(t: T) => isNull(t.deletedAt);
+import { isNull, and, eq } from 'drizzle-orm'
+export const active = <T extends { deletedAt: Column }>(t: T) => isNull(t.deletedAt)
 
-db.select().from(tasks).where(and(eq(tasks.orgId, ctx.orgId), active(tasks)));
+db.select()
+  .from(tasks)
+  .where(and(eq(tasks.orgId, ctx.orgId), active(tasks)))
 ```
 
 Convention: every read of a soft-deletable table goes through `active()`. CI lint rule enforces (v1). See "Pool-DB tenant isolation" in the auth section for the layered enforcement of `WHERE org_id = ?`.
@@ -598,6 +611,7 @@ All routes prefixed `/v1`. JSON in / JSON out. Bearer auth required on every rou
 Better-auth ships its own handler covering signup, signin, signout, OAuth, magic links, email verification, password reset, session refresh, organization CRUD, member invitations, and api-key management. We mount it under `/v1/auth/*` and let it handle the request lifecycle there. See the better-auth docs for the full surface.
 
 Key flows we lean on:
+
 - `POST /v1/auth/sign-up/email` — first user signup (creates user + initial org)
 - `POST /v1/auth/sign-in/{email,oauth/...,magic-link}` — sessions
 - `POST /v1/auth/organization/create` — additional orgs
@@ -780,11 +794,12 @@ POST   /v1/users                                   — direct user CRUD (UI work
                   │   in_progress
                   │
                   └─────────────────► cancelled (terminal)
-                  
+
               anywhere ─────────────► failed (terminal)
 ```
 
 Statuses:
+
 - `pending` — created, not yet assigned to an agent (`agent_id IS NULL`).
 - `ready` — `agent_id` is set; waiting for the agent to claim. Agents poll `?status=ready`.
 - `in_progress` — agent has claimed it (PATCH `status=in_progress` sets `started_at`).
@@ -808,24 +823,26 @@ Every transition emits an `event` row with `kind = 'status_changed'` and `payloa
 JSON envelope per response:
 
 ```json
-{ "error": {
+{
+  "error": {
     "code": "task.not_found",
     "message": "Task t_abc not found in org o_xyz",
     "details": { "task_id": "t_abc" }
-} }
+  }
+}
 ```
 
-| HTTP | Used for |
-|---|---|
-| 400 | Request shape invalid (Zod failure) |
-| 401 | Missing / unparseable / unrecognized token |
-| 403 | Token valid but role insufficient |
-| 404 | Resource doesn't exist (or is soft-deleted and caller can't see soft-deleted) |
-| 409 | Idempotency conflict OR state-machine violation OR duplicate slug/name OR active-tasks-blocking-delete |
-| 422 | Semantic validation (e.g. assigning to a `deleted_at` agent) |
-| 429 | Rate limit |
-| 500 | Server error — logged with request ID, returned without internals |
-| 503 | Pool binding missing (deployment skew between master DB + wrangler bindings); transient — retry-safe |
+| HTTP | Used for                                                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------ |
+| 400  | Request shape invalid (Zod failure)                                                                    |
+| 401  | Missing / unparseable / unrecognized token                                                             |
+| 403  | Token valid but role insufficient                                                                      |
+| 404  | Resource doesn't exist (or is soft-deleted and caller can't see soft-deleted)                          |
+| 409  | Idempotency conflict OR state-machine violation OR duplicate slug/name OR active-tasks-blocking-delete |
+| 422  | Semantic validation (e.g. assigning to a `deleted_at` agent)                                           |
+| 429  | Rate limit                                                                                             |
+| 500  | Server error — logged with request ID, returned without internals                                      |
+| 503  | Pool binding missing (deployment skew between master DB + wrangler bindings); transient — retry-safe   |
 
 Error codes are stable dot-namespaced strings: `task.not_found`, `task.invalid_transition`, `auth.role_insufficient`, `idempotency.conflict`, etc. The error code map is exported as part of the SDK (v1.1).
 
@@ -836,14 +853,16 @@ Error codes are stable dot-namespaced strings: `task.not_found`, `task.invalid_t
 Two layers, each serving a distinct purpose:
 
 **Layer 1 — Generic API-level idempotency (Stripe-style):**
+
 - Caller sends `Idempotency-Key: <opaque-string>` header on `POST /v1/tasks` and `POST /v1/external_refs`.
 - Server stores `(org_id, route, key) → (status, body)` in `idempotency_keys` (D1 pool DB) with 24h TTL via `expires_at`.
 - Repeat request with same key + same body = returns cached response.
-- Repeat with same key + *different* body = `409 idempotency.conflict`.
+- Repeat with same key + _different_ body = `409 idempotency.conflict`.
 - Useful for retries on flaky networks.
 - **Cost note:** every `POST /v1/tasks` writes one extra D1 row. At v1 scale (~10k tasks/day org) this is ~$1/month/org — acceptable. KV would be cheaper, but KV's eventual consistency is wrong for dedup (you could return cached response based on a stale read). Sticking with D1.
 
 **Layer 2 — Semantic dedup via `tasks.idempotency_key`:**
+
 - Caller sets `idempotency_key: "<source_kind>:<source_id>:<external_id>:<version>"` in the request body (e.g. `"notion:ws_abc:page_xyz:v3"`).
 - **Caller is responsible for namespacing.** The unique index is `(org_id, idempotency_key)` only — no `source_kind` column. Two different Notion workspaces in the same org both using `"notion:<page_id>"` would collide.
 - **Format validation (v1):** keys must match `^[a-z][a-z0-9_-]{0,31}:.{1,200}$` — a lowercase source-kind prefix (1-32 chars, starts with a letter), a colon, then up to 200 chars of namespace/id payload. Examples: `"notion:ws_abc:page_xyz:v3"`, `"hermes:t_abc123"`, `"mc:t_xyz"`. The Zod validator returns `400 idempotency.format` on mismatch. This catches the common footgun of passing a raw external id without a source prefix, which would silently share the namespace with every other caller that did the same.
@@ -936,6 +955,7 @@ Consumers reading the event log MUST handle "resource-missing" on follow-up fetc
 No external APM in v1. Workers' built-in observability covers the basics.
 
 **Logging hygiene (NEVER log):**
+
 - Full bearer tokens (only the display prefix is OK)
 - Request bodies on `/v1/auth/*` (passwords, OAuth tokens flow through)
 - `apiKey.metadata` raw (contains org_id which is fine, but in case future plugins add secrets)
@@ -957,6 +977,7 @@ Better-auth issues session cookies with `SameSite=Lax` and `Secure` (production)
 ### CORS
 
 Two modes:
+
 - **SaaS production:** allowed origins from `CORS_ALLOWED_ORIGINS` env var (comma-separated). Credentials enabled. Strict allowlist; no wildcards.
 - **OSS self-host:** defaults to NO origins until configured. The first thing a self-hoster does is set `CORS_ALLOWED_ORIGINS=https://my.notion-connector.example,…`.
 - **Local dev:** `http://localhost:*` allowed via a dev-only middleware bypass when `DB_MODE=single` AND `NODE_ENV=development`.
@@ -985,16 +1006,16 @@ Better-auth's apiKey rate limiting (the `rateLimitEnabled` flags) is disabled �
 
 Required at startup:
 
-| Var | Required | Default | Notes |
-|---|---|---|---|
-| `BETTER_AUTH_SECRET` | yes | — | 32+ random bytes; used for session signing + cursor HMAC |
-| `BETTER_AUTH_URL` | yes | — | Public base URL (`https://api.example.com` or `http://localhost:8787`) |
-| `DB_MODE` | no | `single` | `single` or `split` |
-| `CORS_ALLOWED_ORIGINS` | no | (empty) | Comma-separated origins for browser clients |
-| `MC_ADMIN_TOKEN` | no¹ | — | Required to call `/v1/bootstrap` on first run |
-| `KEY_ROTATION_GRACE_SECONDS` | no | `300` | Old key valid for N seconds after rotate-key |
-| `EVENTS_RETENTION_DAYS` | no | `365` | Cron purges events older than this |
-| `IDEMPOTENCY_TTL_SECONDS` | no | `86400` | Layer-1 idempotency cache TTL |
+| Var                          | Required | Default  | Notes                                                                  |
+| ---------------------------- | -------- | -------- | ---------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`         | yes      | —        | 32+ random bytes; used for session signing + cursor HMAC               |
+| `BETTER_AUTH_URL`            | yes      | —        | Public base URL (`https://api.example.com` or `http://localhost:8787`) |
+| `DB_MODE`                    | no       | `single` | `single` or `split`                                                    |
+| `CORS_ALLOWED_ORIGINS`       | no       | (empty)  | Comma-separated origins for browser clients                            |
+| `MC_ADMIN_TOKEN`             | no¹      | —        | Required to call `/v1/bootstrap` on first run                          |
+| `KEY_ROTATION_GRACE_SECONDS` | no       | `300`    | Old key valid for N seconds after rotate-key                           |
+| `EVENTS_RETENTION_DAYS`      | no       | `365`    | Cron purges events older than this                                     |
+| `IDEMPOTENCY_TTL_SECONDS`    | no       | `86400`  | Layer-1 idempotency cache TTL                                          |
 
 OAuth providers (per-provider): `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc. — configured as better-auth `socialProviders`. Omitted providers simply don't appear on the sign-in surface.
 
@@ -1035,11 +1056,11 @@ Every response carries `X-Request-Id: <cf-request-id>` so callers can quote it i
 
 ### Cron-triggered tasks (Cloudflare Cron Triggers)
 
-| Cron | What | When |
-|---|---|---|
-| `0 3 * * *` | Purge `events` older than `EVENTS_RETENTION_DAYS` | Daily 03:00 UTC |
-| `0 4 * * *` | Purge `idempotency_keys` past `expires_at` | Daily 04:00 UTC |
-| `*/15 * * * *` | Purge expired `verification` rows (better-auth) | Every 15min |
+| Cron           | What                                              | When            |
+| -------------- | ------------------------------------------------- | --------------- |
+| `0 3 * * *`    | Purge `events` older than `EVENTS_RETENTION_DAYS` | Daily 03:00 UTC |
+| `0 4 * * *`    | Purge `idempotency_keys` past `expires_at`        | Daily 04:00 UTC |
+| `*/15 * * * *` | Purge expired `verification` rows (better-auth)   | Every 15min     |
 
 For self-host, wrangler dev simulates cron triggers via `--test-scheduled`. Crons run on the same Workers schedule as prod.
 
@@ -1132,6 +1153,7 @@ The OSS Docker image runs **`wrangler dev`** (not a separate Node server). This 
 self-host and prod on identical code paths — the same Workers bundle runs everywhere.
 
 Two clear personas:
+
 - **OSS self-hoster:** `docker run mc-image` → wrangler dev + local SQLite-backed D1 persisted to `/data`.
 - **Contributor / SaaS dev:** `wrangler dev` on the dev machine → workerd + local D1 + hot reload.
 
@@ -1183,20 +1205,20 @@ This validates the whole architecture before any agent or connector integration 
 
 ## What's deliberately deferred
 
-| Item | Why deferred |
-|---|---|
-| `task_links` (parent/child) | Subtask graphs stay in agents' local kanbans per the design principle. |
-| `task_runs` | Master tracks final outcome; agents track retries locally. |
-| Heartbeat endpoint | `tasks.updated_at` is a sufficient proxy for v1 cadences; middleware also bumps `agents.last_seen_at` / `connectors.last_seen_at` on every authed request. |
-| SSE / WebSockets (`GET /v1/stream/events`) | Polling `GET /v1/events` at 10-30s is free and dead-simple to debug; add streaming when latency matters. |
-| Server-side cursors | Client-side is sufficient until multi-instance consumers or admin lag visibility need it. |
-| Fine-grained scopes | Coarse roles cover v1; add scope strings when an integration genuinely needs less than `connector`. |
-| User CRUD via API | Bootstrap script + direct DB v1; user-API arrives with the custom UI work. |
-| Webhooks out | Pull (event log) is enough for v1. |
-| Per-tenant D1 (sharded pools) | Schema supports it via `tenant_pool_id`; ops setup waits for the first paying customer. |
-| Billing / metering / rate limits | `orgs.plan` exists; enforcement waits for SaaS launch. |
-| Notion connector | Separate spec — `2026-MM-DD-notion-connector-design.md`. |
-| Hermes adapter | Separate spec — `2026-MM-DD-hermes-adapter-design.md`. |
+| Item                                       | Why deferred                                                                                                                                               |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_links` (parent/child)                | Subtask graphs stay in agents' local kanbans per the design principle.                                                                                     |
+| `task_runs`                                | Master tracks final outcome; agents track retries locally.                                                                                                 |
+| Heartbeat endpoint                         | `tasks.updated_at` is a sufficient proxy for v1 cadences; middleware also bumps `agents.last_seen_at` / `connectors.last_seen_at` on every authed request. |
+| SSE / WebSockets (`GET /v1/stream/events`) | Polling `GET /v1/events` at 10-30s is free and dead-simple to debug; add streaming when latency matters.                                                   |
+| Server-side cursors                        | Client-side is sufficient until multi-instance consumers or admin lag visibility need it.                                                                  |
+| Fine-grained scopes                        | Coarse roles cover v1; add scope strings when an integration genuinely needs less than `connector`.                                                        |
+| User CRUD via API                          | Bootstrap script + direct DB v1; user-API arrives with the custom UI work.                                                                                 |
+| Webhooks out                               | Pull (event log) is enough for v1.                                                                                                                         |
+| Per-tenant D1 (sharded pools)              | Schema supports it via `tenant_pool_id`; ops setup waits for the first paying customer.                                                                    |
+| Billing / metering / rate limits           | `orgs.plan` exists; enforcement waits for SaaS launch.                                                                                                     |
+| Notion connector                           | Separate spec — `2026-MM-DD-notion-connector-design.md`.                                                                                                   |
+| Hermes adapter                             | Separate spec — `2026-MM-DD-hermes-adapter-design.md`.                                                                                                     |
 
 ---
 

@@ -9,9 +9,9 @@
  *   const { success } = await env.RATE_LIMITER.limit({ key: c.req.header('cf-connecting-ip') ?? 'unknown' });
  *   if (!success) return c.json({ error: 'rate_limited' }, 429);
  */
-import type { MiddlewareHandler } from 'hono';
+import type { MiddlewareHandler } from 'hono'
 
 export const rateLimitMiddleware: MiddlewareHandler = async (c, next) => {
   // v1 stub: no-op — passes through to the next handler.
-  await next();
-};
+  await next()
+}

@@ -4,5 +4,5 @@ export default function App() {
       <h1>MissionControl UI</h1>
       <p>SPA scaffold bootstrapped — Phase 2 verification target.</p>
     </div>
-  );
+  )
 }

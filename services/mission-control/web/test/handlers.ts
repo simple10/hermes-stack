@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse } from 'msw'
 
 /**
  * Default MSW handlers — empty-state responses for every list endpoint the UI
@@ -10,5 +10,7 @@ export const handlers = [
   http.get('/api/v1/projects', () => HttpResponse.json({ projects: [], next_cursor: null })),
   http.get('/api/v1/tasks', () => HttpResponse.json({ tasks: [], next_cursor: null })),
   http.get('/api/v1/events', () => HttpResponse.json({ events: [], next_cursor: null })),
-  http.get('/api/v1/external_refs', () => HttpResponse.json({ external_refs: [], next_cursor: null })),
-];
+  http.get('/api/v1/external_refs', () =>
+    HttpResponse.json({ external_refs: [], next_cursor: null }),
+  ),
+]

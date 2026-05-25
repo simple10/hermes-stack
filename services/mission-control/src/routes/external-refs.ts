@@ -33,23 +33,23 @@
  * Cursor payload: { createdAt, id, orgId }
  */
 
-import { Hono } from 'hono';
-import { requireAnyRole } from '../auth/middleware.ts';
-import { HttpError, errorResponse } from '../errors.ts';
-import { serializeTimestamps } from '../db/helpers.ts';
-import { db } from '../db/repos/index.ts';
-import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts';
-import type { AuthContext } from '../auth/types.ts';
+import { Hono } from 'hono'
+import { requireAnyRole } from '../auth/middleware.ts'
+import { HttpError, errorResponse } from '../errors.ts'
+import { serializeTimestamps } from '../db/helpers.ts'
+import { db } from '../db/repos/index.ts'
+import { encodeCursor, decodeCursor, clampLimit } from '../pagination.ts'
+import type { AuthContext } from '../auth/types.ts'
 import {
   ExternalRefCreateBody as createBody,
   ExternalRefListQuery as listQuery,
   type ExternalRefResourceType,
-} from '../schemas/external-refs.ts';
+} from '../schemas/external-refs.ts'
 
-type Variables = { auth: AuthContext };
+type Variables = { auth: AuthContext }
 
 // authMiddleware is applied at the /api/v1 parent in src/index.ts.
-export const externalRefsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
+export const externalRefsRouter = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 // ---------------------------------------------------------------------------
 // Resource existence validation helper
@@ -60,24 +60,24 @@ async function validateResourceExists(
   resource_type: ExternalRefResourceType,
   resource_id: string,
 ): Promise<void> {
-  let found = false;
+  let found = false
 
   switch (resource_type) {
     case 'task':
-      found = (await db.tasks(ctx).findByIdForOrg(resource_id)) !== null;
-      break;
+      found = (await db.tasks(ctx).findByIdForOrg(resource_id)) !== null
+      break
     case 'project':
-      found = (await db.projects(ctx).findById(resource_id)) !== null;
-      break;
+      found = (await db.projects(ctx).findById(resource_id)) !== null
+      break
     case 'agent':
-      found = (await db.agents(ctx).findById(resource_id)) !== null;
-      break;
+      found = (await db.agents(ctx).findById(resource_id)) !== null
+      break
     case 'connector':
-      found = (await db.connectors(ctx).findById(resource_id)) !== null;
-      break;
+      found = (await db.connectors(ctx).findById(resource_id)) !== null
+      break
     case 'comment':
-      found = (await db.comments(ctx).findById(resource_id)) !== null;
-      break;
+      found = (await db.comments(ctx).findById(resource_id)) !== null
+      break
   }
 
   if (!found) {
@@ -85,7 +85,7 @@ async function validateResourceExists(
       422,
       'external_ref.invalid_resource',
       `${resource_type} '${resource_id}' not found or inactive in this org`,
-    );
+    )
   }
 }
 
@@ -98,26 +98,34 @@ externalRefsRouter.post(
   requireAnyRole('owner', 'admin', 'member', 'connector', 'agent'),
   async (c) => {
     try {
-      const ctx = c.var.auth;
+      const ctx = c.var.auth
 
       const raw = await c.req.json().catch(() => {
-        throw new HttpError(400, 'external_ref.bad_request', 'Request body must be valid JSON');
-      });
+        throw new HttpError(400, 'external_ref.bad_request', 'Request body must be valid JSON')
+      })
 
-      const input = createBody.safeParse(raw);
+      const input = createBody.safeParse(raw)
       if (!input.success) {
         throw new HttpError(
           400,
           'external_ref.validation_error',
           input.error.issues[0]?.message ?? 'Validation failed',
           input.error.issues,
-        );
+        )
       }
 
-      const { resource_type, resource_id, source_kind, source_id, external_id, external_url, metadata } = input.data;
+      const {
+        resource_type,
+        resource_id,
+        source_kind,
+        source_id,
+        external_id,
+        external_url,
+        metadata,
+      } = input.data
 
       // Validate the target resource exists and belongs to this org.
-      await validateResourceExists(ctx, resource_type, resource_id);
+      await validateResourceExists(ctx, resource_type, resource_id)
 
       // Insert the ref. The repo enforces source_id for agent/connector principals
       // (throws ForbiddenError → 403) and catches UNIQUE violation (DuplicateError → 409).
@@ -130,21 +138,21 @@ externalRefsRouter.post(
         externalId: external_id,
         externalUrl: external_url ?? null,
         metadata: metadata ? JSON.stringify(metadata) : null,
-      });
+      })
 
       await db.events(ctx).emit({
         resourceType: resource_type,
         resourceId: resource_id,
         kind: 'external_ref.added',
         payload: { ref: serializeTimestamps(row) },
-      });
+      })
 
-      return c.json({ external_ref: serializeTimestamps(row) }, 201);
+      return c.json({ external_ref: serializeTimestamps(row) }, 201)
     } catch (e) {
-      return errorResponse(c, e);
+      return errorResponse(c, e)
     }
   },
-);
+)
 
 // ---------------------------------------------------------------------------
 // GET /v1/external_refs
@@ -155,7 +163,7 @@ externalRefsRouter.get(
   requireAnyRole('owner', 'admin', 'member', 'connector', 'agent'),
   async (c) => {
     try {
-      const ctx = c.var.auth;
+      const ctx = c.var.auth
 
       const queryRaw = {
         resource_type: c.req.query('resource_type'),
@@ -165,25 +173,29 @@ externalRefsRouter.get(
         external_id: c.req.query('external_id'),
         cursor: c.req.query('cursor'),
         limit: c.req.query('limit'),
-      };
-
-      const queryParsed = listQuery.safeParse(queryRaw);
-      if (!queryParsed.success) {
-        throw new HttpError(400, 'external_ref.validation_error', 'Invalid query parameters');
       }
 
-      const q = queryParsed.data;
-      const limit = clampLimit(q.limit, 50, 100);
-      const secret = c.env.BETTER_AUTH_SECRET ?? '';
+      const queryParsed = listQuery.safeParse(queryRaw)
+      if (!queryParsed.success) {
+        throw new HttpError(400, 'external_ref.validation_error', 'Invalid query parameters')
+      }
 
-      let cursor: { createdAt: number; id: string } | undefined;
+      const q = queryParsed.data
+      const limit = clampLimit(q.limit, 50, 100)
+      const secret = c.env.BETTER_AUTH_SECRET ?? ''
+
+      let cursor: { createdAt: number; id: string } | undefined
 
       if (q.cursor) {
-        const decoded = await decodeCursor(q.cursor, secret);
+        const decoded = await decodeCursor(q.cursor, secret)
         if (!decoded || decoded.orgId !== ctx.orgId) {
-          throw new HttpError(400, 'external_ref.invalid_cursor', 'Invalid or expired pagination cursor');
+          throw new HttpError(
+            400,
+            'external_ref.invalid_cursor',
+            'Invalid or expired pagination cursor',
+          )
         }
-        cursor = { createdAt: decoded.updatedAt, id: decoded.id };
+        cursor = { createdAt: decoded.updatedAt, id: decoded.id }
       }
 
       let rows = await db.externalRefs(ctx).list({
@@ -194,29 +206,29 @@ externalRefsRouter.get(
         externalId: q.external_id,
         limit: limit + 1,
         cursor,
-      });
+      })
 
-      const hasMore = rows.length > limit;
-      if (hasMore) rows = rows.slice(0, limit);
+      const hasMore = rows.length > limit
+      if (hasMore) rows = rows.slice(0, limit)
 
-      let nextCursor: string | null = null;
+      let nextCursor: string | null = null
       if (hasMore) {
-        const last = rows[rows.length - 1]!;
+        const last = rows[rows.length - 1]!
         nextCursor = await encodeCursor(
           { updatedAt: last.createdAt, id: last.id, orgId: ctx.orgId },
           secret,
-        );
+        )
       }
 
       return c.json({
         external_refs: rows.map(serializeTimestamps),
         next_cursor: nextCursor,
-      });
+      })
     } catch (e) {
-      return errorResponse(c, e);
+      return errorResponse(c, e)
     }
   },
-);
+)
 
 // ---------------------------------------------------------------------------
 // DELETE /v1/external_refs/:id
@@ -227,12 +239,12 @@ externalRefsRouter.delete(
   requireAnyRole('owner', 'admin', 'member', 'connector', 'agent'),
   async (c) => {
     try {
-      const ctx = c.var.auth;
-      const id = c.req.param('id');
+      const ctx = c.var.auth
+      const id = c.req.param('id')
 
-      const existing = await db.externalRefs(ctx).findById(id);
+      const existing = await db.externalRefs(ctx).findById(id)
       if (!existing) {
-        throw new HttpError(404, 'external_ref.not_found', `External ref ${id} not found`);
+        throw new HttpError(404, 'external_ref.not_found', `External ref ${id} not found`)
       }
 
       // Agent role: can only delete refs where source_id == principal.id.
@@ -241,21 +253,21 @@ externalRefsRouter.delete(
           403,
           'external_ref.forbidden',
           'Agents can only delete external refs they created (source_id must equal their own id)',
-        );
+        )
       }
 
-      await db.externalRefs(ctx).softDelete(id);
+      await db.externalRefs(ctx).softDelete(id)
 
       await db.events(ctx).emit({
         resourceType: existing.resourceType,
         resourceId: existing.resourceId,
         kind: 'external_ref.removed',
         payload: { ref_id: id },
-      });
+      })
 
-      return c.json({}, 200);
+      return c.json({}, 200)
     } catch (e) {
-      return errorResponse(c, e);
+      return errorResponse(c, e)
     }
   },
-);
+)

@@ -6,13 +6,7 @@
  * registry table.  This file is the Drizzle source of truth; drizzle-kit
  * reads it to generate migrations/master/*.sql.
  */
-import {
-  sqliteTable,
-  text,
-  integer,
-  index,
-  uniqueIndex,
-} from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 // ---------------------------------------------------------------------------
 // Core better-auth tables
@@ -26,11 +20,13 @@ export const user = sqliteTable('user', {
   image: text('image'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-});
+})
 
 export const session = sqliteTable('session', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   token: text('token').notNull().unique(),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
   ipAddress: text('ip_address'),
@@ -39,11 +35,13 @@ export const session = sqliteTable('session', {
   activeOrganizationId: text('active_organization_id'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-});
+})
 
 export const account = sqliteTable('account', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   accountId: text('account_id').notNull(),
   providerId: text('provider_id').notNull(),
   accessToken: text('access_token'),
@@ -55,7 +53,7 @@ export const account = sqliteTable('account', {
   password: text('password'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-});
+})
 
 export const verification = sqliteTable('verification', {
   id: text('id').primaryKey(),
@@ -64,7 +62,7 @@ export const verification = sqliteTable('verification', {
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-});
+})
 
 // ---------------------------------------------------------------------------
 // Organization plugin tables
@@ -82,77 +80,93 @@ export const organization = sqliteTable('organization', {
   tenantPoolId: text('tenant_pool_id').notNull().default('default'),
   plan: text('plan').notNull().default('free'),
   deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
-});
+})
 
-export const member = sqliteTable('member', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
-  role: text('role').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-}, (t) => [
-  uniqueIndex('member_org_user').on(t.organizationId, t.userId),
-]);
+export const member = sqliteTable(
+  'member',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('member_org_user').on(t.organizationId, t.userId)],
+)
 
 export const invitation = sqliteTable('invitation', {
   id: text('id').primaryKey(),
-  organizationId: text('organization_id').notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  organizationId: text('organization_id')
+    .notNull()
+    .references(() => organization.id, { onDelete: 'cascade' }),
   email: text('email').notNull(),
   role: text('role').notNull(),
   status: text('status').notNull().default('pending'),
-  inviterId: text('inviter_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  inviterId: text('inviter_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-});
+})
 
 // ---------------------------------------------------------------------------
 // API Key plugin table
 // ---------------------------------------------------------------------------
 
-export const apiKey = sqliteTable('apiKey', {
-  id: text('id').primaryKey(),
-  name: text('name'),
-  start: text('start'),
-  prefix: text('prefix'),
-  key: text('key').notNull(),
-  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
-  refillInterval: integer('refill_interval'),
-  refillAmount: integer('refill_amount'),
-  lastRefillAt: integer('last_refill_at', { mode: 'timestamp_ms' }),
-  enabled: integer('enabled', { mode: 'boolean' }).default(true),
-  rateLimitEnabled: integer('rate_limit_enabled', { mode: 'boolean' }).default(true),
-  rateLimitTimeWindow: integer('rate_limit_time_window'),
-  rateLimitMax: integer('rate_limit_max'),
-  requestCount: integer('request_count').default(0),
-  remaining: integer('remaining'),
-  lastRequest: integer('last_request', { mode: 'timestamp_ms' }),
-  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-  permissions: text('permissions'),
-  metadata: text('metadata'),
-  // better-auth 1.6+ apikey fields (both required by the plugin):
-  //   - configId scopes a key to one of the plugin's `configurations`
-  //     (we use 'default' since we don't define multiple configurations).
-  //     verifyApiKey rejects keys whose configId ≠ opts.configId.
-  //   - referenceId is the owner-of-record (user id for user-owned keys;
-  //     org id for org-owned keys).
-  configId: text('config_id').notNull().default('default'),
-  referenceId: text('reference_id').notNull(),
-  // additionalFields — promoted from metadata for indexed lookups
-  orgId: text('org_id').notNull(),
-  principalType: text('principal_type').notNull(),
-}, (t) => [
-  index('api_key_org_principal').on(t.orgId, t.principalType),
-  index('api_key_config').on(t.configId),
-  index('api_key_reference').on(t.referenceId),
-]);
+export const apiKey = sqliteTable(
+  'apiKey',
+  {
+    id: text('id').primaryKey(),
+    name: text('name'),
+    start: text('start'),
+    prefix: text('prefix'),
+    key: text('key').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    refillInterval: integer('refill_interval'),
+    refillAmount: integer('refill_amount'),
+    lastRefillAt: integer('last_refill_at', { mode: 'timestamp_ms' }),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true),
+    rateLimitEnabled: integer('rate_limit_enabled', { mode: 'boolean' }).default(true),
+    rateLimitTimeWindow: integer('rate_limit_time_window'),
+    rateLimitMax: integer('rate_limit_max'),
+    requestCount: integer('request_count').default(0),
+    remaining: integer('remaining'),
+    lastRequest: integer('last_request', { mode: 'timestamp_ms' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    permissions: text('permissions'),
+    metadata: text('metadata'),
+    // better-auth 1.6+ apikey fields (both required by the plugin):
+    //   - configId scopes a key to one of the plugin's `configurations`
+    //     (we use 'default' since we don't define multiple configurations).
+    //     verifyApiKey rejects keys whose configId ≠ opts.configId.
+    //   - referenceId is the owner-of-record (user id for user-owned keys;
+    //     org id for org-owned keys).
+    configId: text('config_id').notNull().default('default'),
+    referenceId: text('reference_id').notNull(),
+    // additionalFields — promoted from metadata for indexed lookups
+    orgId: text('org_id').notNull(),
+    principalType: text('principal_type').notNull(),
+  },
+  (t) => [
+    index('api_key_org_principal').on(t.orgId, t.principalType),
+    index('api_key_config').on(t.configId),
+    index('api_key_reference').on(t.referenceId),
+  ],
+)
 
 // ---------------------------------------------------------------------------
 // Custom master table — tenant pool registry
 // ---------------------------------------------------------------------------
 
 export const tenantPools = sqliteTable('tenant_pools', {
-  id: text('id').primaryKey(),           // 'default', 'premium-acme', 'sharded-001'
+  id: text('id').primaryKey(), // 'default', 'premium-acme', 'sharded-001'
   bindingName: text('binding_name').notNull(), // 'POOL_DEFAULT', 'POOL_PREMIUM_ACME', …
   createdAt: integer('created_at').notNull(), // ms since epoch
-});
+})

@@ -10,9 +10,9 @@
  * This replaces the standalone emitEvent() function that previously lived in
  * src/events/emit.ts (deleted in Task 4 of the DAL refactor).
  */
-import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
-import { events } from '../pool.ts';
-import type { AuthContext } from '../../auth/types.ts';
+import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm'
+import { events } from '../pool.ts'
+import type { AuthContext } from '../../auth/types.ts'
 
 // ---------------------------------------------------------------------------
 // Event type catalogue (moved here from the deleted src/events/emit.ts)
@@ -38,14 +38,9 @@ export type EventKind =
   | 'comment.created'
   | 'comment.deleted'
   | 'external_ref.added'
-  | 'external_ref.removed';
+  | 'external_ref.removed'
 
-export type ResourceType =
-  | 'task'
-  | 'project'
-  | 'agent'
-  | 'connector'
-  | 'comment';
+export type ResourceType = 'task' | 'project' | 'agent' | 'connector' | 'comment'
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -59,10 +54,10 @@ export function eventsRepo(ctx: AuthContext) {
      * orgId and actor are derived from ctx; callers only supply kind-specific args.
      */
     async emit(args: {
-      resourceType: string;
-      resourceId: string;
-      kind: string;
-      payload?: unknown;
+      resourceType: string
+      resourceId: string
+      kind: string
+      payload?: unknown
     }): Promise<void> {
       await ctx.pool.insert(events).values({
         orgId: ctx.orgId,
@@ -73,7 +68,7 @@ export function eventsRepo(ctx: AuthContext) {
         actorId: ctx.principal.id,
         payload: args.payload !== undefined ? JSON.stringify(args.payload) : null,
         createdAt: Date.now(),
-      });
+      })
     },
 
     /**
@@ -93,43 +88,36 @@ export function eventsRepo(ctx: AuthContext) {
      * since cursor suffices.
      */
     async list(args: {
-      since: number;
-      kinds?: string[]; // resource_type values
-      limit: number;
-      cursor?: string | null;
-      order?: 'asc' | 'desc';
-    }): Promise<{ rows: typeof events.$inferSelect[]; nextCursorId: number | null }> {
-      const lower = args.cursor ? Number(args.cursor) : args.since;
-      const conditions = [
-        eq(events.orgId, ctx.orgId),
-        gt(events.id, lower),
-      ];
+      since: number
+      kinds?: string[] // resource_type values
+      limit: number
+      cursor?: string | null
+      order?: 'asc' | 'desc'
+    }): Promise<{ rows: (typeof events.$inferSelect)[]; nextCursorId: number | null }> {
+      const lower = args.cursor ? Number(args.cursor) : args.since
+      const conditions = [eq(events.orgId, ctx.orgId), gt(events.id, lower)]
       if (args.kinds && args.kinds.length > 0) {
-        conditions.push(inArray(events.resourceType, args.kinds));
+        conditions.push(inArray(events.resourceType, args.kinds))
       }
-      const orderBy = args.order === 'desc' ? desc(events.id) : asc(events.id);
+      const orderBy = args.order === 'desc' ? desc(events.id) : asc(events.id)
       const rows = await ctx.pool
         .select()
         .from(events)
         .where(and(...conditions))
         .orderBy(orderBy)
-        .limit(args.limit + 1);
+        .limit(args.limit + 1)
 
-      const hasMore = rows.length > args.limit;
-      const trimmed = hasMore ? rows.slice(0, args.limit) : rows;
+      const hasMore = rows.length > args.limit
+      const trimmed = hasMore ? rows.slice(0, args.limit) : rows
       // nextCursorId only meaningful for ASC order — DESC is a tail-lookup
       // mode, not a paging mode. Callers should re-issue with a refreshed
       // since if they need to scan further back.
       const nextCursorId =
-        args.order === 'desc'
-          ? null
-          : hasMore
-            ? trimmed[trimmed.length - 1]!.id
-            : null;
-      return { rows: trimmed, nextCursorId };
+        args.order === 'desc' ? null : hasMore ? trimmed[trimmed.length - 1]!.id : null
+      return { rows: trimmed, nextCursorId }
     },
 
     // table exposed for system.purgeOlderThan and future analytics
     table: events,
-  };
+  }
 }

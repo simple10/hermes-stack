@@ -8,26 +8,25 @@
  * The route handler is responsible for checking the caller has owner/admin role
  * before calling update.
  */
-import { eq } from 'drizzle-orm';
-import { organization } from '../master.ts';
-import { masterClient } from '../client.ts';
-import type { AuthContext } from '../../auth/types.ts';
+import { eq } from 'drizzle-orm'
+import { organization } from '../master.ts'
+import { masterClient } from '../client.ts'
+import type { AuthContext } from '../../auth/types.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type OrgRow = typeof organization.$inferSelect;
+type OrgRow = typeof organization.$inferSelect
 
-type OrgUpdateInput = Partial<Omit<typeof organization.$inferInsert,
-  'id' | 'createdAt'>>;
+type OrgUpdateInput = Partial<Omit<typeof organization.$inferInsert, 'id' | 'createdAt'>>
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
 export function orgsRepo(ctx: AuthContext) {
-  const master = masterClient(ctx.env);
+  const master = masterClient(ctx.env)
 
   return {
     /**
@@ -38,8 +37,8 @@ export function orgsRepo(ctx: AuthContext) {
         .select()
         .from(organization)
         .where(eq(organization.id, ctx.orgId))
-        .limit(1);
-      return rows[0] ?? null;
+        .limit(1)
+      return rows[0] ?? null
     },
 
     /**
@@ -51,10 +50,10 @@ export function orgsRepo(ctx: AuthContext) {
         .update(organization)
         .set({ ...patch, updatedAt: new Date() })
         .where(eq(organization.id, ctx.orgId))
-        .returning();
-      return updated[0] ?? null;
+        .returning()
+      return updated[0] ?? null
     },
 
     table: organization,
-  };
+  }
 }

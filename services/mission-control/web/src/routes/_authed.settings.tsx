@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
+import { createFileRoute, Link, Outlet } from '@tanstack/react-router'
 
 const LINKS = [
   { to: '/settings/profile', label: 'Profile' },
@@ -7,11 +7,11 @@ const LINKS = [
   { to: '/settings/organization', label: 'Organization' },
   { to: '/settings/organization/members', label: 'Members' },
   { to: '/settings/organization/invitations', label: 'Invitations' },
-];
+]
 
 export const Route = createFileRoute('/_authed/settings')({
   component: SettingsLayout,
-});
+})
 
 function SettingsLayout() {
   return (
@@ -32,5 +32,5 @@ function SettingsLayout() {
         <Outlet />
       </div>
     </div>
-  );
+  )
 }

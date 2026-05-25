@@ -7,17 +7,17 @@
  *
  * Returns { userId, orgId, pat } so callers can authenticate as this org.
  */
-import { drizzle } from 'drizzle-orm/d1';
-import * as masterSchema from '../../src/db/master.ts';
-import { mintApiKey } from '../../src/auth/api-keys.ts';
-import { makeId } from '../../src/ids.ts';
+import { drizzle } from 'drizzle-orm/d1'
+import * as masterSchema from '../../src/db/master.ts'
+import { mintApiKey } from '../../src/auth/api-keys.ts'
+import { makeId } from '../../src/ids.ts'
 
-const { user, account, organization, member } = masterSchema;
+const { user, account, organization, member } = masterSchema
 
 export interface OrgFixture {
-  userId: string;
-  orgId: string;
-  pat: string;
+  userId: string
+  orgId: string
+  pat: string
 }
 
 /**
@@ -32,14 +32,14 @@ export async function createOrgFixture(
   name: string,
   slug: string,
 ): Promise<OrgFixture> {
-  const drizzleDb = drizzle(db, { schema: masterSchema });
+  const drizzleDb = drizzle(db, { schema: masterSchema })
 
-  const userId = makeId('user');
-  const orgId = makeId('org');
-  const memberId = makeId('mbr');
-  const accountId = makeId('acct');
-  const now = new Date();
-  const email = `${slug}-fixture@example.com`;
+  const userId = makeId('user')
+  const orgId = makeId('org')
+  const memberId = makeId('mbr')
+  const accountId = makeId('acct')
+  const now = new Date()
+  const email = `${slug}-fixture@example.com`
 
   // Insert user.
   await drizzleDb.insert(user).values({
@@ -49,7 +49,7 @@ export async function createOrgFixture(
     emailVerified: true,
     createdAt: now,
     updatedAt: now,
-  });
+  })
 
   // Insert a credential account (needed for FK integrity in some better-auth flows,
   // though for API-key-only tests it's mostly for completeness).
@@ -61,7 +61,7 @@ export async function createOrgFixture(
     password: 'hashed-for-test-only',
     createdAt: now,
     updatedAt: now,
-  });
+  })
 
   // Insert organization.
   await drizzleDb.insert(organization).values({
@@ -70,7 +70,7 @@ export async function createOrgFixture(
     slug,
     createdAt: now,
     updatedAt: now,
-  });
+  })
 
   // Insert member (owner).
   await drizzleDb.insert(member).values({
@@ -79,7 +79,7 @@ export async function createOrgFixture(
     userId,
     role: 'owner',
     createdAt: now,
-  });
+  })
 
   // Mint PAT.
   const { rawKey: pat } = await mintApiKey(drizzleDb as any, {
@@ -88,9 +88,9 @@ export async function createOrgFixture(
     userId,
     orgId,
     principalType: 'pat',
-  });
+  })
 
-  return { userId, orgId, pat };
+  return { userId, orgId, pat }
 }
 
 /**
@@ -103,13 +103,13 @@ export async function createMemberFixture(
   slug: string,
   role: 'admin' | 'member' = 'member',
 ): Promise<{ userId: string; pat: string }> {
-  const drizzleDb = drizzle(db, { schema: masterSchema });
+  const drizzleDb = drizzle(db, { schema: masterSchema })
 
-  const userId = makeId('user');
-  const memberId = makeId('mbr');
-  const accountId = makeId('acct');
-  const now = new Date();
-  const email = `${slug}-member@example.com`;
+  const userId = makeId('user')
+  const memberId = makeId('mbr')
+  const accountId = makeId('acct')
+  const now = new Date()
+  const email = `${slug}-member@example.com`
 
   await drizzleDb.insert(user).values({
     id: userId,
@@ -118,7 +118,7 @@ export async function createMemberFixture(
     emailVerified: true,
     createdAt: now,
     updatedAt: now,
-  });
+  })
 
   await drizzleDb.insert(account).values({
     id: accountId,
@@ -128,7 +128,7 @@ export async function createMemberFixture(
     password: 'hashed-for-test-only',
     createdAt: now,
     updatedAt: now,
-  });
+  })
 
   await drizzleDb.insert(member).values({
     id: memberId,
@@ -136,7 +136,7 @@ export async function createMemberFixture(
     userId,
     role,
     createdAt: now,
-  });
+  })
 
   const { rawKey: pat } = await mintApiKey(drizzleDb as any, {
     prefix: 'mcpat_',
@@ -144,7 +144,7 @@ export async function createMemberFixture(
     userId,
     orgId,
     principalType: 'pat',
-  });
+  })
 
-  return { userId, pat };
+  return { userId, pat }
 }

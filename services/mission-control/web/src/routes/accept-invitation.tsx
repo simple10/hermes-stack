@@ -1,38 +1,38 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
-import { z } from 'zod';
-import { authClient } from '@/lib/auth-client';
-import { toast } from 'sonner';
-import { messageFor } from '@/lib/error-messages';
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { z } from 'zod'
+import { authClient } from '@/lib/auth-client'
+import { toast } from 'sonner'
+import { messageFor } from '@/lib/error-messages'
 
-const searchSchema = z.object({ token: z.string().optional() });
+const searchSchema = z.object({ token: z.string().optional() })
 
 export const Route = createFileRoute('/accept-invitation')({
   validateSearch: searchSchema,
   component: AcceptInvitationRoute,
-});
+})
 
 function AcceptInvitationRoute() {
-  const { token } = Route.useSearch();
-  const navigate = useNavigate();
+  const { token } = Route.useSearch()
+  const navigate = useNavigate()
   const [status, setStatus] = useState<'pending' | 'ok' | 'error' | 'no-token'>(
     token ? 'pending' : 'no-token',
-  );
+  )
 
   useEffect(() => {
-    if (!token) return;
-    (async () => {
+    if (!token) return
+    ;(async () => {
       try {
-        await (authClient as any).organization.acceptInvitation({ invitationId: token });
-        toast.success('Invitation accepted');
-        setStatus('ok');
-        setTimeout(() => navigate({ to: '/tasks' as any }), 1000);
+        await (authClient as any).organization.acceptInvitation({ invitationId: token })
+        toast.success('Invitation accepted')
+        setStatus('ok')
+        setTimeout(() => navigate({ to: '/tasks' as any }), 1000)
       } catch (e) {
-        toast.error(messageFor(e));
-        setStatus('error');
+        toast.error(messageFor(e))
+        setStatus('error')
       }
-    })();
-  }, [token, navigate]);
+    })()
+  }, [token, navigate])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30">
@@ -44,12 +44,13 @@ function AcceptInvitationRoute() {
           {status === 'error' && 'Could not accept invitation'}
         </h1>
         <p className="text-muted-foreground">
-          {status === 'no-token' && 'The invitation link is missing its token. Check your email and click the link again.'}
+          {status === 'no-token' &&
+            'The invitation link is missing its token. Check your email and click the link again.'}
           {status === 'pending' && 'One moment…'}
           {status === 'ok' && 'Redirecting you to MissionControl…'}
           {status === 'error' && 'The link may have expired. Ask the inviter for a fresh one.'}
         </p>
       </div>
     </div>
-  );
+  )
 }

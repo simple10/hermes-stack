@@ -11,7 +11,7 @@
  * forget.  CI lint rule catches raw selects that bypass this helper.
  */
 
-import { isNull } from 'drizzle-orm';
+import { isNull } from 'drizzle-orm'
 
 // ---------------------------------------------------------------------------
 // active()
@@ -24,7 +24,7 @@ import { isNull } from 'drizzle-orm';
  *   db.select().from(tasks).where(and(eq(tasks.orgId, ctx.orgId), active(tasks)));
  */
 export function active(t: { deletedAt: Parameters<typeof isNull>[0] }) {
-  return isNull(t.deletedAt);
+  return isNull(t.deletedAt)
 }
 
 // ---------------------------------------------------------------------------
@@ -38,8 +38,8 @@ export function active(t: { deletedAt: Parameters<typeof isNull>[0] }) {
  * Internal storage: INTEGER ms.  API responses: ISO string.
  */
 export function isoOrNull(ms: number | null | undefined): string | null {
-  if (ms == null) return null;
-  return new Date(ms).toISOString();
+  if (ms == null) return null
+  return new Date(ms).toISOString()
 }
 
 // ---------------------------------------------------------------------------
@@ -60,19 +60,19 @@ const TS_KEYS = new Set([
   'expiresAt',
   'lastUsedAt',
   'revokedAt',
-]);
+])
 
 /**
  * Known JSON column names whose string values should be parsed into objects.
  */
-const JSON_KEYS = new Set(['metadata', 'payload', 'permissions']);
+const JSON_KEYS = new Set(['metadata', 'payload', 'permissions'])
 
 /**
  * Convert a camelCase JavaScript identifier to snake_case.
  * e.g. "orgId" → "org_id", "createdAt" → "created_at"
  */
 function camelToSnake(k: string): string {
-  return k.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
+  return k.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase())
 }
 
 /**
@@ -88,43 +88,43 @@ function camelToSnake(k: string): string {
  * `task` nested inside a task.created event payload) are also normalised.
  */
 export function serializeRow<T>(row: T): any {
-  if (row == null) return row;
-  if (Array.isArray(row)) return row.map(serializeRow);
-  if (typeof row !== 'object') return row;
+  if (row == null) return row
+  if (Array.isArray(row)) return row.map(serializeRow)
+  if (typeof row !== 'object') return row
   // Skip Date instances — they are not plain row objects.
-  if (row instanceof Date) return row;
+  if (row instanceof Date) return row
 
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(row as Record<string, unknown>)) {
-    const newK = camelToSnake(k);
-    let newV = v;
+    const newK = camelToSnake(k)
+    let newV = v
 
     // Convert timestamp integers to ISO strings.
     if (TS_KEYS.has(k) && typeof v === 'number') {
-      newV = new Date(v).toISOString();
+      newV = new Date(v).toISOString()
     }
     // Parse JSON string columns into objects.
     if (JSON_KEYS.has(k) && typeof v === 'string') {
       try {
-        newV = JSON.parse(v);
+        newV = JSON.parse(v)
       } catch {
         // Leave as string if unparseable.
       }
     }
     // Recurse into nested objects/arrays (but not Dates).
     if (newV !== null && typeof newV === 'object' && !(newV instanceof Date)) {
-      newV = serializeRow(newV);
+      newV = serializeRow(newV)
     }
-    out[newK] = newV;
+    out[newK] = newV
   }
-  return out;
+  return out
 }
 
 /**
  * Alias kept for call-site backward compatibility.
  * All existing `serializeTimestamps(row)` calls now also get camelCase→snake_case.
  */
-export const serializeTimestamps = serializeRow;
+export const serializeTimestamps = serializeRow
 
 // ---------------------------------------------------------------------------
 // isUniqueViolation()
@@ -140,8 +140,8 @@ export const serializeTimestamps = serializeRow;
  */
 export function isUniqueViolation(e: unknown): boolean {
   for (let cur: unknown = e; cur != null; cur = (cur as { cause?: unknown }).cause) {
-    const msg = (cur as { message?: unknown }).message;
-    if (typeof msg === 'string' && /UNIQUE|unique constraint/i.test(msg)) return true;
+    const msg = (cur as { message?: unknown }).message
+    if (typeof msg === 'string' && /UNIQUE|unique constraint/i.test(msg)) return true
   }
-  return false;
+  return false
 }

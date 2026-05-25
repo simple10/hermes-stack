@@ -1,6 +1,6 @@
-import { createAuthClient } from 'better-auth/react';
-import { organizationClient, magicLinkClient } from 'better-auth/client/plugins';
-import { apiKeyClient } from '@better-auth/api-key/client';
+import { createAuthClient } from 'better-auth/react'
+import { organizationClient, magicLinkClient } from 'better-auth/client/plugins'
+import { apiKeyClient } from '@better-auth/api-key/client'
 
 /**
  * Better-auth React client for the MC UI. Same-origin with the API so
@@ -10,12 +10,6 @@ import { apiKeyClient } from '@better-auth/api-key/client';
 export const authClient = createAuthClient({
   baseURL: '/api/v1/auth',
   plugins: [organizationClient(), apiKeyClient(), magicLinkClient()],
-});
+})
 
-export const {
-  useSession,
-  useListOrganizations,
-  signIn,
-  signUp,
-  signOut,
-} = authClient;
+export const { useSession, useListOrganizations, signIn, signUp, signOut } = authClient

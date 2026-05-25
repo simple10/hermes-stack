@@ -7,36 +7,34 @@
  * Body capture is intentionally disabled to avoid leaking credentials on
  * sensitive paths (auth endpoints, bootstrap).
  */
-import type { MiddlewareHandler } from 'hono';
+import type { MiddlewareHandler } from 'hono'
 
 // Paths whose request/response bodies must never be logged.
-const SENSITIVE_PATHS = ['/api/v1/auth/', '/api/v1/bootstrap'];
+const SENSITIVE_PATHS = ['/api/v1/auth/', '/api/v1/bootstrap']
 
 function isSensitive(path: string): boolean {
-  return SENSITIVE_PATHS.some((prefix) => path.startsWith(prefix));
+  return SENSITIVE_PATHS.some((prefix) => path.startsWith(prefix))
 }
 
 export const loggingMiddleware: MiddlewareHandler = async (c, next) => {
-  const start = Date.now();
+  const start = Date.now()
 
   // Prefer Cloudflare's stable request id; fall back to caller-supplied or generated.
   const requestId =
-    c.req.header('cf-request-id') ??
-    c.req.header('x-request-id') ??
-    crypto.randomUUID();
+    c.req.header('cf-request-id') ?? c.req.header('x-request-id') ?? crypto.randomUUID()
 
   // Propagate to response so callers can correlate logs.
-  c.header('X-Request-Id', requestId);
+  c.header('X-Request-Id', requestId)
 
-  await next();
+  await next()
 
-  const ms = Date.now() - start;
-  const path = new URL(c.req.url).pathname;
+  const ms = Date.now() - start
+  const path = new URL(c.req.url).pathname
 
   // Auth context is set by authMiddleware on authenticated routes.
   const auth = c.get('auth') as
     | { orgId?: string; principal?: { type: string; id: string } }
-    | undefined;
+    | undefined
 
   const line: Record<string, unknown> = {
     ts: new Date().toISOString(),
@@ -45,15 +43,13 @@ export const loggingMiddleware: MiddlewareHandler = async (c, next) => {
     path,
     status: c.res.status,
     ms,
-  };
+  }
 
   // Only include identity fields on non-sensitive paths.
   if (!isSensitive(path)) {
-    line.org_id = auth?.orgId;
-    line.principal = auth?.principal
-      ? `${auth.principal.type}:${auth.principal.id}`
-      : undefined;
+    line.org_id = auth?.orgId
+    line.principal = auth?.principal ? `${auth.principal.type}:${auth.principal.id}` : undefined
   }
 
-  console.log(JSON.stringify(line));
-};
+  console.log(JSON.stringify(line))
+}

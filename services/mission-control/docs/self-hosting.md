@@ -9,6 +9,7 @@ creates a local SQLite-backed D1 database automatically.
 ## How it works
 
 The self-host story uses **`wrangler dev`** as the runtime. Wrangler:
+
 - Serves the Cloudflare Workers bundle locally on `localhost:8787`
 - Automatically provisions a local SQLite-backed D1 database (stored under
   `.wrangler/state/v3/d1/`)
@@ -86,11 +87,11 @@ services:
     image: mission-control:local
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      - '8787:8787'
     environment:
-      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET}"
-      BETTER_AUTH_URL: "http://localhost:8787"
-      MC_ADMIN_TOKEN: "${MC_ADMIN_TOKEN}"
+      BETTER_AUTH_SECRET: '${BETTER_AUTH_SECRET}'
+      BETTER_AUTH_URL: 'http://localhost:8787'
+      MC_ADMIN_TOKEN: '${MC_ADMIN_TOKEN}'
     volumes:
       - mc-data:/data
 
@@ -125,15 +126,15 @@ pnpm dev                      # wrangler dev → http://localhost:8787
 Set secrets at container start time via `-e` flags or an `.env` file. Never
 bake secrets into the image.
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `BETTER_AUTH_SECRET` | yes | — | 32+ byte secret for session / JWT signing. Generate: `openssl rand -hex 32` |
-| `BETTER_AUTH_URL` | yes | — | Public base URL the service is reachable at (e.g. `https://mc.example.com`). Used in auth redirect URLs. |
-| `MC_ADMIN_TOKEN` | first boot | — | Admin token for the `/v1/bootstrap` endpoint. Unset or remove after first user is created. |
-| `CORS_ALLOWED_ORIGINS` | no | — | Comma-separated browser origins. Empty = no browser clients allowed. |
-| `EVENTS_RETENTION_DAYS` | no | `365` | Days before events rows are purged by the nightly cron. |
-| `IDEMPOTENCY_TTL_SECONDS` | no | `86400` | How long idempotency keys are retained (seconds). |
-| `KEY_ROTATION_GRACE_SECONDS` | no | `300` | Overlap window (seconds) during API key rotation. |
+| Variable                     | Required   | Default | Description                                                                                              |
+| ---------------------------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`         | yes        | —       | 32+ byte secret for session / JWT signing. Generate: `openssl rand -hex 32`                              |
+| `BETTER_AUTH_URL`            | yes        | —       | Public base URL the service is reachable at (e.g. `https://mc.example.com`). Used in auth redirect URLs. |
+| `MC_ADMIN_TOKEN`             | first boot | —       | Admin token for the `/v1/bootstrap` endpoint. Unset or remove after first user is created.               |
+| `CORS_ALLOWED_ORIGINS`       | no         | —       | Comma-separated browser origins. Empty = no browser clients allowed.                                     |
+| `EVENTS_RETENTION_DAYS`      | no         | `365`   | Days before events rows are purged by the nightly cron.                                                  |
+| `IDEMPOTENCY_TTL_SECONDS`    | no         | `86400` | How long idempotency keys are retained (seconds).                                                        |
+| `KEY_ROTATION_GRACE_SECONDS` | no         | `300`   | Overlap window (seconds) during API key rotation.                                                        |
 
 ---
 
@@ -159,6 +160,7 @@ curl -X POST "$MC_URL/v1/bootstrap" \
 ```
 
 The response contains:
+
 - `user.id` — your user ID
 - `organization.id` — your org ID
 - `pat` — a Personal Access Token (PAT); store it securely
@@ -281,6 +283,7 @@ docker logs mission-control
 ```
 
 Common causes:
+
 - `BETTER_AUTH_SECRET` not set — wrangler dev will exit if required env vars
   are missing from `.dev.vars` or the environment.
 - Permission error on the volume mount — ensure the volume is writable by the

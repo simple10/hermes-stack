@@ -4,21 +4,16 @@
  * These contexts bypass the HTTP layer and auth middleware entirely.
  * Use only in test/db/repos/* — production code must never import this.
  */
-import { poolClient } from '../../../src/db/client.ts';
-import { asOrgId, type OrgId } from '../../../src/auth/types.ts';
-import type { AuthContext } from '../../../src/auth/types.ts';
-import { makeId } from '../../../src/ids.ts';
+import { poolClient } from '../../../src/db/client.ts'
+import { asOrgId, type OrgId } from '../../../src/auth/types.ts'
+import type { AuthContext } from '../../../src/auth/types.ts'
+import { makeId } from '../../../src/ids.ts'
 
-export { asOrgId };
-export type { OrgId };
+export { asOrgId }
+export type { OrgId }
 
 /** Build an owner-role AuthContext for a given org/user. */
-export function ownerCtx(
-  db: D1Database,
-  env: Env,
-  orgId: OrgId,
-  userId: string,
-): AuthContext {
+export function ownerCtx(db: D1Database, env: Env, orgId: OrgId, userId: string): AuthContext {
   return {
     orgId,
     role: 'owner',
@@ -27,7 +22,7 @@ export function ownerCtx(
     env,
     viaUserId: userId,
     viaKeyId: makeId('apk'),
-  };
+  }
 }
 
 /** Build an agent-role AuthContext. */
@@ -46,7 +41,7 @@ export function agentCtx(
     env,
     viaUserId: userId,
     viaKeyId: makeId('apk'),
-  };
+  }
 }
 
 /** Build a connector-role AuthContext. */
@@ -65,5 +60,5 @@ export function connectorCtx(
     env,
     viaUserId: userId,
     viaKeyId: makeId('apk'),
-  };
+  }
 }

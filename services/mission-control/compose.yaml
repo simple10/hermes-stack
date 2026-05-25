@@ -11,43 +11,43 @@
 
 services:
   mission-control:
-    image: "${MC_IMAGE:-mission-control:local}"
+    image: '${MC_IMAGE:-mission-control:local}'
     build:
       context: .
       dockerfile: Dockerfile
     profiles: [mission-control]
     restart: unless-stopped
     ports:
-      - "${MC_PORT:-8787}:8787"
+      - '${MC_PORT:-8787}:8787'
     environment:
       # Identity / auth
-      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .stack/.env}"
-      BETTER_AUTH_URL: "http://localhost:${MC_PORT:-8787}"
+      BETTER_AUTH_SECRET: '${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .stack/.env}'
+      BETTER_AUTH_URL: 'http://localhost:${MC_PORT:-8787}'
       # Bootstrap gate — remove from env after first user is created
-      MC_ADMIN_TOKEN: "${MC_ADMIN_TOKEN:-}"
+      MC_ADMIN_TOKEN: '${MC_ADMIN_TOKEN:-}'
       # Database
       MC_DB_PATH: /data/mc.sqlite
       DB_MODE: single
       # Runtime
       NODE_ENV: production
-      PORT: "8787"
+      PORT: '8787'
       # CORS — comma-separated origins; empty = no browser clients
-      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-}"
+      CORS_ALLOWED_ORIGINS: '${CORS_ALLOWED_ORIGINS:-}'
       # Tuning
-      EVENTS_RETENTION_DAYS: "${EVENTS_RETENTION_DAYS:-365}"
-      IDEMPOTENCY_TTL_SECONDS: "${IDEMPOTENCY_TTL_SECONDS:-86400}"
-      KEY_ROTATION_GRACE_SECONDS: "${KEY_ROTATION_GRACE_SECONDS:-300}"
+      EVENTS_RETENTION_DAYS: '${EVENTS_RETENTION_DAYS:-365}'
+      IDEMPOTENCY_TTL_SECONDS: '${IDEMPOTENCY_TTL_SECONDS:-86400}'
+      KEY_ROTATION_GRACE_SECONDS: '${KEY_ROTATION_GRACE_SECONDS:-300}'
     volumes:
       - mission-control-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8787/v1/health"]
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8787/v1/health']
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 15s
     logging:
       driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      options: { max-size: '10m', max-file: '3' }
 
 volumes:
   mission-control-data:

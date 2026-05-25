@@ -4,7 +4,7 @@ import { SignIn } from '@/components/auth/sign-in';
 
 const searchSchema = z.object({ redirect: z.string().optional() });
 
-export const Route = createFileRoute('/sign-in' as any)({
+export const Route = createFileRoute('/sign-in')({
   validateSearch: searchSchema,
   component: SignInRoute,
 });

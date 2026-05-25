@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/magic-link' as any)({
+export const Route = createFileRoute('/magic-link')({
   component: MagicLinkRoute,
 });
 

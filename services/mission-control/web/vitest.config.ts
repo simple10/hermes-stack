@@ -1,6 +1,5 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
-import tsconfigPaths from 'vite-tsconfig-paths'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -16,10 +15,13 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths({ projects: [path.resolve(ROOT, 'tsconfig.json')] })],
+  plugins: [react()],
+  // Mirror the @/ and @mc/schemas aliases from web/tsconfig.json and the dev
+  // vite.config.ts. vite-tsconfig-paths was removed in favor of explicit aliases.
   resolve: {
     alias: {
       '@': path.resolve(ROOT, 'src'),
+      '@mc/schemas': path.resolve(ROOT, '../src/schemas'),
     },
   },
   test: {

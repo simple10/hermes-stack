@@ -1,0 +1,6 @@
+{
+  "name": "mission-control-web",
+  "private": true,
+  "type": "module",
+  "//": "Stub package.json — shadcn CLI needs a package.json in the SPA directory to install components. All runtime deps live in the parent services/mission-control/package.json so the project has one node_modules and one lockfile. After each `pnpm dlx shadcn add ...` run, move any new entries from this file's `dependencies` up to the parent's, then reset this file back to the stub-only form."
+}

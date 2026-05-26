@@ -13,5 +13,6 @@
     "lib": ["ES2023"],
     "types": ["node"]
   },
-  "include": ["**/*.ts"]
+  "include": ["scripts/**/*.ts", "services/**/*.ts"],
+  "exclude": ["**/node_modules/**", "**/_source/**", ".stack-node/**", ".stack/**"]
 }

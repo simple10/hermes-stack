@@ -26,6 +26,13 @@ _bak/
 .claude/*.lock
 .claude/worktrees
 
+# --- Node / TS scripts ---
+# scripts/node_modules is .gitignored via scripts/.gitignore; this catches
+# any stray node_modules that pnpm/npm/bun might dump at the repo root if
+# a command is mistakenly run from the wrong cwd.
+node_modules/
+/bun.lock
+
 # --- Python ---
 **/.venv/
 **/__pycache__/

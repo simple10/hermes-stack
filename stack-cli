@@ -14,13 +14,15 @@ if [ ! -f "$entry" ]; then
 fi
 
 # Install deps on first run (no node_modules → opportunistic install).
-if [ ! -d "$here/scripts/node_modules" ]; then
-  ( cd "$here/scripts" && {
+# package.json + node_modules live at the repo root so both scripts/
+# and services/<svc>/*.ts can resolve deps the same way.
+if [ ! -d "$here/node_modules" ]; then
+  ( cd "$here" && {
       if command -v bun >/dev/null 2>&1; then bun install
       elif command -v pnpm >/dev/null 2>&1; then pnpm install
       elif command -v npm  >/dev/null 2>&1; then npm install
       else
-        printf 'FATAL: no bun/pnpm/npm on PATH — cannot install scripts/ deps\n' >&2
+        printf 'FATAL: no bun/pnpm/npm on PATH — cannot install deps\n' >&2
         exit 1
       fi
     } )

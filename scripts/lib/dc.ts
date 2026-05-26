@@ -44,11 +44,11 @@ export const dcArgs = (extra: readonly string[]): string[] => {
   return [...args, ...extra];
 };
 
-export const dcEnv = (): NodeJS.ProcessEnv => {
-  const env: NodeJS.ProcessEnv = {};
+export const dcEnv = (): Record<string, string> => {
+  const env: Record<string, string> = {};
   for (const k of HOST_ALLOWLIST) {
     const v = process.env[k];
-    if (v !== undefined) env[k] = v;
+    if (typeof v === "string") env[k] = v;
   }
   const prof = stackProfiles();
   if (prof) env.COMPOSE_PROFILES = prof;

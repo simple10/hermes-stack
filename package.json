@@ -1,5 +1,5 @@
 {
-  "name": "hermes-stack-scripts",
+  "name": "hermes-stack",
   "private": true,
   "type": "module",
   "description": "Parallel Node/TS CLI for hermes-stack — runs alongside the bash justfile + .stack/ until it reaches parity.",

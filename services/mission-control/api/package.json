@@ -1,12 +1,12 @@
 {
-  "name": "mission-control",
+  "name": "mission-control-api",
   "version": "0.0.1",
   "private": true,
   "description": "Multi-tenant master kanban API for multi-agent task coordination",
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "FORCE_COLOR=1 vite 2>&1 | tee .wrangler/dev-server.log",
+    "dev": "FORCE_COLOR=1 vite dev 2>&1 | tee .wrangler/dev-server.log",
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "wrangler deploy",

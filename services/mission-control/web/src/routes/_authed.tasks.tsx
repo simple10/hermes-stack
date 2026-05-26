@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
-import { TaskStatus } from '@mc/schemas/common'
+import { TaskStatus } from '@api-schemas/common'
 import { api } from '@/lib/api'
 import {
   Table,

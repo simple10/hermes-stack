@@ -5,7 +5,7 @@ import type {
   AgentPatchBody,
   AgentCreateResponse,
   AgentRotateKeyResponse,
-} from '@mc/schemas/agents'
+} from '@api-schemas/agents'
 import type {
   Connector,
   ConnectorListResponse,
@@ -13,18 +13,18 @@ import type {
   ConnectorPatchBody,
   ConnectorCreateResponse,
   ConnectorRotateKeyResponse,
-} from '@mc/schemas/connectors'
+} from '@api-schemas/connectors'
 import type {
   Project,
   ProjectListResponse,
   ProjectCreateBody,
   ProjectPatchBody,
-} from '@mc/schemas/projects'
-import type { TaskListResponse, TaskDetailResponse, TaskListQuery } from '@mc/schemas/tasks'
-import type { CommentListResponse } from '@mc/schemas/comments'
-import type { EventListResponse, EventListQuery } from '@mc/schemas/events'
-import type { ExternalRefListResponse } from '@mc/schemas/external-refs'
-import type { MeResponse } from '@mc/schemas/me'
+} from '@api-schemas/projects'
+import type { TaskListResponse, TaskDetailResponse, TaskListQuery } from '@api-schemas/tasks'
+import type { CommentListResponse } from '@api-schemas/comments'
+import type { EventListResponse, EventListQuery } from '@api-schemas/events'
+import type { ExternalRefListResponse } from '@api-schemas/external-refs'
+import type { MeResponse } from '@api-schemas/me'
 
 /**
  * Surfaced HTTP error. Carries the API's structured error code + request id

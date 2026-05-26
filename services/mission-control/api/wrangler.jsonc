@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "mission-control",
+  "name": "mission-control-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-22",
   // nodejs_compat enables node:* imports (used by better-auth core for
@@ -9,7 +9,7 @@
   "compatibility_flags": ["nodejs_compat"],
 
   "observability": {
-    "enabled": true,
+    "enabled": true
   },
 
   // Workers Assets — serves the SPA built into web/dist/ by Vite. The Cloudflare
@@ -21,7 +21,7 @@
   //     check entirely and hits the Hono router directly.
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*"]
   },
 
   // Single DB in dev (single-DB mode); SaaS prod overrides via env-specific blocks.

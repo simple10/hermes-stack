@@ -27,3 +27,5 @@ _bak/
 **/__pycache__/
 **/*.pyc
 **/.pytest_cache/
+
+**/mission-control/tmp

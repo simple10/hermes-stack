@@ -1,5 +1,5 @@
 import { defineConfig, type PluginOption } from 'vite'
-import react from '@vitejs/plugin-react'
+import viteReact from '@vitejs/plugin-react'
 import { cloudflare } from '@cloudflare/vite-plugin'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import tailwindcss from '@tailwindcss/vite'
@@ -61,17 +61,18 @@ export default defineConfig({
       routesDirectory: 'src/routes',
       generatedRouteTree: 'src/routeTree.gen.ts',
     }),
-    react(),
     tailwindcss(),
+    viteReact(),
     cloudflare(),
-    spaFallback(),
+    // spaFallback(),
   ],
   // Mirror the path aliases in web/tsconfig.json so dev/build resolve them.
   // (Vitest has its own config with the same aliases — keep them in sync.)
   resolve: {
-    alias: {
-      '@': path.resolve(WEB_ROOT, 'src'),
-      '@mc/schemas': path.resolve(SERVICE_ROOT, 'src/schemas'),
-    },
+    tsconfigPaths: true,
+    // alias: {
+    //   '@': path.resolve(WEB_ROOT, 'src'),
+    //   '@mc/schemas': path.resolve(SERVICE_ROOT, 'src/schemas'),
+    // },
   },
 })

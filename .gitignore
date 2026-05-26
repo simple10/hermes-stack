@@ -3,6 +3,10 @@
 # the ChatGPT token) lives under .stack/<svc>/ — gitignored wholesale here.
 # Templates stay tracked in service dirs (*.template).
 .stack/
+# Parallel state dir for the new Node/TS CLI (scripts/) — same shape as
+# .stack/, gitignored for the same reason. Will be renamed to .stack/
+# at cutover.
+.stack-node/
 **/*.generated.env
 # Top-level compose is GENERATED from docker-compose.example.yaml + the
 # enabled COMPOSE_PROFILES by stack_render_compose. Path anchored to repo

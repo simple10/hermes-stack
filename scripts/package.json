@@ -1,0 +1,21 @@
+{
+  "name": "hermes-stack-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Parallel Node/TS CLI for hermes-stack — runs alongside the bash justfile + .stack/ until it reaches parity.",
+  "scripts": {
+    "setup": "./bin setup",
+    "enable": "./bin enable",
+    "disable": "./bin disable",
+    "enabled": "./bin enabled"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "picocolors": "^1.1.1",
+    "zx": "^8.8.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}

@@ -4,18 +4,22 @@
   "type": "module",
   "description": "Parallel Node/TS CLI for hermes-stack — runs alongside the bash justfile + .stack/ until it reaches parity.",
   "scripts": {
-    "setup": "./bin setup",
-    "enable": "./bin enable",
-    "disable": "./bin disable",
-    "enabled": "./bin enabled"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clack/prompts": "^0.11.0",
+    "@clack/prompts": "^1.4.0",
+    "dotenv": "^17.4.2",
+    "dotenv-expand": "^13.0.0",
     "picocolors": "^1.1.1",
-    "zx": "^8.8.4"
+    "yaml": "^2.9.0",
+    "zx": "^8.8.5"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5",
-    "typescript": "^5.7.3"
+    "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.7",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

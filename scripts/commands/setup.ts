@@ -10,12 +10,12 @@
 //   5. Conditionally gen secrets / prompt for hermes Telegram fields,
 //      gated on which services are enabled.
 //   6. Print a summary + "next steps".
-import { existsSync, copyFileSync, chmodSync, readFileSync } from "node:fs";
+import { existsSync, copyFileSync, chmodSync } from "node:fs";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 
 import { STACK_ENV, DEFAULTS_ENV } from "../lib/paths.ts";
-import { envGet, envUpsert, parseEnv } from "../lib/env.ts";
+import { envGet, envUpsert, parseEnvFile } from "../lib/env.ts";
 import { ensureStackDir, enableService, stackUpsert } from "../lib/stack.ts";
 import { listServices, type ServiceDescriptor } from "../lib/services.ts";
 import { genIfMissing } from "../lib/secrets.ts";
@@ -30,9 +30,9 @@ export const runSetup = async (): Promise<void> => {
     chmodSync(STACK_ENV, 0o600);
     p.log.step(`created ${STACK_ENV} from .stack.defaults.env`);
   } else {
-    const defaults = parseEnv(readFileSync(DEFAULTS_ENV, "utf8"));
+    const defaults = parseEnvFile(DEFAULTS_ENV);
     const seeded: string[] = [];
-    for (const [k, v] of defaults) {
+    for (const [k, v] of Object.entries(defaults)) {
       if (!envGet(STACK_ENV, k)) {
         envUpsert(STACK_ENV, k, v);
         seeded.push(k);

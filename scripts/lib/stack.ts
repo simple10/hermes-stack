@@ -23,8 +23,8 @@
 // stack_upsert contract).
 import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { STACK_DIR, STACK_ENV } from "./paths.ts";
-import { envGet, envUpsert, parseEnv } from "./env.ts";
-import { listServices, loadService } from "./services.ts";
+import { envGet, envUpsert } from "./env.ts";
+import { stackEnvOwnerMap, loadService } from "./services.ts";
 import { die } from "./log.ts";
 
 export type BlockStatus = "enabled" | "disabled" | "missing";
@@ -33,17 +33,8 @@ export const ensureStackDir = (): void => {
   if (!existsSync(STACK_DIR)) mkdirSync(STACK_DIR, { recursive: true });
 };
 
-// Build {key -> owning service} once per call (cheap; ~17 service.env files).
-const owningServiceMap = (): Map<string, string> => {
-  const out = new Map<string, string>();
-  for (const svc of listServices()) {
-    for (const [key] of parseEnv(svc.stackEnv)) out.set(key, svc.name);
-  }
-  return out;
-};
-
 export const owningService = (key: string): string | null => {
-  return owningServiceMap().get(key) ?? null;
+  return stackEnvOwnerMap().get(key) ?? null;
 };
 
 export const blockStatus = (svc: string): BlockStatus => {

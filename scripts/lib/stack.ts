@@ -268,7 +268,57 @@ export const enableService = (svc: string, log?: (msg: string) => void): void =>
   visit(svc);
 };
 
+// Reverse of SERVICE_REQUIRES: which enabled services depend on `svc`?
+// Used by disableService to refuse if anything would break.
+export const findDependants = (svc: string): string[] => {
+  const all = [
+    ...envGet(STACK_ENV, "COMPOSE_PROFILES").split(",").map((x) => x.trim()).filter(Boolean),
+    ...envGet(STACK_ENV, "STACK_MACHINES").split(",").map((x) => x.trim()).filter(Boolean),
+  ];
+  const out: string[] = [];
+  for (const dep of all) {
+    if (dep === svc) continue;
+    const d = loadService(dep);
+    if (!d) continue;
+    if (d.requires.includes(svc)) out.push(dep);
+  }
+  return out;
+};
+
+// disableService — idempotent. Refuses (throws) if any enabled service
+// has SERVICE_REQUIRES containing this one. No force flag.
+export const disableService = (svc: string): { changed: boolean } => {
+  const d = loadService(svc);
+  if (!d) {
+    die(`no such service: ${svc}`);
+    throw new Error("unreachable");
+  }
+  const deps = findDependants(svc);
+  if (deps.length > 0) {
+    die(
+      `refusing to disable '${svc}' — these enabled services depend on it: ${deps.join(", ")}\n` +
+      `       disable them first:  stack-cli disable ${deps.join(" ")}`,
+    );
+    throw new Error("unreachable");
+  }
+  const before = existsSync(STACK_ENV) ? readFileSync(STACK_ENV, "utf8") : "";
+  const csvKey = d.runner === "vm" ? "STACK_MACHINES" : "COMPOSE_PROFILES";
+  csvRemoveTopLevel(csvKey, d.profile);
+  if (d.litellmKey) csvRemove("LITELLM_VIRTKEYS", d.profile);
+  if (blockStatus(svc) === "enabled") blockToggle(svc, "disabled");
+  const after = existsSync(STACK_ENV) ? readFileSync(STACK_ENV, "utf8") : "";
+  return { changed: before !== after };
+};
+
+const csvRemoveTopLevel = (key: string, value: string): void => {
+  const cur = envGet(STACK_ENV, key);
+  if (!cur) return;
+  const next = cur.split(",").map((x) => x.trim()).filter((x) => x && x !== value);
+  envUpsert(STACK_ENV, key, next.join(","));
+};
+
 const re = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Re-exports for callers that need the raw helpers.
 export { envGet, envUpsert };
+export { isEnabled };

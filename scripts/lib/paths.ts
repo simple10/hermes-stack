@@ -24,7 +24,13 @@ if (
   process.exit(1);
 }
 
-export const STACK_DIR = resolve(STACK_ROOT, ".stack-node");
+// HERMES_STACK_DIR_OVERRIDE is a TEST-ONLY hook: vitest sets it to a
+// per-test temp dir so block/upsert/cascade logic can be exercised without
+// touching the real .stack-node/.env. Never set this in production — the
+// dc()/orchestrator path strips it from the host env anyway.
+export const STACK_DIR = process.env.HERMES_STACK_DIR_OVERRIDE
+  ? resolve(process.env.HERMES_STACK_DIR_OVERRIDE)
+  : resolve(STACK_ROOT, ".stack-node");
 export const STACK_ENV = resolve(STACK_DIR, ".env");
 export const SERVICES_DIR = resolve(STACK_ROOT, "services");
 export const DEFAULTS_ENV = resolve(STACK_ROOT, ".stack.defaults.env");

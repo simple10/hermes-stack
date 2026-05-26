@@ -67,7 +67,7 @@ export const runSetup = async (): Promise<void> => {
   const curVm = csv(envGet(STACK_ENV, "STACK_MACHINES"));
 
   const dockerPick = await p.multiselect({
-    message: "Docker services to enable",
+    message: `Docker services to enable\n${pc.dim("  space to toggle · enter to continue")}`,
     options: dockerOpts,
     initialValues: curDocker,
     required: false,
@@ -75,7 +75,7 @@ export const runSetup = async (): Promise<void> => {
   if (p.isCancel(dockerPick)) return cancel();
 
   const vmPick = await p.multiselect({
-    message: "VM services to enable (blank ok)",
+    message: `VM services to enable (blank ok)\n${pc.dim("  space to toggle · enter to continue")}`,
     options: vmOpts,
     initialValues: curVm,
     required: false,

@@ -21,6 +21,7 @@ import { runEnable } from "./commands/enable.ts";
 import { runDisable } from "./commands/disable.ts";
 import { runEnabled } from "./commands/enabled.ts";
 import { runStatus } from "./commands/status.ts";
+import { runInfo } from "./commands/info.ts";
 import { runBuild } from "./commands/build.ts";
 import { runStart } from "./commands/start.ts";
 import { runStop } from "./commands/stop.ts";
@@ -37,6 +38,7 @@ const COMMANDS: Record<string, Handler> = {
   enable: runEnable,
   disable: runDisable,
   enabled: async () => runEnabled(),
+  info: async () => runInfo(),
   status: async () => runStatus(),
   build: async () => runBuild(),
   start: async () => runStart(),
@@ -76,11 +78,12 @@ const printHelp = (): void => {
       "  enable <svc>...       cascade-enable services",
       "  disable <svc>...      disable (refuses if dependants enabled)",
       "  enabled               list active profiles + machines",
+      "  info                  overview: what's enabled + is the stack up?",
       "  build                 resolve image digests + per-service build.ts",
       "  start (up)            backends -> preflight -> prestart -> up -> poststart -> VMs",
       "  stop  (down)          VMs + dc down --remove-orphans",
       "  restart               stop + start",
-      "  status                dc ps + orb list",
+      "  status                detailed runtime status (containers + this stack's VMs)",
       "  logs [machine]        orb logs",
       "  reconfigure <svc>     re-render runtime config(s)",
       "  start-cleanup         remove exited provisioner containers",

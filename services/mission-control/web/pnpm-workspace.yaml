@@ -1,5 +1,6 @@
 overrides:
   wrangler: '^4.93.0'
+  esbuild: '^0.28.0'
 
 # Don't auto-install peer dependencies. Keeps the install surface to exactly
 # what's in package.json5 — every dep is an explicit choice.

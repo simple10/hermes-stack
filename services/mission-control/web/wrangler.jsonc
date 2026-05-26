@@ -1,20 +1,29 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "mission-control-ui",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-05-22",
 
   "observability": {
     "enabled": true,
   },
 
-  // Assets-only Worker — no `main` field. The Cloudflare Vite plugin
-  // auto-populates `assets.directory` and `assets.binding` at build time,
-  // so we only declare behavior here:
+  // Workers Assets serves the SPA built into dist/ by Vite. The Cloudflare
+  // Vite plugin auto-populates `assets.directory` and `assets.binding` at
+  // build time, so we only declare behavior here:
   //   - not_found_handling: "single-page-application" → unmatched paths fall
   //     through to index.html so TanStack Router can take over client-side.
-  // API calls go to a separate Worker (mission-control-api) and are proxied
-  // through the Vite dev server in dev (see vite.config.mts).
+  //   - run_worker_first: ["/api/*"] → /api/* requests bypass the asset
+  //     check and hit src/worker.ts (which dispatches to the API binding).
   "assets": {
     "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
   },
+
+  // Service binding to the API Worker. In dev, vite.config.ts boots that
+  // Worker as an `auxiliaryWorkers` entry so the binding resolves to the
+  // local instance — no CORS, no proxy, true same-origin.
+  // In prod the binding resolves to the deployed mission-control-api Worker
+  // (deployed separately from the same repo).
+  "services": [{ "binding": "API", "service": "mission-control-api" }],
 }

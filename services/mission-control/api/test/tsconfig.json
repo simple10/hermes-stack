@@ -1,9 +1,0 @@
-{
-  "extends": "../tsconfig.json",
-  "compilerOptions": {
-    // Worker types from `pnpm cf:types`; `cloudflare:test` types from the
-    // vitest-pool-workers package; node for Node built-ins used by globalSetup.
-    "types": ["node", "../worker-configuration.d.ts", "@cloudflare/vitest-pool-workers/types"]
-  },
-  "include": ["./**/*", "../worker-configuration.d.ts"]
-}

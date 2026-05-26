@@ -1,9 +1,0 @@
-# Required at startup
-BETTER_AUTH_SECRET=replace_with_32_random_bytes_base64
-BETTER_AUTH_URL=http://localhost:8787
-
-# OAuth providers (omit to disable that provider in sign-in surface)
-# GITHUB_CLIENT_ID=
-# GITHUB_CLIENT_SECRET=
-# GOOGLE_CLIENT_ID=
-# GOOGLE_CLIENT_SECRET=

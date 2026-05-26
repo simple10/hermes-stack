@@ -16,7 +16,6 @@
 // .stack-node/.env not .stack/.env.
 import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { $ } from "zx";
 import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 
 import { STACK_ROOT } from "../../scripts/lib/paths.ts";
@@ -26,7 +25,7 @@ import { envGet, envUpsert } from "../../scripts/lib/env.ts";
 import { generatedGet, generatedUpsert, generatedEnvPath } from "../../scripts/lib/generated.ts";
 import {
   orbExec, orbExecWithStdin, orbMachineExists, orbSetMachineIsolation,
-  orbMountIsActive,
+  orbMountIsActive, orbShell,
 } from "../../scripts/lib/orb.ts";
 import { writeManagedBlock } from "../../scripts/lib/hermes-env.ts";
 import { die, log, warn } from "../../scripts/lib/log.ts";
@@ -111,7 +110,7 @@ const ensureOrbMachine = async (ctx: Ctx): Promise<void> => {
     if (rc === 1) warn(`machine ${ctx.vm}: isolation flags were FALSE — flipped to true. Run 'stack-cli restart' to apply.`);
     else if (rc === 2) die(`machine ${ctx.vm}: 'orb config set' failed (is OrbStack running?)`);
     if (ctx.mountEnabled) {
-      try { await $`orb config add ${`machine.${ctx.vm}.mounts`} ${ctx.orbMountSpec}`; } catch { /* already set */ }
+      try { await orbShell`orb config add ${`machine.${ctx.vm}.mounts`} ${ctx.orbMountSpec}`; } catch { /* already set */ }
       if (!(await orbMountIsActive(ctx.vm, ctx.vmHermes))) {
         die(`mount '${ctx.orbMountSpec}' configured but not yet applied — run 'stack-cli restart' to cycle the VM`);
       }
@@ -119,15 +118,22 @@ const ensureOrbMachine = async (ctx: Ctx): Promise<void> => {
     return;
   }
   if (ctx.mountEnabled) {
-    await $`orb create --user ${ctx.remoteUser} --isolated --isolate-network --mount ${ctx.orbMountSpec} ubuntu ${ctx.vm}`;
+    await orbShell`orb create --user ${ctx.remoteUser} --isolated --isolate-network --mount ${ctx.orbMountSpec} ubuntu ${ctx.vm}`;
   } else {
-    await $`orb create --user ${ctx.remoteUser} --isolated --isolate-network ubuntu ${ctx.vm}`;
+    await orbShell`orb create --user ${ctx.remoteUser} --isolated --isolate-network ubuntu ${ctx.vm}`;
   }
 };
 
 const installSystemPackages = async (ctx: Ctx): Promise<void> => {
   log("2. apt xz-utils (REQUIRED — Hermes installer extracts Node .tar.xz)");
-  await orbExec(ctx.vm, "sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates", { stdio: "inherit" });
+  // Fix /home/<user> ownership when orb created the dir as root because
+  // the bind-mount target (/home/<user>/.hermes) was provisioned first.
+  // No-op when ownership is already correct.
+  await orbExec(ctx.vm, `sudo chown -R ${ctx.remoteUser}:${ctx.remoteUser} /home/${ctx.remoteUser}`);
+  // git: required by the hermes installer's clone step. Some upstream
+  // versions of install.sh refuse to proceed without it (newer than the
+  // bash build.sh tested against — caught here when porting).
+  await orbExec(ctx.vm, "sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates git", { stdio: "inherit" });
 };
 
 const hardenVm = async (ctx: Ctx): Promise<void> => {
@@ -139,6 +145,17 @@ const hardenVm = async (ctx: Ctx): Promise<void> => {
 
 const installHermes = async (ctx: Ctx): Promise<void> => {
   log("3. install Hermes (HERMES_INSTALL_DIR=/opt/hermes-agent)");
+  // The installer's git clone runs as the invoking user (not root). It
+  // needs /opt itself to be writable by them, AND /opt/hermes-agent to
+  // not exist as an empty dir (the installer refuses to clone into a
+  // non-empty/empty pre-existing dir).
+  await orbExec(
+    ctx.vm,
+    [
+      `sudo chown ${ctx.remoteUser}:${ctx.remoteUser} /opt`,
+      `if [ -d /opt/hermes-agent ] && [ -z "$(ls -A /opt/hermes-agent 2>/dev/null)" ]; then rmdir /opt/hermes-agent; fi`,
+    ].join(" && "),
+  );
   await orbExec(ctx.vm,
     "command -v hermes >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | HERMES_INSTALL_DIR=/opt/hermes-agent bash",
     { stdio: "inherit" });
@@ -149,7 +166,7 @@ const subst = (body: string, vars: Record<string, string>): string =>
   body.replace(/__([A-Z][A-Z0-9_]*)__/g, (_, k) => vars[k] ?? "")
       .replace(/\$\{([A-Z][A-Z0-9_]*)\}/g, (_, k) => vars[k] ?? `\${${k}}`);
 
-const configureMemory = (ctx: Ctx, managed: string[]): string => {
+const configureMemory = async (ctx: Ctx, managed: string[]): Promise<string> => {
   const mem = stackGet("HERMES_MEMORY") || "honcho";
   log(`4. configure Hermes memory provider: ${mem}`);
   const profiles = envGet(STACK_ROOT + "/.stack-node/.env", "COMPOSE_PROFILES").split(",").map((x) => x.trim());
@@ -161,7 +178,7 @@ const configureMemory = (ctx: Ctx, managed: string[]): string => {
       if (!profiles.includes("honcho")) warn("HERMES_MEMORY=honcho but 'honcho' not in COMPOSE_PROFILES");
       const tpl = readFileSync(resolve(D, "config/honcho.json.tmpl"), "utf8");
       hermesWrite(ctx, "honcho.json", subst(tpl, { STACK_PROJECT: ctx.project }));
-      void orbExec(ctx.vm, "hermes config set memory.provider honcho", { stdio: "inherit" });
+      await orbExec(ctx.vm, "hermes config set memory.provider honcho", { stdio: "inherit" });
       log(`memory: honcho -> honcho-api.${ctx.project}.orb.local:8000`);
       break;
     }
@@ -169,19 +186,19 @@ const configureMemory = (ctx: Ctx, managed: string[]): string => {
       if (!profiles.includes("hindsight")) warn("HERMES_MEMORY=hindsight but 'hindsight' not in COMPOSE_PROFILES");
       const tpl = readFileSync(resolve(D, "config/hindsight.config.json.tmpl"), "utf8");
       hermesWrite(ctx, "hindsight/config.json", subst(tpl, { STACK_PROJECT: ctx.project }));
-      void orbExec(ctx.vm, "hermes config set memory.provider hindsight", { stdio: "inherit" });
+      await orbExec(ctx.vm, "hermes config set memory.provider hindsight", { stdio: "inherit" });
       log(`memory: hindsight -> hindsight.${ctx.project}.orb.local:8888`);
       break;
     }
     case "holographic":
-      void orbExec(ctx.vm, "hermes config set memory.provider holographic", { stdio: "inherit" });
+      await orbExec(ctx.vm, "hermes config set memory.provider holographic", { stdio: "inherit" });
       log("memory: holographic (fully local)");
       break;
     case "agentmemory": {
       if (!profiles.includes("agentmemory")) warn("HERMES_MEMORY=agentmemory but 'agentmemory' not in COMPOSE_PROFILES");
       managed.push(`AGENTMEMORY_URL=http://agentmemory.${ctx.project}.orb.local:3111`);
       managed.push(`AGENTMEMORY_SECRET=${stackGet("AGENTMEMORY_SECRET")}`);
-      void orbExec(ctx.vm, "hermes config set memory.provider agentmemory", { stdio: "inherit" });
+      await orbExec(ctx.vm, "hermes config set memory.provider agentmemory", { stdio: "inherit" });
       // YAML merge: mcp_servers.agentmemory + memory.provider — done with
       // the `yaml` lib (preserves comments).
       if (ctx.mountEnabled) {
@@ -208,7 +225,7 @@ const configureMemory = (ctx: Ctx, managed: string[]): string => {
   return mem;
 };
 
-const wireOptionalServices = (ctx: Ctx, managed: string[]): void => {
+const wireOptionalServices = async (ctx: Ctx, managed: string[]): Promise<void> => {
   const profiles = envGet(STACK_ROOT + "/.stack-node/.env", "COMPOSE_PROFILES").split(",").map((x) => x.trim());
   if (profiles.includes("firecrawl")) {
     managed.push(`FIRECRAWL_API_URL=http://firecrawl-api.${ctx.project}.orb.local:3002`);
@@ -225,7 +242,7 @@ const wireOptionalServices = (ctx: Ctx, managed: string[]): void => {
   }
   if (profiles.includes("searxng")) {
     managed.push(`SEARXNG_URL=http://searxng.${ctx.project}.orb.local:8080`);
-    void orbExec(ctx.vm, "hermes config set web.search_backend searxng", { stdio: "inherit" });
+    await orbExec(ctx.vm, "hermes config set web.search_backend searxng", { stdio: "inherit" });
     log(`searxng: SEARXNG_URL -> managed .env block (web.search_backend=searxng)`);
   } else {
     warn("searxng not in COMPOSE_PROFILES — skipping Hermes searxng env");
@@ -331,7 +348,6 @@ const materializeManagedEnv = (ctx: Ctx, managed: string[]): void => {
 };
 
 export default async function build(): Promise<void> {
-  $.verbose = false;
   const ctx = resolveCtx();
   resolveMountConfig(ctx);
   await refuseToShadow(ctx);
@@ -347,8 +363,8 @@ export default async function build(): Promise<void> {
     `TELEGRAM_ALLOWED_USERS=${stackGet("HERMES_TELEGRAM_ALLOWED_USERS")}`,
     `TELEGRAM_HOME_CHANNEL=${stackGet("HERMES_TELEGRAM_HOME_CHANNEL")}`,
   ];
-  configureMemory(ctx, managed);
-  wireOptionalServices(ctx, managed);
+  await configureMemory(ctx, managed);
+  await wireOptionalServices(ctx, managed);
   materializeManagedEnv(ctx, managed);
   patchModelBlock(ctx);
   await installUnits(ctx);

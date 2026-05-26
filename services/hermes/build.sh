@@ -505,33 +505,34 @@ else
   warn "searxng not in COMPOSE_PROFILES — skipping Hermes searxng env"
 fi
 
+# IMPORTANT: Skip installing the Mission Control plugin until its stable
 # MissionControl (lever: HERMES_MC_URL in .stack/.env). Bidirectional
 # sync between this Hermes VM and a MissionControl deployment. When
 # enabled, this script also syncs services/hermes/plugins/mission-control/
 # into the VM and registers it in plugins.enabled.
-if [ -n "${HERMES_MC_URL:-}" ]; then
-  HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
-HERMES_MC_URL=$HERMES_MC_URL
-HERMES_MC_AGENT_NAME=${HERMES_MC_AGENT_NAME:-$VM}
-HERMES_MC_BOARD=${HERMES_MC_BOARD:-mc}
-HERMES_MC_POLL_INTERVAL=${HERMES_MC_POLL_INTERVAL:-10}
-HERMES_MC_DEFAULT_PROJECT_SLUG=${HERMES_MC_DEFAULT_PROJECT_SLUG:-}
-HERMES_MC_DEBUG=${HERMES_MC_DEBUG:-false}"
-
-  # PAT is only included in the managed block while still set in .stack/.env.
-  # The operator clears it after first-run registration; subsequent builds
-  # drop the line from the managed block automatically.
-  if [ -n "${HERMES_MC_USER_PAT:-}" ]; then
-    HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
-HERMES_MC_USER_PAT=$HERMES_MC_USER_PAT"
-  fi
-
-  hermes_sync_plugin "mission-control"
-  hermes_enable_plugin "mission-control"
-  log "mission-control: HERMES_MC_URL=$HERMES_MC_URL -> managed .env block + plugin enabled"
-else
-  warn "mission-control: HERMES_MC_URL unset in .stack/.env — plugin not enabled"
-fi
+# if [ -n "${HERMES_MC_URL:-}" ]; then
+#   HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
+# HERMES_MC_URL=$HERMES_MC_URL
+# HERMES_MC_AGENT_NAME=${HERMES_MC_AGENT_NAME:-$VM}
+# HERMES_MC_BOARD=${HERMES_MC_BOARD:-mc}
+# HERMES_MC_POLL_INTERVAL=${HERMES_MC_POLL_INTERVAL:-10}
+# HERMES_MC_DEFAULT_PROJECT_SLUG=${HERMES_MC_DEFAULT_PROJECT_SLUG:-}
+# HERMES_MC_DEBUG=${HERMES_MC_DEBUG:-false}"
+#
+#   # PAT is only included in the managed block while still set in .stack/.env.
+#   # The operator clears it after first-run registration; subsequent builds
+#   # drop the line from the managed block automatically.
+#   if [ -n "${HERMES_MC_USER_PAT:-}" ]; then
+#     HERMES_ENV_MANAGED="$HERMES_ENV_MANAGED
+# HERMES_MC_USER_PAT=$HERMES_MC_USER_PAT"
+#   fi
+#
+#   hermes_sync_plugin "mission-control"
+#   hermes_enable_plugin "mission-control"
+#   log "mission-control: HERMES_MC_URL=$HERMES_MC_URL -> managed .env block + plugin enabled"
+# else
+#   # warn "mission-control: HERMES_MC_URL unset in .stack/.env — plugin not enabled"
+# fi
 
 # Materialize the accumulated managed block now that every conditional
 # section has had its chance to add lines. User lines outside the markers

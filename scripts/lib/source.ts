@@ -76,16 +76,30 @@ export const stackSource = async (
     }
   }
 
-  // Reuse fast-path.
-  const lockReq = generatedGet(svc, `${uc}_SOURCE_REQUESTED`);
-  const lockSha = generatedGet(svc, `${uc}_SOURCE_RESOLVED_SHA`);
-  if (existsSync(resolve(srcDir, ".git")) && lockReq && lockReq === requested) {
+  // Reuse fast-path. Two cases:
+  //   (a) lock matches + HEAD matches lock — the standard reuse path.
+  //   (b) lock missing but HEAD already matches `requested` (interpreted
+  //       as a SHA) — common on a fresh .stack-node when _source/ was
+  //       already cloned for a sibling stack. Adopt the existing checkout
+  //       and seed the lock + rebuild flag (compose project doesn't share
+  //       image tags across projects, so a fresh project needs the build).
+  if (existsSync(resolve(srcDir, ".git"))) {
     let head = "";
     try { head = (await $`git -C ${srcDir} rev-parse HEAD`).stdout.trim(); } catch { /* ignore */ }
-    if (head && head === lockSha) {
+    const lockReq = generatedGet(svc, `${uc}_SOURCE_REQUESTED`);
+    const lockSha = generatedGet(svc, `${uc}_SOURCE_RESOLVED_SHA`);
+    if (lockReq && lockReq === requested && head && head === lockSha) {
       ensureDockerignore(srcDir);
       log(`stackSource(${svc}): reuse — ${requested} @ ${head.slice(0, 12)}`);
       return { reused: true, sha: head, requested };
+    }
+    if (!lockReq && head && /^[0-9a-f]{40}$/.test(requested) && head === requested) {
+      ensureDockerignore(srcDir);
+      generatedUpsert(svc, `${uc}_SOURCE_REQUESTED`, requested);
+      generatedUpsert(svc, `${uc}_SOURCE_RESOLVED_SHA`, head);
+      generatedUpsert(svc, `${uc}_SOURCE_REBUILD`, "1");
+      log(`stackSource(${svc}): adopt existing checkout @ ${head.slice(0, 12)} (rebuild flag set for fresh project)`);
+      return { reused: false, sha: head, requested };
     }
   }
 

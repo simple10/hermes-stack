@@ -1,5 +1,5 @@
 // generated.ts — read/write the per-service .generated.env in
-// .stack-node/<svc>/.generated.env. These files hold machine-owned state
+// .stack/<svc>/.generated.env. These files hold machine-owned state
 // (DB passwords, minted virtual keys, resolved digests, source SHAs).
 // Never hand-edited.
 import { randomBytes } from 'node:crypto'

@@ -1,7 +1,7 @@
 // cli.ts — entry point. Tiny dispatcher; commands live in commands/.
 //
 // Usage:
-//   ./stack-cli setup                # interactive .stack-node/.env setup
+//   ./stack-cli setup                # interactive .stack/.env setup
 //   ./stack-cli enable <svc>...      # cascade-enable services
 //   ./stack-cli disable <svc>...     # disable (refuses if dependants enabled)
 //   ./stack-cli enabled              # list active profiles + machines
@@ -74,7 +74,7 @@ const printHelp = (): void => {
       pc.bold('stack-cli') + ' — parallel Node/TS scripting for hermes-stack',
       '',
       'Commands:',
-      '  setup                 interactive .stack-node/.env setup',
+      '  setup                 interactive .stack/.env setup',
       '  enable <svc>...       cascade-enable services',
       '  disable <svc>...      disable (refuses if dependants enabled)',
       '  enabled               list active profiles + machines',
@@ -89,7 +89,7 @@ const printHelp = (): void => {
       '  start-cleanup         remove exited provisioner containers',
       '  chrome-cdp[-stop]     Mac-host Chrome with CDP for the hermes VM',
       '',
-      pc.dim('Operates on .stack-node/ until cutover; the existing `just` flow is untouched.'),
+      pc.dim('Operates on .stack/ until cutover; the existing `just` flow is untouched.'),
     ].join('\n'),
   )
 }

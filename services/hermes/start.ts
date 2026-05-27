@@ -25,7 +25,7 @@ export default async function start(): Promise<void> {
   const hm = stackGet('HERMES_MODEL') || 'cliproxy/gpt-5.5'
   const mountEnabled = (stackGet('HERMES_MOUNT_ENABLED') || 'true') === 'true'
   const remoteUser = stackGet('HERMES_REMOTE_USER') || 'hermes'
-  const mountDir = stackGet('HERMES_MOUNT_DIR') || '.stack-node/hermes/.hermes'
+  const mountDir = stackGet('HERMES_MOUNT_DIR') || '.stack/hermes/.hermes'
   const macHermes = mountDir.startsWith('/') ? mountDir : resolve(STACK_ROOT, mountDir)
 
   if (hk) {

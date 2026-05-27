@@ -7,12 +7,12 @@ import { die, log } from '../../scripts/lib/log.ts'
 export default async function build(): Promise<void> {
   if (stackGet('HERMES_GATEWAY_ALLOW_ACCESS') !== 'true') {
     die(
-      `hermes-workspace requires HERMES_GATEWAY_ALLOW_ACCESS=true in .stack-node/.env.
+      `hermes-workspace requires HERMES_GATEWAY_ALLOW_ACCESS=true in .stack/.env.
 
   The Hermes gateway defaults to loopback-only inside the VM. To allow
   hermes-workspace to reach it:
 
-    1. edit .stack-node/.env: HERMES_GATEWAY_ALLOW_ACCESS=true
+    1. edit .stack/.env: HERMES_GATEWAY_ALLOW_ACCESS=true
     2. stack-cli setup       # mints HERMES_GATEWAY_API_KEY + HERMES_WORKSPACE_PASSWORD
     3. stack-cli build       # rebuilds the hermes systemd unit + this service
     4. stack-cli start       # drain-restarts the gateway + brings up workspace

@@ -3,7 +3,7 @@
 // hermes-stack owns a single block delimited by MANAGED_OPEN/_CLOSE.
 // Lines OUTSIDE that block are user-owned and preserved across every
 // `stack-cli build`. Mirrors the `#>--- svc ---` block idiom used in
-// .stack-node/.env and the bash hermes_env_rewrite_managed_block.
+// .stack/.env and the bash hermes_env_rewrite_managed_block.
 import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { warn } from './log.ts'

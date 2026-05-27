@@ -1,7 +1,7 @@
-// source.ts — port of stack_source in lib/stacklib.sh.
+// source.ts — clone-and-pin a service's _source/ directory.
 //
 // Clone-and-pin services/<svc>/_source to ${<SVC_UC>_VERSION:-DEFAULT_PIN}.
-// State (lock + rebuild flag) lives in .stack-node/<svc>/.generated.env
+// State (lock + rebuild flag) lives in .stack/<svc>/.generated.env
 // under <SVC_UC>_SOURCE_* keys.
 //
 // Reuse fast-path: lock matches + HEAD matches -> no network, no rebuild flag.
@@ -83,7 +83,7 @@ export const stackSource = async (
   // Reuse fast-path. Two cases:
   //   (a) lock matches + HEAD matches lock — the standard reuse path.
   //   (b) lock missing but HEAD already matches `requested` (interpreted
-  //       as a SHA) — common on a fresh .stack-node when _source/ was
+  //       as a SHA) — common on a fresh .stack when _source/ was
   //       already cloned for a sibling stack. Adopt the existing checkout
   //       and seed the lock + rebuild flag (compose project doesn't share
   //       image tags across projects, so a fresh project needs the build).

@@ -1,19 +1,15 @@
-// services/hermes/build.ts — TS port of services/hermes/build.sh.
-//
-// Provisions an OrbStack Ubuntu machine running Hermes wired to the
-// Dockerized Honcho+LiteLLM stack. Installs ONLY messaging/agent services
-// (dashboard, gateway, logtail) — NO native honcho/postgres (Honcho is
-// Dockerized).
+// services/hermes/build.ts — provision an OrbStack Ubuntu machine
+// running Hermes wired to the Dockerized Honcho+LiteLLM stack.
+// Installs ONLY messaging/agent services (dashboard, gateway, logtail) —
+// NO native honcho/postgres (Honcho is Dockerized).
 //
 // HARD SAFETY: refuses the frozen original `hermes-agent`.
 //
-// The bash version lives at services/hermes/build.sh and remains the
-// production driver while this port matures.  Both write the same kind of
-// artifacts (~/.hermes/{.env,config.yaml,honcho.json,…}, systemd units in
-// /etc/systemd/system/, /usr/local/bin/hermes-logtail.sh).  The TS port
-// targets the parallel test stack: STACK_DIR=.stack-node, so
-// HERMES_VIRTUAL_KEY/HERMES_GATEWAY_API_KEY/etc come from
-// .stack-node/.env not .stack/.env.
+// Writes ~/.hermes/{.env,config.yaml,honcho.json,…}, systemd units in
+// /etc/systemd/system/, and /usr/local/bin/hermes-logtail.sh inside
+// the VM. The Mac-side bind-mount (HERMES_MOUNT_DIR, default
+// .stack/hermes/.hermes) lets the build write those files locally
+// rather than shoveling them over `orb -m bash -lc cat >`.
 import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml'
@@ -58,7 +54,7 @@ const resolveCtx = (): Ctx => {
     warn('HERMES_VIRTUAL_KEY not minted yet — start.ts will apply it post-mint')
   }
   const mountEnabled = (stackGet('HERMES_MOUNT_ENABLED') || 'true') === 'true'
-  const mountDir = stackGet('HERMES_MOUNT_DIR') || '.stack-node/hermes/.hermes'
+  const mountDir = stackGet('HERMES_MOUNT_DIR') || '.stack/hermes/.hermes'
   const macHermes = mountDir.startsWith('/') ? mountDir : resolve(STACK_ROOT, mountDir)
   const vmHermes = `/home/${remoteUser}/.hermes`
   return {
@@ -88,7 +84,7 @@ const hermesWrite = (ctx: Ctx, rel: string, content: string): void => {
 const resolveMountConfig = (ctx: Ctx): void => {
   log(`0. resolve hermes mount config
    HERMES_MOUNT_ENABLED=${ctx.mountEnabled}
-   HERMES_MOUNT_DIR=${stackGet('HERMES_MOUNT_DIR') || '.stack-node/hermes/.hermes'}
+   HERMES_MOUNT_DIR=${stackGet('HERMES_MOUNT_DIR') || '.stack/hermes/.hermes'}
    resolves to: ${ctx.orbMountSpec}`)
   if (!ctx.mountEnabled) return
   mkdirSync(ctx.macHermes, { recursive: true })
@@ -162,7 +158,7 @@ const installSystemPackages = async (ctx: Ctx): Promise<void> => {
   await orbExec(ctx.vm, `sudo chown -R ${ctx.remoteUser}:${ctx.remoteUser} /home/${ctx.remoteUser}`)
   // git: required by the hermes installer's clone step. Some upstream
   // versions of install.sh refuse to proceed without it (newer than the
-  // bash build.sh tested against — caught here when porting).
+  // the installer requires git for its clone step.
   await orbExec(
     ctx.vm,
     'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates git',
@@ -215,7 +211,7 @@ const subst = (body: string, vars: Record<string, string>): string =>
 const configureMemory = async (ctx: Ctx, managed: string[]): Promise<string> => {
   const mem = stackGet('HERMES_MEMORY') || 'honcho'
   log(`4. configure Hermes memory provider: ${mem}`)
-  const profiles = envGet(STACK_ROOT + '/.stack-node/.env', 'COMPOSE_PROFILES')
+  const profiles = envGet(STACK_ROOT + '/.stack/.env', 'COMPOSE_PROFILES')
     .split(',')
     .map((x) => x.trim())
   switch (mem) {
@@ -279,7 +275,7 @@ const configureMemory = async (ctx: Ctx, managed: string[]): Promise<string> => 
 }
 
 const wireOptionalServices = async (ctx: Ctx, managed: string[]): Promise<void> => {
-  const profiles = envGet(STACK_ROOT + '/.stack-node/.env', 'COMPOSE_PROFILES')
+  const profiles = envGet(STACK_ROOT + '/.stack/.env', 'COMPOSE_PROFILES')
     .split(',')
     .map((x) => x.trim())
   if (profiles.includes('firecrawl')) {
@@ -454,7 +450,7 @@ export default async function build(): Promise<void> {
   await installUnits(ctx)
   await applyGatewayGate(ctx)
 
-  // Persist any pgmt env back into .stack-node/.env if needed (currently no-op
+  // Persist any pgmt env back into .stack/.env if needed (currently no-op
   // beyond what stackUpsert already does inline).
   void envUpsert
   log(`services/hermes/build.ts DONE for '${ctx.vm}'`)

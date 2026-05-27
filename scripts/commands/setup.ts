@@ -1,7 +1,7 @@
 // commands/setup.ts — interactive setup flow (clack-driven).
 //
 // Step order:
-//   1. Seed .stack-node/.env from .stack.defaults.env (first run = copy;
+//   1. Seed .stack/.env from .stack.defaults.env (first run = copy;
 //      subsequent = additive merge of missing keys).
 //   2. Prompt for COMPOSE_PROJECT_NAME.
 //   3. Multi-select docker + VM services (cascade SERVICE_REQUIRES).
@@ -38,7 +38,7 @@ export const runSetup = async (): Promise<void> => {
   p.intro(pc.bgCyan(pc.black(' hermes-stack setup ')))
   ensureStackDir()
 
-  // -- step 1: seed .stack-node/.env from defaults --------------------------
+  // -- step 1: seed .stack/.env from defaults --------------------------
   if (!existsSync(STACK_ENV)) {
     copyFileSync(DEFAULTS_ENV, STACK_ENV)
     chmodSync(STACK_ENV, 0o600)
@@ -147,7 +147,7 @@ export const runSetup = async (): Promise<void> => {
           manualMemoryNotice.push(
             `hermes will use '${backing}' but the local service isn't enabled — after start, ` +
               `point hermes at an external ${backing} endpoint (edit ~/.hermes/config.yaml ` +
-              `via the mount at .stack-node/hermes/.hermes/, or run 'hermes config set' in the VM).`,
+              `via the mount at .stack/hermes/.hermes/, or run 'hermes config set' in the VM).`,
           )
         }
       }
@@ -157,7 +157,7 @@ export const runSetup = async (): Promise<void> => {
   // -- step 5: stack-wide LLM models ---------------------------------------
   p.note(
     [
-      'These three values feed every per-service *_MODEL lever in .stack-node/.env',
+      'These three values feed every per-service *_MODEL lever in .stack/.env',
       'and (via LiteLLM) every chat/embedding call the stack makes.',
       '',
       pc.bold('Examples:'),
@@ -246,7 +246,7 @@ export const runSetup = async (): Promise<void> => {
         '',
         pc.bold('After ./stack-cli start, activate each provider:'),
         `  1. Open  http://cliproxyapi.${projectName}.orb.local:8317/management.html`,
-        '  2. Sign in with the CLIPROXY_MANAGEMENT_KEY from .stack-node/.env',
+        '  2. Sign in with the CLIPROXY_MANAGEMENT_KEY from .stack/.env',
         '  3. For each provider you want to use, click its OAuth button and complete',
         '     the flow. When the provider redirects to a localhost URL that fails,',
         '     copy the failed URL from the address bar and paste it into the',

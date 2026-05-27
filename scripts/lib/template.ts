@@ -1,4 +1,4 @@
-// template.ts — mirror render_template in lib/stacklib.sh.
+// template.ts — copy-once template renderer with drift detection.
 //
 //   - First render: copy TEMPLATE -> OUT verbatim, record sha256.
 //   - Subsequent: if OUT exists AND the TEMPLATE's sha256 has drifted
@@ -6,7 +6,7 @@
 //     in OUT are preserved). User re-renders with `stack-cli reconfigure`.
 //   - No drift -> silent (just a "present and up to date" log).
 //
-// State lives in .stack-node/<svc>/.config-hashes/<basename>.sha256.
+// State lives in .stack/<svc>/.config-hashes/<basename>.sha256.
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, statSync } from 'node:fs'
 import { basename, dirname, resolve } from 'node:path'

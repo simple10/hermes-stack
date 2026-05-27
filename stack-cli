@@ -2,7 +2,7 @@
 # stack-cli — entry point for the parallel Node/TS scripting system.
 # Runs scripts/cli.ts under bun if present, else node with TS stripping.
 # Lives next to the (existing) justfile; nothing here replaces it yet —
-# the new system writes to .stack-node/ so it runs alongside .stack/.
+# the new system writes to .stack/ so it runs alongside .stack/.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

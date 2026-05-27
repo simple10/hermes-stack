@@ -10,7 +10,7 @@
 //
 //   envGet / envUpsert — LINE-ORIENTED reads/writes that preserve the
 //     file's existing structure (comments, block markers, line order).
-//     Used for in-place edits of .stack-node/.env, where structure
+//     Used for in-place edits of .stack/.env, where structure
 //     matters (the #>--- svc --- blocks are NOT ordinary env content).
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -35,7 +35,7 @@ export const envGet = (file: string, key: string): string => {
 }
 
 // envUpsert — in-place line replacement (or append if absent). Preserves
-// line position + surrounding comments. Mirrors stacklib.sh's env_upsert.
+// line position + surrounding comments.
 export const envUpsert = (file: string, key: string, value: string): void => {
   mkdirSync(dirname(file), { recursive: true })
   const body = existsSync(file) ? readFileSync(file, 'utf8') : ''

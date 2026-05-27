@@ -1,15 +1,14 @@
-// compose.ts — render .stack-node/docker-compose.yaml.
+// compose.ts — render .stack/docker-compose.yaml.
 //
-// Mirrors stack_render_compose() in lib/stacklib.sh:
 //   - Header: the tracked docker-compose.example.yaml (comments only).
 //   - Generated `include:` block listing services/<svc>/compose.yaml for
-//     every <svc> in stack_profiles (COMPOSE_PROFILES closed under
+//     every <svc> in stackProfiles (COMPOSE_PROFILES closed under
 //     SERVICE_REQUIRES).
 //
-// Lives at .stack-node/docker-compose.yaml so the whole stack state is
-// self-contained in one directory (easy to back up, doesn't collide with
-// the existing /docker-compose.yaml from the bash system). The include:
-// paths are emitted relative to that location (../services/<svc>/…).
+// Lives at .stack/docker-compose.yaml so the whole stack state is
+// self-contained in one directory (easy to back up, easy to rm -rf for
+// a clean slate). The include: paths are emitted relative to that
+// location (../services/<svc>/…).
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { stringify as yamlStringify } from 'yaml'

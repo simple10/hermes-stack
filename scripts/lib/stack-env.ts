@@ -1,5 +1,5 @@
-// stack-env.ts — load + expand the full .stack-node/.env (including all
-// .stack-node/*/.generated.env overlays) into a flat Record<string,string>.
+// stack-env.ts — load + expand the full .stack/.env (including all
+// .stack/*/.generated.env overlays) into a flat Record<string,string>.
 // Used by service build.ts modules that need to substitute ${VAR}-style
 // references inside templates (the bash version did this by `set -a; .
 // .stack/.env; set +a`).
@@ -34,7 +34,6 @@ export const loadStackEnv = (): Record<string, string> => {
 
 // substituteTemplate — replace __KEY__ placeholders in `body` with values
 // from `env`. Missing keys become `fallback[key]` if provided, else "".
-// Mirrors the sed-replace pattern in the bash build.sh files.
 export const substituteTemplate = (
   body: string,
   env: Record<string, string>,

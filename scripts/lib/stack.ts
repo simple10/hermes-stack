@@ -1,6 +1,6 @@
-// stack.ts — block-aware reads/writes for .stack-node/.env.
+// stack.ts — block-aware reads/writes for .stack/.env.
 //
-// .stack-node/.env layout (mirrors .stack/.env in the bash system):
+// .stack/.env layout (mirrors .stack/.env in the bash system):
 //
 //   COMPOSE_PROJECT_NAME=…
 //   OPENROUTER_API_KEY=…             ← top-level (no owner)

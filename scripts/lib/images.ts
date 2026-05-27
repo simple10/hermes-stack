@@ -4,7 +4,7 @@
 // pass-through digest) to a concrete digest via
 // `docker buildx imagetools inspect` and write *_IMAGE=repo@digest +
 // *_IMAGE_REQUESTED + *_IMAGE_RESOLVED_DIGEST into
-// .stack-node/<svc>/.generated.env.
+// .stack/<svc>/.generated.env.
 //
 // Runs unconditionally because compose `include:` parses + interpolates
 // every entry on every `dc` call; the values must always be resolved.

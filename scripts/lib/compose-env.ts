@@ -1,5 +1,5 @@
 // compose-env.ts — pure helpers for what COMPOSE_PROFILES / project resolve
-// to from .stack-node/.env (transitive closure of SERVICE_REQUIRES). Split
+// to from .stack/.env (transitive closure of SERVICE_REQUIRES). Split
 // out from compose.ts to avoid circular imports (services.ts <-> compose.ts).
 import { envGet } from './env.ts'
 import { STACK_ENV } from './paths.ts'
@@ -41,5 +41,5 @@ export const stackMachines = (): string[] =>
     .filter(Boolean)
 
 // VM name = `${COMPOSE_PROJECT_NAME}-${SVC}` (dash, not underscore — orb
-// rejects underscores). Mirrors stack_vm_name in stacklib.sh.
+// rejects underscores).
 export const stackVmName = (svc: string): string => `${stackProject()}-${svc}`

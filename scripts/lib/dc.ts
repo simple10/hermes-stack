@@ -1,9 +1,8 @@
-// dc.ts — hermetic `docker compose` runner for the parallel test stack.
+// dc.ts — hermetic `docker compose` runner for this stack.
 //
-// Mirrors dc() in lib/stacklib.sh:
-//   - Project name + profiles injected from .stack-node/.env (never the
+//   - Project name + profiles injected from .stack/.env (never the
 //     ambient shell).
-//   - --env-file args for .stack-node/.env + every .stack-node/*/.generated.env
+//   - --env-file args for .stack/.env + every .stack/*/.generated.env
 //     (absolute paths).
 //   - Host environment STRIPPED apart from a tight docker-operational
 //     allowlist (PATH, HOME, DOCKER_*, *_PROXY, etc.). Compose interpolation

@@ -2,7 +2,7 @@
 //
 // Cascades SERVICE_REQUIRES leaf-first. Each name added to the
 // appropriate CSV (COMPOSE_PROFILES or STACK_MACHINES) + #>--- svc ---
-// block appended/re-enabled in .stack-node/.env. Compose file is
+// block appended/re-enabled in .stack/.env. Compose file is
 // regenerated so the include: list stays consistent.
 import pc from 'picocolors'
 import { ensureStackDir, enableService } from '../lib/stack.ts'

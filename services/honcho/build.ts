@@ -13,7 +13,7 @@ export default async function build(): Promise<void> {
   await stackSource('honcho')
 
   // 2. Render config.runtime.toml. The template uses __PLACEHOLDER__ form;
-  //    values come from .stack-node/.env (incl. block-owned HONCHO_* keys
+  //    values come from .stack/.env (incl. block-owned HONCHO_* keys
   //    that may interpolate ${STACK_LLM_MODEL*} — dotenv-expand resolves
   //    those for us).
   const env = loadStackEnv()

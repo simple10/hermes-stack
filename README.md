@@ -2,16 +2,20 @@
 
 A personal Hermes Agent stack you run safely on your Mac.
 
-Hermes runs in an isolated OrbStack VM. Supporting services run in Docker.
+Hermes runs in an isolated OrbStack VM.
+
+Supporting services run in Docker.
+
 Nothing has access to your Mac filesystem by default.
 
-One command brings up
-[Hermes](https://github.com/NousResearch/hermes-agent) (the agent),
-[Honcho](https://github.com/plastic-labs/honcho) (memory),
-[LiteLLM](https://github.com/BerriAI/litellm) (model gateway),
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (use your ChatGPT
-or Claude Code subscription as an API), plus optional web search,
-browser automation, and more.
+**One command brings up:**
+
+- [Hermes](https://github.com/NousResearch/hermes-agent) agent
+- [Honcho](https://github.com/plastic-labs/honcho) - memory
+- [LiteLLM](https://github.com/BerriAI/litellm) - LLM gateway
+- [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) - use your ChatGPT
+or Claude Code subscription as an API
+- Optional services for web search, browser automation, dashboards and more.
 
 ## Quick Start
 

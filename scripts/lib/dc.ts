@@ -14,6 +14,7 @@ import { resolve } from 'node:path'
 import { STACK_DIR, STACK_ENV } from './paths.ts'
 import { COMPOSE_PATH, renderCompose } from './compose.ts'
 import { stackProject, stackProfiles } from './compose-env.ts'
+import { loadStackEnv } from './stack-env.ts'
 
 const HOST_ALLOWLIST = [
   // operational (talking to the daemon, building over the network)
@@ -71,6 +72,15 @@ export const dcEnv = (): Record<string, string> => {
     const v = process.env[k]
     if (typeof v === 'string') env[k] = v
   }
+  // Overlay every .stack/.env (+ .stack/*/.generated.env) value with
+  // ${VAR} references already expanded by dotenv-expand. Compose still
+  // sees the same files via --env-file (literal, unexpanded), but its
+  // interpolation precedence is host-env > --env-file, so these
+  // injected, expanded values win — `${HONCHO_DERIVER_MODEL}` in a
+  // compose.yaml resolves to `cliproxy/gpt-5.4-mini`, not the literal
+  // `${STACK_LLM_MODEL_FAST}` string on disk.
+  const stack = loadStackEnv()
+  for (const [k, v] of Object.entries(stack)) env[k] = v
   const prof = stackProfiles()
   if (prof) env.COMPOSE_PROFILES = prof
   return env

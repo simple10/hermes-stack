@@ -17,6 +17,7 @@ import { parse as yamlParse, stringify as yamlStringify } from 'yaml'
 import { STACK_ROOT } from '../../scripts/lib/paths.ts'
 import { stackProject, stackVmName } from '../../scripts/lib/compose-env.ts'
 import { stackGet } from '../../scripts/lib/stack.ts'
+import { loadStackEnv } from '../../scripts/lib/stack-env.ts'
 import { envGet, envUpsert } from '../../scripts/lib/env.ts'
 import { generatedGet, generatedUpsert, generatedEnvPath } from '../../scripts/lib/generated.ts'
 import {
@@ -304,7 +305,9 @@ const patchModelBlock = (ctx: Ctx): void => {
   log(
     `5. patch config.yaml model: block (litellm.${ctx.project}.orb.local; key via stdin, never argv)`,
   )
-  const hm = stackGet('HERMES_MODEL') || 'cliproxy/gpt-5.5'
+  // HERMES_MODEL is usually `${STACK_LLM_MODEL}` in .stack/.env — read the
+  // dotenv-expanded view so the rendered config holds the resolved name.
+  const hm = loadStackEnv().HERMES_MODEL || 'cliproxy/gpt-5.5'
   const tpl = readFileSync(resolve(D, 'config/config.yaml.model.tmpl'), 'utf8')
   const modelBlock = subst(tpl, {
     STACK_PROJECT: ctx.project,

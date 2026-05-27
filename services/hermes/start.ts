@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { STACK_ROOT } from '../../scripts/lib/paths.ts'
 import { stackProject, stackVmName } from '../../scripts/lib/compose-env.ts'
 import { stackGet } from '../../scripts/lib/stack.ts'
+import { loadStackEnv } from '../../scripts/lib/stack-env.ts'
 import { generatedGet } from '../../scripts/lib/generated.ts'
 import { orbExec } from '../../scripts/lib/orb.ts'
 import { log, die } from '../../scripts/lib/log.ts'
@@ -22,7 +23,10 @@ export default async function start(): Promise<void> {
   const vm = stackVmName(SVC)
   const project = stackProject()
   const hk = generatedGet('litellm', 'HERMES_VIRTUAL_KEY')
-  const hm = stackGet('HERMES_MODEL') || 'cliproxy/gpt-5.5'
+  // HERMES_MODEL is usually `${STACK_LLM_MODEL}` in .stack/.env — read
+  // the dotenv-expanded view so the rendered model block carries the
+  // resolved name.
+  const hm = loadStackEnv().HERMES_MODEL || 'cliproxy/gpt-5.5'
   const mountEnabled = (stackGet('HERMES_MOUNT_ENABLED') || 'true') === 'true'
   const remoteUser = stackGet('HERMES_REMOTE_USER') || 'hermes'
   const mountDir = stackGet('HERMES_MOUNT_DIR') || '.stack/hermes/.hermes'

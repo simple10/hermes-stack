@@ -18,6 +18,6 @@ PG_VERSION=pg18
 Data volume is `<project>_pg-data`. To recreate from scratch (new
 passwords, new role/db provisioning): stop the stack, `docker volume rm
 <project>_pg-data`, `just start`. The `POSTGRES_SUPERPASS` is regenerated
-by `services/pg/build.sh` on first build into
+by `services/pg/build.ts` on first build into
 `.stack/pg/.generated.env` (gen-once + reused to keep matching the
 volume).

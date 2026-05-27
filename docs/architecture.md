@@ -24,7 +24,6 @@ hermes-stack/
     poststart.ts               # rare; for hooks needing serving deps
     start.ts                   # VM services only
     README.md
-  docker-compose.example.yaml  # tracked header for the generated compose file
   .stack.defaults.env          # tracked defaults for first-time setup
   .stack/                      # gitignored runtime state (see below)
   docs/

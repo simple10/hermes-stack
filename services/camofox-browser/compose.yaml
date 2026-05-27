@@ -5,7 +5,7 @@
 # (honcho/honcho-ui precedent). Project-scoped (no container_name / no shared
 # network); siblings reach it as camofox-browser:9377, external via
 # camofox-browser.<project>.orb.local:9377. CAMOFOX_ACCESS_KEY is generated
-# (services/camofox-browser/build.sh) into .stack/camofox-browser.generated.env
+# (services/camofox-browser/build.ts) into .stack/camofox-browser.generated.env
 # and reaches the container ONLY via dc's hermetic --env-file (gotcha #16).
 services:
   camofox-browser:

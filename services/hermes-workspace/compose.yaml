@@ -7,8 +7,8 @@
 #
 # Connects to the Hermes Agent gateway over OrbStack DNS at
 # HERMES_GATEWAY_URL (auto-written to .stack/hermes/.generated.env by
-# services/hermes/build.sh when the gate is open). When the gate is closed,
-# HERMES_GATEWAY_URL is absent and services/hermes-workspace/build.sh
+# services/hermes/build.ts when the gate is open). When the gate is closed,
+# HERMES_GATEWAY_URL is absent and services/hermes-workspace/build.ts
 # refuses to build (clear opt-in instruction), so we never reach a state
 # where the workspace container starts pointing at a dead endpoint.
 #
@@ -34,7 +34,7 @@ services:
       # Plain interpolation (no `:?`) — every dc() call would otherwise fail
       # parsing whenever the gate is closed but workspace is still enabled
       # (e.g. `just stop` after `just disable hermes-workspace`). Primary
-      # protection is services/hermes-workspace/build.sh's gate refuse;
+      # protection is services/hermes-workspace/build.ts's gate refuse;
       # if those URLs end up empty here, the workspace container fails
       # fast at startup with its own clear "no gateway" error.
       HERMES_API_URL: ${HERMES_GATEWAY_URL:-}
@@ -43,11 +43,11 @@ services:
       # the workspace's Skills / Memory / Cron / etc. panels consume.
       # Without this set, the workspace shows "Skills requires a Hermes
       # gateway that exposes the extended APIs". Written by
-      # services/hermes/build.sh into .stack/hermes/.generated.env when the
+      # services/hermes/build.ts into .stack/hermes/.generated.env when the
       # gate is open (the dashboard's systemd unit already binds 0.0.0.0:9119
       # unconditionally; we just need to surface the URL).
       HERMES_DASHBOARD_URL: ${HERMES_DASHBOARD_URL:-}
-      # Session password for the workspace web UI (auto-minted by setup.sh).
+      # Session password for the workspace web UI (auto-minted by stack-cli setup).
       HERMES_PASSWORD: ${HERMES_WORKSPACE_PASSWORD}
       COOKIE_SECURE: ${HERMES_WORKSPACE_COOKIE_SECURE:-true}
       TRUST_PROXY: ${HERMES_WORKSPACE_TRUST_PROXY:-true}

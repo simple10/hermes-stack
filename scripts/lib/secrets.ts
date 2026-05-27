@@ -1,6 +1,5 @@
 // secrets.ts — gen-once secret helpers. Stable across re-runs: if the
-// value already exists in .stack/.env, leave it. (Mirrors
-// gen_if_missing in lib/setup.sh.)
+// value already exists in .stack/.env, leave it.
 import { randomBytes } from 'node:crypto'
 import { stackGet, stackUpsert } from './stack.ts'
 

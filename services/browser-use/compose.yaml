@@ -36,7 +36,7 @@ services:
     environment:
       # All inference via LiteLLM (OpenAI-compatible) on the minted virtual
       # key; model is the .stack/.env lever (-> STACK_LLM_MODEL). NOTE: the
-      # LITELLM_VIRTKEYS alias is `browser_use` (UNDERSCORE) — preflight.sh
+      # LITELLM_VIRTKEYS alias is `browser_use` (UNDERSCORE) — preflight.ts
       # derives the env var as <ALIAS-uppercased>_VIRTUAL_KEY, and a hyphen
       # would yield the invalid `BROWSER-USE_VIRTUAL_KEY`. Service/profile
       # stay `browser-use`; only the key alias differs.

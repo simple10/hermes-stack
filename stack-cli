@@ -29,14 +29,15 @@ if [ ! -d "$here/node_modules" ]; then
 fi
 
 if command -v bun >/dev/null 2>&1; then
-  exec bun run "$entry" "$@"
+  # Skip PMG proxy on run commands to prevent unreachable proxy in isolated VMs
+  PMG_PROXY_INSTALL_ONLY=true exec bun run "$entry" "$@"
 fi
 
 # Node fallback. Node 23+ strips TS by default; earlier needs the flag.
 # We pass --experimental-strip-types unconditionally — it's a no-op on 23+
 # and required on 22.x. --no-warnings hides the ExperimentalWarning noise.
 if command -v node >/dev/null 2>&1; then
-  exec node --experimental-strip-types --no-warnings=ExperimentalWarning \
+  PMG_PROXY_INSTALL_ONLY=true exec node --experimental-strip-types --no-warnings=ExperimentalWarning \
     "$entry" "$@"
 fi
 

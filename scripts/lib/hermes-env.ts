@@ -14,6 +14,13 @@ export const MANAGED_CLOSE = '# <<< hermes-stack managed <<<'
 const MANAGED_HINT =
   '# User vars below are preserved across `stack-cli build`. Add plugin env (e.g. HERMES_AGENTS_OBSERVE_URL) here.'
 
+// Match the OPEN/CLOSE markers tolerantly so files written by older
+// versions of the marker text (e.g. the legacy bash flow's
+// `# >>> hermes-stack managed (rewritten on each `just build`) ...`)
+// still parse. Next write replaces them with the current MANAGED_* text.
+export const isManagedOpen = (line: string): boolean => /^# >>> hermes-stack managed\b/.test(line)
+export const isManagedClose = (line: string): boolean => /^# <<< hermes-stack managed\b/.test(line)
+
 // extractManagedKeys — return the set of KEY names declared at the start
 // of each line in `content` (KEY=...). Used to scrub stale top-level
 // assignments during migration.
@@ -50,8 +57,8 @@ export const writeManagedBlock = (target: string, content: string): void => {
   if (existsSync(target)) {
     const body = readFileSync(target, 'utf8')
     const lines = body.split('\n')
-    const openIdx = lines.findIndex((l) => l === MANAGED_OPEN)
-    const closeIdx = lines.findIndex((l) => l === MANAGED_CLOSE)
+    const openIdx = lines.findIndex(isManagedOpen)
+    const closeIdx = lines.findIndex(isManagedClose)
     if (openIdx >= 0 && closeIdx > openIdx) {
       mode = 'update'
       pre = lines.slice(0, openIdx).join('\n')

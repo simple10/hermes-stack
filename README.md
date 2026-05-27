@@ -2,14 +2,14 @@
 
 A personal Hermes Agent stack you run safely on your Mac.
 
-Hermes runs in an isolated OrbStack VM, supporting services run in Docker.
-Nothing has access to your host.
+Hermes runs in an isolated OrbStack VM. Supporting services run in Docker.
+Nothing has access to your Mac filesystem by default.
 
 One command brings up
 [Hermes](https://github.com/NousResearch/hermes-agent) (the agent),
 [Honcho](https://github.com/plastic-labs/honcho) (memory),
 [LiteLLM](https://github.com/BerriAI/litellm) (model gateway),
-[CLIProxyAPI](https://github.com/eceasy/cli-proxy-api) (use your ChatGPT
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (use your ChatGPT
 or Claude Code subscription as an API), plus optional web search,
 browser automation, and more.
 
@@ -40,18 +40,18 @@ git clone https://github.com/simple10/hermes-stack && cd hermes-stack
 Configure the stack with Honcho memory and SearXNG enabled.
 
 Then run `./stack-cli chrome-cdp` to start a separate chrome browser instance
-on your mac.
+on your Mac.
 
 Hermes can then use SearXNG for web scraping and your local chrome
-to bypass any bot detection. You can manually login to web sites without ever
+to bypass any bot detection. You can manually log in to web sites without ever
 giving Hermes your website passwords.
 
 ## Why Hermes Agent Stack
 
 You want a real personal AI agent with:
 
-- **Safety first** - Hermes runs isolated from your mac, unable to reach
-  files or other servers on your mac unless you give it access.
+- **Safety first** - Hermes runs isolated from your Mac, unable to reach
+  files or other servers on your Mac unless you give it access.
 - **Batteries included** - multiple memory providers, browser tools and
   even local browser CDP baked in and ready to run.
 - **Doesn't leak your data** — runs locally; no third-party SaaS.
@@ -82,9 +82,10 @@ macOS (Apple Silicon or Intel) with:
   (faster startup); Node fallback uses `--experimental-strip-types`.
 - **git, openssl** — already on macOS for most users.
 
-If you're on Linux: the docker side will mostly work but Hermes (the
+If you're on Linux: the docker services will work but Hermes (the
 agent) provisions via OrbStack-only commands. Linux port is on the
-roadmap; today it's macOS-only.
+roadmap; today it's macOS-only. If you need Linux today, just have
+claude or codex fork this project. The code is simple.
 
 ## Setup
 
@@ -98,25 +99,33 @@ roadmap; today it's macOS-only.
   Anthropic given)
 - Provider API key, **only** for providers your chosen
   models actually use (cliproxy users get an OAuth flow instead of an
-  API key),
+  API key)
 - Optional Telegram bot credentials if you enabled Hermes
 
 If you prefer, you can skip most of the setup and manually configure Hermes
 after it starts.
 
-After `start`, Hermes agent is reachable several ways:
+After `start`, your Hermes agent is reachable via:
 
-1. In the browser - start command outputs the url for you
-2. CLI - run the hermes cli or ssh into the VM to run any command
-3. **Telegram** - if you wired up telegram during setup
+1. Browser on your Mac - start command outputs the dashboard url for you
+2. CLI - run the hermes CLI or ssh into the VM to run any command
+3. **Telegram** - if you wired up Telegram during setup
 
-- **In-VM CLI**: `./stack-cli ssh` or `orb -m <project>-hermes` then `hermes` for a TUI.
+```bash
+# Run hermes CLI...
 
+# Enter the VM then run hermes
+./stack-cli ssh
+hermes
 
-- **Honcho UI** at `https://honcho-ui.<project>.orb.local` to inspect
-  what Hermes remembers about you.
+# Or simply run hermes commands from your Mac
+./stack-cli hermes <cmd>
 
-If you went with cliproxy models, you have one more step: open
+# Hermes only runs in the VM
+# ./stack-cli hermes just saves you a step
+```
+
+If you went with cliproxy models during setup, you have one more step: open
 `http://cliproxyapi.<project>.orb.local:8317/management.html`, sign in
 with the management key from `.stack/.env`, and complete the OAuth
 flow for each provider you want to use. The CLI tells you all of this
@@ -130,7 +139,8 @@ at the end of `setup`.
 | `./stack-cli enable <svc>` | Cascade-enable a service (auto-includes its dependencies) |
 | `./stack-cli disable <svc>` | Disable (refuses if other enabled services depend on it) |
 | `./stack-cli build` | Resolve image digests, fetch pinned sources, render configs, generate secrets |
-| `./stack-cli start` | Bring the whole stack up (backends → preflight → services → VMs) |
+| `./stack-cli start` | Bring the whole stack up (backends →
+  preflight → prestart → up → poststart → VMs) |
 | `./stack-cli stop` | Bring it down (VMs + `docker compose down`; volumes kept) |
 | `./stack-cli restart` | `stop` + `start`. Use this to apply VM config changes. |
 | `./stack-cli info` | Overview: what's enabled + runtime state of containers + VMs |

@@ -12,10 +12,10 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { STACK_DIR, STACK_ROOT } from '../lib/paths.ts'
+import { envUpsert } from '../lib/env.ts'
 import { csvAdd, csvRemove, stackGet } from '../lib/stack.ts'
 import { stackMachines, stackProject } from '../lib/compose-env.ts'
 import { dc } from '../lib/dc.ts'
-import { MANAGED_OPEN, MANAGED_CLOSE } from '../lib/hermes-env.ts'
 import { die, log, warn } from '../lib/log.ts'
 
 const CHROME_BIN = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -32,11 +32,25 @@ const spawnChrome = (port: string): number => {
     throw new Error('unreachable')
   }
   mkdirSync(USER_DATA_DIR, { recursive: true })
-  const proc = spawn(
-    CHROME_BIN,
-    [`--remote-debugging-port=${port}`, `--user-data-dir=${USER_DATA_DIR}`],
-    { detached: true, stdio: 'ignore' },
-  )
+
+  // Quiet flags so this isolated profile doesn't pester the user about
+  // first-run, sign-in, default-browser, what's-new, etc. on each launch.
+  // The user-data-dir is dedicated to chrome-cdp (.stack/chrome-cdp/data/),
+  // so none of these affect their real Chrome profile.
+  const args = [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${USER_DATA_DIR}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--no-service-autorun',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--disable-features=ChromeWhatsNewUI,ChromeSigninAutoSignin',
+    '--password-store=basic',
+    '--use-mock-keychain',
+  ]
+
+  const proc = spawn(CHROME_BIN, args, { detached: true, stdio: 'ignore' })
   proc.unref()
   if (!proc.pid) {
     die('chrome-cdp: failed to spawn Chrome')
@@ -63,10 +77,9 @@ const killChrome = (): boolean => {
   return killed
 }
 
-// Surgical edit of the managed block in ~/.hermes/.env: add or remove a
-// single BROWSER_CDP_URL line. The wider managed block is owned by
-// services/hermes/build.ts; we only touch this one key here so we don't
-// blow away the rest of the block.
+// Upsert (or remove) the single BROWSER_CDP_URL line in ~/.hermes/.env.
+// Line-oriented: no marker dependency, so this works whether the file
+// has the managed block markers or is a flat key=value file.
 const setBrowserCdpUrl = (url: string | null): void => {
   if (!stackMachines().includes('hermes')) return // no hermes -> nothing to do
 
@@ -79,24 +92,20 @@ const setBrowserCdpUrl = (url: string | null): void => {
   const mountDir = stackGet('HERMES_MOUNT_DIR') || '.stack/hermes/.hermes'
   const macHermes = mountDir.startsWith('/') ? mountDir : resolve(STACK_ROOT, mountDir)
   const envFile = resolve(macHermes, '.env')
-  if (!existsSync(envFile)) {
-    warn(`chrome-cdp: ${envFile} doesn't exist — run ./stack-cli build first`)
+
+  if (url) {
+    // envUpsert creates the parent dir + chmod 600. Safe to call even
+    // when the file is missing (rare — usually `./stack-cli build`
+    // wrote one already).
+    envUpsert(envFile, 'BROWSER_CDP_URL', url)
     return
   }
 
-  const lines = readFileSync(envFile, 'utf8').split('\n')
-  const open = lines.findIndex((l) => l.trim() === MANAGED_OPEN.trim())
-  const close = lines.findIndex((l) => l.trim() === MANAGED_CLOSE.trim())
-  if (open < 0 || close <= open) {
-    warn(`chrome-cdp: managed block markers not found in ${envFile}`)
-    return
-  }
-
-  const pre = lines.slice(0, open + 1)
-  const inner = lines.slice(open + 1, close).filter((l) => !/^BROWSER_CDP_URL=/.test(l))
-  const post = lines.slice(close)
-  if (url) inner.push(`BROWSER_CDP_URL=${url}`)
-  writeFileSync(envFile, [...pre, ...inner, ...post].join('\n'))
+  // Removing: only touch the file if it exists.
+  if (!existsSync(envFile)) return
+  const body = readFileSync(envFile, 'utf8')
+  const next = body.replace(/^BROWSER_CDP_URL=.*\n?/m, '')
+  if (next !== body) writeFileSync(envFile, next)
 }
 
 const localhostProxyEnabled = (): boolean => {

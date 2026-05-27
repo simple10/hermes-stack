@@ -5,13 +5,13 @@
 //
 // Reused on re-run so the value keeps matching the project's pg data
 // volume — rotating it after the volume exists would break auth.
-import { generatedGenIfMissing } from "../../scripts/lib/generated.ts";
-import { log } from "../../scripts/lib/log.ts";
+import { generatedGenIfMissing } from '../../scripts/lib/generated.ts'
+import { log } from '../../scripts/lib/log.ts'
 
 export default async function build(): Promise<void> {
-  if (generatedGenIfMissing("pg", "POSTGRES_SUPERPASS", "", 16)) {
-    log("postgres: generated POSTGRES_SUPERPASS");
+  if (generatedGenIfMissing('pg', 'POSTGRES_SUPERPASS', '', 16)) {
+    log('postgres: generated POSTGRES_SUPERPASS')
   } else {
-    log("postgres: reusing existing POSTGRES_SUPERPASS (keeps matching pg volume)");
+    log('postgres: reusing existing POSTGRES_SUPERPASS (keeps matching pg volume)')
   }
 }

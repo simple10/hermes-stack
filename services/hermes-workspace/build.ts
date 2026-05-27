@@ -1,11 +1,11 @@
 // hermes-workspace/build.ts — refuse-to-build until the user opens the
 // Hermes gateway access gate. Phase 1 image resolution is handled by the
 // build orchestrator; this is just the safety check.
-import { stackGet } from "../../scripts/lib/stack.ts";
-import { die, log } from "../../scripts/lib/log.ts";
+import { stackGet } from '../../scripts/lib/stack.ts'
+import { die, log } from '../../scripts/lib/log.ts'
 
 export default async function build(): Promise<void> {
-  if (stackGet("HERMES_GATEWAY_ALLOW_ACCESS") !== "true") {
+  if (stackGet('HERMES_GATEWAY_ALLOW_ACCESS') !== 'true') {
     die(
       `hermes-workspace requires HERMES_GATEWAY_ALLOW_ACCESS=true in .stack-node/.env.
 
@@ -19,7 +19,7 @@ export default async function build(): Promise<void> {
 
   SECURITY: binds the gateway to 0.0.0.0 on the orb docker network.
   HERMES_GATEWAY_API_KEY is required on every inbound request.`,
-    );
+    )
   }
-  log("hermes-workspace: gate open (HERMES_GATEWAY_ALLOW_ACCESS=true)");
+  log('hermes-workspace: gate open (HERMES_GATEWAY_ALLOW_ACCESS=true)')
 }

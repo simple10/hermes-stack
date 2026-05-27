@@ -12,44 +12,43 @@
 //     file's existing structure (comments, block markers, line order).
 //     Used for in-place edits of .stack-node/.env, where structure
 //     matters (the #>--- svc --- blocks are NOT ordinary env content).
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
-import { dirname } from "node:path";
-import { parse as dotenvParse } from "dotenv";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { parse as dotenvParse } from 'dotenv'
 
-export const parseEnvBody = (body: string): Record<string, string> =>
-  dotenvParse(Buffer.from(body));
+export const parseEnvBody = (body: string): Record<string, string> => dotenvParse(Buffer.from(body))
 
 export const parseEnvFile = (file: string): Record<string, string> => {
-  if (!existsSync(file)) return {};
-  return dotenvParse(readFileSync(file));
-};
+  if (!existsSync(file)) return {}
+  return dotenvParse(readFileSync(file))
+}
 
 // envGet — read a single KEY value via line-grep. Faster than parsing
 // the whole file when you only need one value. Inline comments are NOT
 // stripped here (caller can strip if needed; values may legitimately
 // contain `#` — passwords, etc.). For full dict access, use parseEnvFile.
 export const envGet = (file: string, key: string): string => {
-  if (!existsSync(file)) return "";
-  const body = readFileSync(file, "utf8");
-  const m = body.match(new RegExp(`^${escapeRe(key)}=(.*)$`, "m"));
-  return m ? m[1] : "";
-};
+  if (!existsSync(file)) return ''
+  const body = readFileSync(file, 'utf8')
+  const m = body.match(new RegExp(`^${escapeRe(key)}=(.*)$`, 'm'))
+  return m ? m[1] : ''
+}
 
 // envUpsert — in-place line replacement (or append if absent). Preserves
 // line position + surrounding comments. Mirrors stacklib.sh's env_upsert.
 export const envUpsert = (file: string, key: string, value: string): void => {
-  mkdirSync(dirname(file), { recursive: true });
-  const body = existsSync(file) ? readFileSync(file, "utf8") : "";
-  const lineRe = new RegExp(`^${escapeRe(key)}=.*$`, "m");
-  let next: string;
+  mkdirSync(dirname(file), { recursive: true })
+  const body = existsSync(file) ? readFileSync(file, 'utf8') : ''
+  const lineRe = new RegExp(`^${escapeRe(key)}=.*$`, 'm')
+  let next: string
   if (lineRe.test(body)) {
-    next = body.replace(lineRe, `${key}=${value}`);
+    next = body.replace(lineRe, `${key}=${value}`)
   } else {
-    next = body.length === 0 || body.endsWith("\n") ? body : body + "\n";
-    next += `${key}=${value}\n`;
+    next = body.length === 0 || body.endsWith('\n') ? body : body + '\n'
+    next += `${key}=${value}\n`
   }
-  writeFileSync(file, next);
-  chmodSync(file, 0o600);
-};
+  writeFileSync(file, next)
+  chmodSync(file, 0o600)
+}
 
-const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

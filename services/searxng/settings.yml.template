@@ -8,7 +8,7 @@ general:
   contact_url: false
 server:
   # SearXNG REQUIRES a secret_key (used for the request signing / cookie HMAC).
-  # Generated once per stack by services/searxng/build.sh and rendered here —
+  # Generated once per stack by services/searxng/build.ts and rendered here —
   # the templated value below is replaced verbatim. Never commit a real one.
   secret_key: "__SEARXNG_SECRET_KEY__"
   # Local-only; this whole service lives on the project network and is only

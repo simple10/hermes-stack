@@ -7,7 +7,7 @@ Dockerized and Hermes reaches them via orb DNS.
 
 Enable: `just enable hermes` (cascades `litellm` + `pg` + `redis`; the rest
 are opt-in and Hermes auto-detects each via `~/.hermes/.env` wire-ups in
-`build.sh`).
+`build.ts`).
 
 ## Levers (in the `#>--- hermes ---` block of `.stack/.env`)
 
@@ -33,7 +33,7 @@ HERMES_MC_URL=                     # MissionControl deployment URL — enables t
 ```
 
 All keys carry the `HERMES_` prefix to avoid collisions with other
-services. `build.sh` reads the prefixed names from `.stack/.env` and
+services. `build.ts` reads the prefixed names from `.stack/.env` and
 maps them into `~/.hermes/.env` inside the VM under the **upstream's**
 un-prefixed names (e.g. `HERMES_TELEGRAM_BOT_TOKEN` →
 `TELEGRAM_BOT_TOKEN`), which is what `hermes-agent` reads.
@@ -42,7 +42,7 @@ un-prefixed names (e.g. `HERMES_TELEGRAM_BOT_TOKEN` →
 OrbStack's default for `orb create` is to mirror `$USER`; we override
 with `--user $HERMES_REMOTE_USER` to give Hermes a stable identity inside
 the VM. systemd units + bin scripts under `services/hermes/` use
-`__REMOTE_USER__` placeholders that `build.sh` substitutes at install
+`__REMOTE_USER__` placeholders that `build.ts` substitutes at install
 time. For existing VMs created before this lever (with the orb default
 user), set `HERMES_REMOTE_USER=<that-username>` in `.stack/.env` to keep
 the VM working without recreating. (`just setup` auto-migrates the
@@ -52,7 +52,7 @@ legacy un-prefixed `REMOTE_USER` / `TELEGRAM_*` keys on first run.)
 bind-mount from `<repo-root>/.stack/hermes/.hermes/` (Mac) into
 `/home/$HERMES_REMOTE_USER/.hermes/` (VM). When enabled (default):
 
-- `build.sh` writes config edits Mac-side directly (no `orb -m` dance);
+- `build.ts` writes config edits Mac-side directly (no `orb -m` dance);
   the running gateway/dashboard see them immediately via the mount.
 - A `tar` of `.stack/` captures the full Hermes state for backup.
 - The hermes-workspace container can bind the same Mac path at
@@ -66,7 +66,7 @@ env var — so the mount carries only user config + runtime state
 
 ## What `just build` writes to `~/.hermes/`
 
-`~/.hermes/.env` is **partially managed**. `build.sh` owns a single
+`~/.hermes/.env` is **partially managed**. `build.ts` owns a single
 marker-delimited block (`# >>> hermes-stack managed >>>` …
 `# <<< hermes-stack managed <<<`) — that block is rewritten authoritatively
 on every build to reflect the current `.stack/.env` + active
@@ -83,17 +83,17 @@ so stale values can't shadow the new ones. Test fixtures cover the full
 matrix (first-build / migration / steady-state / service-disable / corrupt
 markers / idempotency) — see `services/hermes/build.test.sh`.
 
-`~/.hermes/config.yaml` is **NOT** marker-protected: `build.sh` (and
-`start.sh`) surgically replace the `model:` block on every run, and the
+`~/.hermes/config.yaml` is **NOT** marker-protected: `build.ts` (and
+`start.ts`) surgically replace the `model:` block on every run, and the
 `HERMES_MEMORY=agentmemory` branch round-trips the whole file through
 `yaml.safe_load`/`yaml.safe_dump` to set `mcp_servers.agentmemory` +
 `memory.provider`. That round-trip drops YAML comments (a limitation of
 pyyaml; `hermes config set` itself has the same constraint inside the
-Hermes CLI). Top-level keys not touched by `build.sh` are preserved, but
+Hermes CLI). Top-level keys not touched by `build.ts` are preserved, but
 don't rely on comment preservation inside `model:` or the agentmemory
 branch's edits.
 
-When disabled, `build.sh` skips every step that would edit `~/.hermes/*`
+When disabled, `build.ts` skips every step that would edit `~/.hermes/*`
 and prints the equivalent `orb -m bash -lc` command for manual apply.
 Other build steps (orb create, apt installs, systemd unit install, the
 gateway-access drop-in) still run normally. Config changes through
@@ -110,7 +110,7 @@ logic simple.
 | `holographic` | — | OFFICIAL plugin; fully local in the VM (no stack service) |
 | `agentmemory` | `just enable agentmemory` | THIRD-PARTY shim (`@agentmemory/mcp`); needs `npx` |
 
-## Auto-wired by `services/hermes/build.sh` when the relevant profile is active
+## Auto-wired by `services/hermes/build.ts` when the relevant profile is active
 
 | profile | what gets injected |
 |---|---|

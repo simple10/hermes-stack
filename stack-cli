@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# stack-cli — entry point for the parallel Node/TS scripting system.
+# Runs scripts/cli.ts under bun if present, else node with TS stripping.
+# Lives next to the (existing) justfile; nothing here replaces it yet —
+# the new system writes to .stack/ so it runs alongside .stack/.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+entry="$here/scripts/cli.ts"
+
+if [ ! -f "$entry" ]; then
+  printf 'FATAL: %s not found\n' "$entry" >&2
+  exit 1
+fi
+
+# Install deps on first run (no node_modules → opportunistic install).
+# package.json + node_modules live at the repo root so both scripts/
+# and services/<svc>/*.ts can resolve deps the same way.
+if [ ! -d "$here/node_modules" ]; then
+  ( cd "$here" && {
+      if command -v bun >/dev/null 2>&1; then bun install
+      elif command -v pnpm >/dev/null 2>&1; then pnpm install
+      elif command -v npm  >/dev/null 2>&1; then npm install
+      else
+        printf 'FATAL: no bun/pnpm/npm on PATH — cannot install deps\n' >&2
+        exit 1
+      fi
+    } )
+fi
+
+if command -v bun >/dev/null 2>&1; then
+  # Skip PMG proxy on run commands to prevent unreachable proxy in isolated VMs
+  PMG_PROXY_INSTALL_ONLY=true exec bun run "$entry" "$@"
+fi
+
+# Node fallback. Node 23+ strips TS by default; earlier needs the flag.
+# We pass --experimental-strip-types unconditionally — it's a no-op on 23+
+# and required on 22.x. --no-warnings hides the ExperimentalWarning noise.
+if command -v node >/dev/null 2>&1; then
+  PMG_PROXY_INSTALL_ONLY=true exec node --experimental-strip-types --no-warnings=ExperimentalWarning \
+    "$entry" "$@"
+fi
+
+printf 'FATAL: neither bun nor node on PATH\n' >&2
+exit 1

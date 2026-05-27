@@ -16,7 +16,7 @@ web:
 ```
 
 …plus `SEARXNG_URL` in `~/.hermes/.env`. Both are written automatically by
-`machines/hermes/build.sh` when the `[searxng]` profile is active in
+`machines/hermes/build.ts` when the `[searxng]` profile is active in
 `COMPOSE_PROFILES`.
 
 Hermes calls `GET /search?q=<query>&format=json` — which is why our overlay
@@ -38,7 +38,7 @@ COMPOSE_PROFILES=...,searxng    # opt-in
 # SEARXNG_CPU=1   SEARXNG_MEM=512m     # resource limits
 ```
 
-Secrets: `services/searxng/build.sh` generates `SEARXNG_SECRET_KEY` once into
+Secrets: `services/searxng/build.ts` generates `SEARXNG_SECRET_KEY` once into
 `.stack/searxng/.generated.env` and renders the runtime
 `.stack/searxng/settings.yml` from `settings.yml.template`.
 

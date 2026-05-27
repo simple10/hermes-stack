@@ -107,7 +107,7 @@ For deeper debugging set `HERMES_MC_DEBUG=true` and check `~/.hermes/logs/agent.
 ~/.hermes/
 ├── auth.json                        # providers.mission_control block holds the keys + org
 ├── config.yaml                      # plugins.enabled includes 'mission-control'
-├── plugins/mission-control/         # plugin source (synced by build.sh)
+├── plugins/mission-control/         # plugin source (synced by build.ts)
 └── mission-control/
     ├── projects.json                # cached project list (refresh on demand)
     └── links.db                     # MC↔local mappings + cursors + apply log

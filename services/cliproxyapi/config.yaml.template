@@ -1,4 +1,4 @@
-# CLIProxyAPI config TEMPLATE (committed). build.sh renders this ->
+# CLIProxyAPI config TEMPLATE (committed). build.ts renders this ->
 # config.runtime.yaml (gitignored, bind-mounted) and substitutes the
 # __CLIPROXY_*__ placeholders with values from .stack/.env. CLIProxyAPI reads
 # api-keys / management secret from this FILE (no env support), so the rendered

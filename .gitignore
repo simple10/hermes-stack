@@ -3,18 +3,11 @@
 # the ChatGPT token) lives under .stack/<svc>/ — gitignored wholesale here.
 # Templates stay tracked in service dirs (*.template).
 .stack/
-**/*.generated.env
-# Top-level compose is GENERATED from docker-compose.example.yaml + the
-# enabled COMPOSE_PROFILES by stack_render_compose. Path anchored to repo
-# root so per-service `services/*/compose.yaml` files stay tracked.
-/docker-compose.yaml
+
 # Build-from-source clones (pinned commit, re-cloned by build scripts).
 **/_source/
 
 # --- editor / bak ---
-*.bak
-*.bak.*
-.bak/
 # Repo-root backup dir convention (e.g. _bak/.stack.<timestamp>/). NEVER
 # put .stack/ backups in /tmp — secrets leak; world-readable; forgotten.
 _bak/
@@ -22,10 +15,16 @@ _bak/
 .claude/*.lock
 .claude/worktrees
 
+# --- Node / TS scripts ---
+# scripts/node_modules is .gitignored via scripts/.gitignore; this catches
+# any stray node_modules that pnpm/npm/bun might dump at the repo root if
+# a command is mistakenly run from the wrong cwd.
+node_modules/
+/bun.lock
+
 # --- Python ---
+# Local dev build files for hermes plugins
 **/.venv/
 **/__pycache__/
 **/*.pyc
 **/.pytest_cache/
-
-**/mission-control/tmp

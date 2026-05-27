@@ -9,7 +9,7 @@ non-streaming `chatgpt/*` bug (gotcha #5) until that's fixed upstream.
 
 - Image: pinned `eceasy/cli-proxy-api:${CLIPROXY_VERSION}` (bump deliberately).
 - Config is **file-based** (no env support): committed `config.yaml.template`
-  → gitignored `config.runtime.yaml` (rendered by `build.sh`, which injects
+  → gitignored `config.runtime.yaml` (rendered by `build.ts`, which injects
   `CLIPROXY_API_KEY` + `CLIPROXY_MANAGEMENT_KEY` from `.stack/.env`).
 - OAuth tokens persist in the project-scoped `cliproxyapi-auth` volume.
 - **No host ports** (stack convention) — reachable only in-OrbStack at

@@ -1,6 +1,6 @@
 # honcho-ui (offendingcommit/openconcho) — OPTIONAL web UI for Honcho.
 # profile [honcho-ui]. Project-scoped (no container_name / no shared net).
-# Built from PINNED source (services/honcho-ui/build.sh -> _source/, gotcha
+# Built from PINNED source (services/honcho-ui/build.ts -> _source/, gotcha
 # #6) via the local multi-stage Dockerfile; no published image upstream.
 #
 # Stateless static SPA: NO database, NO secrets, NO model/env levers.

@@ -26,7 +26,7 @@ known client in this stack (Hermes) doesn't send `Authorization: Bearer`.
 The trust boundary is then orb-DNS-only exposure (no host port mapping —
 only services on the project network can reach :9377).
 
-If you set `CAMOFOX_AUTH=` (unset) or any other value, `build.sh` generates
+If you set `CAMOFOX_AUTH=` (unset) or any other value, `build.ts` generates
 a bearer key into `.stack/camofox-browser/.generated.env` and the server
 requires it. Clients without `Authorization: Bearer <key>` get HTTP 401.
 

@@ -1,6 +1,9 @@
-# hermes-stack
+# Hermes Agent Stack
 
-A personal AI stack you run on your Mac.
+A personal Hermes Agent stack you run safely on your Mac.
+
+Hermes runs in an isolated OrbStack VM, supporting services run in Docker.
+Nothing has access to your host.
 
 One command brings up
 [Hermes](https://github.com/NousResearch/hermes-agent) (the agent),
@@ -8,15 +11,17 @@ One command brings up
 [LiteLLM](https://github.com/BerriAI/litellm) (model gateway),
 [CLIProxyAPI](https://github.com/eceasy/cli-proxy-api) (use your ChatGPT
 or Claude Code subscription as an API), plus optional web search,
-browser automation, and more. Everything stays on your machine, in one
-isolated stack you can tear down and recreate at will.
-
-
+browser automation, and more.
 
 ```bash
+# Setup & build the stack (one time)
 ./stack-cli setup       # interactive: pick services + models
 ./stack-cli build       # pull images, fetch sources, generate secrets
+
+# Start/stop the stack on demand
 ./stack-cli start       # bring it all up
+./stack-cli stop        # pause the stack, all data is preserved
+
 ./stack-cli info        # see what's running
 ```
 
@@ -29,11 +34,10 @@ You want a real personal AI agent that:
   Codex, Gemini CLI — instead of paying per-token a second time.
 - **Remembers you across sessions** — Honcho gives Hermes durable,
   graph-based memory across chats and platforms.
-- **Reaches Telegram** — Hermes ships with a Telegram bot interface
-  out of the box, so the agent is always one DM away.
 - **Is yours to modify** — every service is a normal docker container
   (or OrbStack VM); pin a different version, swap a model, add your
   own service.
+- **Hermes without limits** - Hermes safely runs in a VM with full capabilities to install tools as needed unlike running in a Docker container that cripples functionality
 
 ## Prerequisites
 
@@ -95,8 +99,7 @@ at the end of `setup`.
 | `./stack-cli start` | Bring the whole stack up (backends → preflight → services → VMs) |
 | `./stack-cli stop` | Bring it down (VMs + `docker compose down`; volumes kept) |
 | `./stack-cli restart` | `stop` + `start`. Use this to apply VM config changes. |
-| `./stack-cli info` | Friendly overview: what's enabled, what's running |
-| `./stack-cli status` | Detailed runtime status (containers + this stack's VMs) |
+| `./stack-cli info` | Overview: what's enabled + runtime state of containers + VMs |
 | `./stack-cli logs` | Tail the Hermes VM's console |
 | `./stack-cli reconfigure <svc>` | Re-render a service's runtime config from its template |
 

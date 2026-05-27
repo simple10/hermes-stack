@@ -1,8 +1,8 @@
-// render-health.ts — shared health renderer for `info` / `status`.
+// render-health.ts — service / VM line formatters used by `info`.
 //
-// Wraps friendly. Uses ANSI-stripped width for measurement so picocolors
-// markup doesn't throw off column calc. For very narrow terminals the
-// service column collapses to whatever fits.
+// ANSI-stripped width for measurement so picocolors markup doesn't
+// throw off column calc. For very narrow terminals the service column
+// collapses to whatever fits.
 import pc from 'picocolors'
 import type { HealthState, RunState, ServiceHealth, MachineHealth } from './health.ts'
 
@@ -55,17 +55,14 @@ const stateBadge = (run: RunState, health: HealthState): string => {
   return h ? `${runWord}, ${h}` : runWord
 }
 
-export const formatServiceLines = (
-  services: ServiceHealth[],
-  opts: { showImage?: boolean } = {},
-): string[] => {
+export const formatServiceLines = (services: ServiceHealth[]): string[] => {
   if (services.length === 0) return [pc.dim('  (no services)')]
   const w = services.reduce((m, s) => Math.max(m, s.service.length), 0)
   return services.map((s) => {
     const icon = stateIcon(s.run, s.health)
     const name = pad(s.service, w)
     const badge = stateBadge(s.run, s.health)
-    const extra = opts.showImage && s.image ? pc.dim(`  ${s.image}`) : ''
+    const extra = s.containerName ? pc.dim(`  ${s.containerName}`) : ''
     return `${icon}  ${name}  ${badge}${extra}`
   })
 }

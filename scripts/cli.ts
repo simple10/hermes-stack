@@ -10,6 +10,8 @@
 //   ./stack-cli stop                 # bring it down (VMs + dc down)
 //   ./stack-cli restart              # stop + start
 //   ./stack-cli info                 # overview: what's enabled + runtime state
+//   ./stack-cli ssh [machine]        # interactive shell into a VM
+//   ./stack-cli hermes <args...>     # run a hermes CLI command in the VM
 //   ./stack-cli logs [machine]       # `orb logs`
 //   ./stack-cli reconfigure <svc>    # re-render runtime configs
 //   ./stack-cli chrome-cdp           # launch Mac-host Chrome with CDP
@@ -26,6 +28,8 @@ import { runStart } from './commands/start.ts'
 import { runStop } from './commands/stop.ts'
 import { runRestart } from './commands/restart.ts'
 import { runLogs } from './commands/logs.ts'
+import { runSsh } from './commands/ssh.ts'
+import { runHermes } from './commands/hermes.ts'
 import { runReconfigure } from './commands/reconfigure.ts'
 import { runStartCleanup } from './commands/start-cleanup.ts'
 import { runChromeCdp, runChromeCdpStop } from './commands/chrome-cdp.ts'
@@ -45,6 +49,8 @@ const COMMANDS: Record<string, Handler> = {
   down: async () => runStop(),
   restart: async () => runRestart(),
   logs: runLogs,
+  ssh: runSsh,
+  hermes: runHermes,
   reconfigure: runReconfigure,
   'start-cleanup': async () => runStartCleanup(),
   'chrome-cdp': async () => runChromeCdp(),
@@ -81,6 +87,8 @@ const printHelp = (): void => {
       '  start (up)            backends -> preflight -> prestart -> up -> poststart -> VMs',
       '  stop  (down)          VMs + dc down --remove-orphans',
       '  restart               stop + start',
+      '  ssh [machine]         interactive shell into a VM (single-VM auto-picks)',
+      '  hermes <args...>      run a hermes CLI command in the VM',
       '  logs [machine]        orb logs',
       '  reconfigure <svc>     re-render runtime config(s)',
       '  start-cleanup         remove exited provisioner containers',

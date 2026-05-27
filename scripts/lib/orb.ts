@@ -1,5 +1,4 @@
-// orb.ts — OrbStack CLI helpers. Mirrors the orb_* helpers + the inline
-// `orb -m <vm> bash -lc` idiom in services/hermes/{build,start}.sh.
+// orb.ts — OrbStack CLI helpers.
 //
 // HTTP_PROXY scrubbing: OrbStack passes the calling process's
 // HTTP_PROXY/HTTPS_PROXY env vars into the VM shell, rewriting 127.0.0.1
@@ -7,10 +6,11 @@
 // Mac IPs from the VM) this turns into curl-(7) for every install script
 // the VM tries to run. The PMG package-manager wrapper sets HTTP_PROXY on
 // the parent shell, so we have to strip it on every orb call.
+import { spawn } from 'node:child_process'
 import { $ } from 'zx'
 import { warn } from './log.ts'
 
-const orbEnv = (): Record<string, string> => {
+export const orbEnv = (): Record<string, string> => {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v !== 'string') continue
@@ -110,3 +110,18 @@ export const orbMountIsActive = async (vm: string, mountPoint: string): Promise<
 // Spawn `orb` with the same proxy-scrubbed env — exposed for callers
 // (e.g. hermes/build.ts) that build their own `$\`orb ...\`` invocations.
 export const orbShell = orb$
+
+// Run `orb -m <vm> [args...]` with full TTY pass-through (inherit
+// stdio so the user can type, see colors, etc). For interactive
+// shells, hermes-cli sessions, anything that wants a real terminal.
+// Resolves regardless of exit code — Ctrl-D / exit shouldn't be an
+// error.
+export const orbInteractive = (vm: string, args: readonly string[] = []): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const proc = spawn('orb', ['-m', vm, ...args], {
+      stdio: 'inherit',
+      env: orbEnv(),
+    })
+    proc.on('error', reject)
+    proc.on('close', () => resolve())
+  })

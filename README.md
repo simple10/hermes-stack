@@ -13,7 +13,14 @@ One command brings up
 or Claude Code subscription as an API), plus optional web search,
 browser automation, and more.
 
+## Quick Start
+
+Just configure the stack, build it, and run...
+
 ```bash
+# Clone this repo
+git clone https://github.com/simple10/hermes-stack && cd hermes-stack
+
 # Setup & build the stack (one time)
 ./stack-cli setup       # interactive: pick services + models
 ./stack-cli build       # pull images, fetch sources, generate secrets
@@ -23,12 +30,30 @@ browser automation, and more.
 ./stack-cli stop        # pause the stack, all data is preserved
 
 ./stack-cli info        # see what's running
+
+# View all the available commands
+./stack-cli
 ```
 
-## Why
+## Quick Wins
 
-You want a real personal AI agent that:
+Configure the stack with Honcho memory and SearXNG enabled.
 
+Then run `./stack-cli chrome-cdp` to start a separate chrome browser instance
+on your mac.
+
+Hermes can then use SearXNG for web scraping and your local chrome
+to bypass any bot detection. You can manually login to web sites without ever
+giving Hermes your website passwords.
+
+## Why Hermes Agent Stack
+
+You want a real personal AI agent with:
+
+- **Safety first** - Hermes runs isolated from your mac, unable to reach
+  files or other servers on your mac unless you give it access.
+- **Batteries included** - multiple memory providers, browser tools and
+  even local browser CDP baked in and ready to run.
 - **Doesn't leak your data** — runs locally; no third-party SaaS.
 - **Uses your existing subscriptions** — ChatGPT Plus, Claude Code,
   Codex, Gemini CLI — instead of paying per-token a second time.
@@ -37,7 +62,15 @@ You want a real personal AI agent that:
 - **Is yours to modify** — every service is a normal docker container
   (or OrbStack VM); pin a different version, swap a model, add your
   own service.
-- **Hermes without limits** - Hermes safely runs in a VM with full capabilities to install tools as needed unlike running in a Docker container that cripples functionality
+
+Hermes safely runs in an isolated VM with **full capabilities** to install tools as needed, unlike running in a Docker container that cripples functionality.
+
+You can re-use the Docker services for any local agent or even spin up multiple
+instances of Hermes.
+
+> **LiteLLM** is used to proxy all LLM requests by default. This makes it easy
+> to set token budgets, rotate keys, view logs, etc. You can optionally disable
+> LiteLLM if you want to reduce memory usage. The stack is yours to modify.
 
 ## Prerequisites
 
@@ -53,32 +86,33 @@ If you're on Linux: the docker side will mostly work but Hermes (the
 agent) provisions via OrbStack-only commands. Linux port is on the
 roadmap; today it's macOS-only.
 
-## Quickstart
+## Setup
 
-```bash
-git clone <this-repo> hermes-stack && cd hermes-stack
-./stack-cli setup
-./stack-cli build
-./stack-cli start
-```
+`./stack-cli setup` prompts you for:
 
-`setup` prompts you for:
-
-- a project name (lets you run multiple isolated stacks side by side),
-- which services to enable (defaults: hermes, honcho, honcho-ui,
-  cliproxyapi — plus the auto-included pg/redis/litellm),
-- which LLM models to use (defaults to ChatGPT-subscription routing
+- Project name (lets you run multiple isolated stacks side by side)
+- Services to enable (defaults: hermes, honcho, honcho-ui,
+  cliproxyapi — plus the auto-included pg/redis/litellm)
+- LLM models to use (defaults to ChatGPT-subscription routing
   via cliproxy + Voyage embeddings — examples for OpenRouter, OpenAI,
-  Anthropic given),
-- the relevant provider API key, **only** for providers your chosen
+  Anthropic given)
+- Provider API key, **only** for providers your chosen
   models actually use (cliproxy users get an OAuth flow instead of an
   API key),
-- optional Telegram bot credentials if you enabled Hermes.
+- Optional Telegram bot credentials if you enabled Hermes
 
-After `start`, the agent is reachable in three places:
+If you prefer, you can skip most of the setup and manually configure Hermes
+after it starts.
 
-- **Telegram** (if you wired up a bot): your agent is now one DM away.
-- **In-VM CLI**: `orb -m <project>-hermes` then `hermes` for a TUI.
+After `start`, Hermes agent is reachable several ways:
+
+1. In the browser - start command outputs the url for you
+2. CLI - run the hermes cli or ssh into the VM to run any command
+3. **Telegram** - if you wired up telegram during setup
+
+- **In-VM CLI**: `./stack-cli ssh` or `orb -m <project>-hermes` then `hermes` for a TUI.
+
+
 - **Honcho UI** at `https://honcho-ui.<project>.orb.local` to inspect
   what Hermes remembers about you.
 

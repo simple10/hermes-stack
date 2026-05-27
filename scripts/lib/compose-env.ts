@@ -19,7 +19,7 @@ export const stackProfiles = (seed?: string): string => {
 }
 
 // stackBackends — substrate (SERVICE_KIND=backend) members of stackProfiles.
-// These are the `dc up -d <…>` targets `just start` brings up first.
+// These are the `dc up -d <…>` targets the start orchestrator brings up first.
 export const stackBackends = (seed?: string): string[] => {
   const profiles = stackProfiles(seed)
     .split(',')

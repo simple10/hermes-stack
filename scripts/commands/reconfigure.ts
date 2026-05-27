@@ -1,5 +1,5 @@
 // commands/reconfigure.ts — back up + re-render a service's runtime
-// config from its template. Mirrors `just reconfigure <svc>`.
+// config from its template.
 //
 // For services with a known template path, we hardcode the (template,
 // output) pair. Extending this list as more services accumulate

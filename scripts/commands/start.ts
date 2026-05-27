@@ -1,6 +1,6 @@
 // commands/start.ts — bring up the stack.
 //
-// Pipeline (mirrors `just start`):
+// Pipeline:
 //   1. ensure docker-compose.yaml is fresh (renderCompose)
 //   2. dc up -d $(stackBackends)         — pg/redis/rabbitmq first
 //   3. each enabled service's preflight.ts (host script; may dc up,

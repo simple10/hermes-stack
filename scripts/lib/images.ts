@@ -1,5 +1,5 @@
 // images.ts — port of stack_image / stack_resolve_images (Phase 1 of
-// `just build`). For every services/<svc>/service.env that declares a
+// `./stack-cli build`). For every services/<svc>/service.env that declares a
 // *_IMAGE_REPO + *_IMAGE_DEFAULT pair, resolve the requested tag (or
 // pass-through digest) to a concrete digest via
 // `docker buildx imagetools inspect` and write *_IMAGE=repo@digest +

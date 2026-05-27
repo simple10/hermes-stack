@@ -7,6 +7,9 @@
 # .stack/, gitignored for the same reason. Will be renamed to .stack/
 # at cutover.
 .stack-node/
+# Renamed-on-cutover holdover for the bash flow's state. Same shape +
+# same secrets as .stack/, just under a different name.
+.stack-bash/
 **/*.generated.env
 # Top-level compose is GENERATED from docker-compose.example.yaml + the
 # enabled COMPOSE_PROFILES by stack_render_compose. Path anchored to repo

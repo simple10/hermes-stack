@@ -1,24 +1,38 @@
 // commands/setup.ts — interactive setup flow (clack-driven).
 //
-// Mirrors the responsibilities of lib/setup.sh:
+// Step order:
 //   1. Seed .stack-node/.env from .stack.defaults.env (first run = copy;
 //      subsequent = additive merge of missing keys).
-//   2. Prompt the user for COMPOSE_PROJECT_NAME.
-//   3. Multi-select which services to enable (docker + VM lists), with
-//      transitive SERVICE_REQUIRES cascade.
-//   4. Prompt for provider API keys (OpenRouter, Voyage).
-//   5. Conditionally gen secrets / prompt for hermes Telegram fields,
-//      gated on which services are enabled.
-//   6. Print a summary + "next steps".
+//   2. Prompt for COMPOSE_PROJECT_NAME.
+//   3. Multi-select docker + VM services (cascade SERVICE_REQUIRES).
+//   4. Hermes memory backend (only if hermes is enabled). Optionally
+//      cascade-enable the chosen backend's service.
+//   5. Stack-wide LLM model levers (primary chat, fast/background,
+//      embedding). Examples for cliproxy / openrouter / openai / anthropic.
+//   6. Provider API keys — ONLY for the providers actually referenced by
+//      the chosen models. cliproxy users get an OAuth-setup note instead.
+//   7. Block-owned secret generation (litellm/agentmemory/cliproxy/etc).
+//   8. Hermes Telegram fields (if hermes enabled).
+//   9. Summary + next steps.
 import { existsSync, copyFileSync, chmodSync } from 'node:fs'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
 
 import { STACK_ENV, DEFAULTS_ENV } from '../lib/paths.ts'
 import { envGet, envUpsert, parseEnvFile } from '../lib/env.ts'
-import { ensureStackDir, enableService, stackUpsert } from '../lib/stack.ts'
+import { ensureStackDir, enableService, stackGet, stackUpsert } from '../lib/stack.ts'
 import { listServices, type ServiceDescriptor } from '../lib/services.ts'
 import { genIfMissing } from '../lib/secrets.ts'
+
+type MemoryBackend = 'honcho' | 'hindsight' | 'agentmemory' | 'holographic' | 'default'
+
+const MEMORY_BACKING_SERVICE: Record<MemoryBackend, string | null> = {
+  honcho: 'honcho',
+  hindsight: 'hindsight',
+  agentmemory: 'agentmemory',
+  holographic: null, // fully local in the VM
+  default: null, // use hermes' own default; no override
+}
 
 export const runSetup = async (): Promise<void> => {
   p.intro(pc.bgCyan(pc.black(' hermes-stack setup ')))
@@ -96,28 +110,153 @@ export const runSetup = async (): Promise<void> => {
   }
   for (const m of cascadeMsgs) p.log.info(m)
 
-  // -- step 4: provider API keys (top-level, always asked) -----------------
-  p.log.step('Provider API keys')
-  const orCur = envGet(STACK_ENV, 'OPENROUTER_API_KEY')
-  const orVal = await p.password({
-    message: orCur
-      ? 'OpenRouter API key (press enter to keep current)'
-      : 'OpenRouter API key (fallback gateway when ChatGPT-sub quota hits)',
-    mask: '•',
-  })
-  if (p.isCancel(orVal)) return cancel()
-  if (typeof orVal === 'string' && orVal.length > 0)
-    envUpsert(STACK_ENV, 'OPENROUTER_API_KEY', orVal)
+  // -- step 4: hermes memory backend (only if hermes is enabled) -----------
+  const manualMemoryNotice: string[] = []
+  if ((vmPick as string[]).includes('hermes')) {
+    const curMem = (stackGet('HERMES_MEMORY') || 'honcho') as MemoryBackend
+    const mem = (await p.select<MemoryBackend>({
+      message:
+        'Hermes memory backend\n' + pc.dim('  determines what Hermes uses for long-term recall'),
+      options: [
+        { value: 'honcho', label: 'honcho', hint: 'graph-based; recommended' },
+        { value: 'hindsight', label: 'hindsight', hint: 'vector + reranker' },
+        { value: 'agentmemory', label: 'agentmemory', hint: 'fast file-based via MCP shim' },
+        { value: 'holographic', label: 'holographic', hint: 'fully local in the VM (no service)' },
+        { value: 'default', label: 'default', hint: "leave hermes' built-in unchanged" },
+      ],
+      initialValue: curMem,
+    })) as MemoryBackend | symbol
+    if (p.isCancel(mem)) return cancel()
+    stackUpsert('HERMES_MEMORY', mem as string)
 
-  const voCur = envGet(STACK_ENV, 'VOYAGE_API_KEY')
-  const voVal = await p.password({
-    message: voCur ? 'Voyage API key (press enter to keep current)' : 'Voyage API key (embeddings)',
-    mask: '•',
-  })
-  if (p.isCancel(voVal)) return cancel()
-  if (typeof voVal === 'string' && voVal.length > 0) envUpsert(STACK_ENV, 'VOYAGE_API_KEY', voVal)
+    // Cascade-enable backing service if it's not already in COMPOSE_PROFILES.
+    const backing = MEMORY_BACKING_SERVICE[mem as MemoryBackend]
+    if (backing) {
+      const enabledNow = new Set(csv(envGet(STACK_ENV, 'COMPOSE_PROFILES')))
+      if (!enabledNow.has(backing)) {
+        const enableIt = await p.confirm({
+          message: `Enable the local '${backing}' service in this stack?`,
+          initialValue: true,
+        })
+        if (p.isCancel(enableIt)) return cancel()
+        if (enableIt) {
+          const msgs: string[] = []
+          enableService(backing, (m) => msgs.push(m))
+          for (const m of msgs) p.log.info(m)
+        } else {
+          manualMemoryNotice.push(
+            `hermes will use '${backing}' but the local service isn't enabled — after start, ` +
+              `point hermes at an external ${backing} endpoint (edit ~/.hermes/config.yaml ` +
+              `via the mount at .stack-node/hermes/.hermes/, or run 'hermes config set' in the VM).`,
+          )
+        }
+      }
+    }
+  }
 
-  // -- step 5: conditional block-owned secrets -----------------------------
+  // -- step 5: stack-wide LLM models ---------------------------------------
+  p.note(
+    [
+      'These three values feed every per-service *_MODEL lever in .stack-node/.env',
+      'and (via LiteLLM) every chat/embedding call the stack makes.',
+      '',
+      pc.bold('Examples:'),
+      '  cliproxy/gpt-5.5                  ' + pc.dim('ChatGPT-sub via CLIProxyAPI'),
+      '  cliproxy/claude-sonnet-4.5        ' + pc.dim('Claude Code sub via CLIProxyAPI'),
+      '  openrouter/anthropic/claude-sonnet-4.5  ' + pc.dim('OpenRouter pay-per-token'),
+      '  openrouter/openai/gpt-5           ' + pc.dim('OpenRouter pay-per-token'),
+      '  openai/gpt-5                      ' + pc.dim('direct OpenAI'),
+      '  anthropic/claude-sonnet-4.5       ' + pc.dim('direct Anthropic'),
+      '',
+      pc.bold('Embeddings:'),
+      '  voyage-4-lite                     ' + pc.dim('default; Voyage AI'),
+      '  voyage-4                          ' + pc.dim('higher quality'),
+      '  openai/text-embedding-3-large     ' + pc.dim('direct OpenAI'),
+    ].join('\n'),
+    'Stack-wide LLM models',
+  )
+
+  const askModel = async (key: string, label: string, fallback: string): Promise<string> => {
+    const cur = envGet(STACK_ENV, key) || fallback
+    const v = await p.text({
+      message: label,
+      placeholder: cur,
+      defaultValue: cur,
+    })
+    if (p.isCancel(v)) {
+      cancel()
+      throw new Error('unreachable')
+    }
+    return (v as string).trim() || cur
+  }
+
+  const primary = await askModel('STACK_LLM_MODEL', 'Primary chat model', 'cliproxy/gpt-5.5')
+  const fast = await askModel(
+    'STACK_LLM_MODEL_FAST',
+    'Fast / background model',
+    'cliproxy/gpt-5.4-mini',
+  )
+  const embedding = await askModel('STACK_LLM_EMBEDDING_MODEL', 'Embedding model', 'voyage-4-lite')
+  envUpsert(STACK_ENV, 'STACK_LLM_MODEL', primary)
+  envUpsert(STACK_ENV, 'STACK_LLM_MODEL_FAST', fast)
+  envUpsert(STACK_ENV, 'STACK_LLM_EMBEDDING_MODEL', embedding)
+
+  // -- step 6: provider API keys, conditional on chosen models -------------
+  const models = [primary, fast, embedding]
+  const usesProvider = (prefix: string): boolean =>
+    models.some((m) => m.toLowerCase().startsWith(prefix))
+  const usesVoyage = models.some((m) => /^voyage/i.test(m))
+
+  const askSecret = async (key: string, message: string): Promise<void> => {
+    const cur = envGet(STACK_ENV, key)
+    const v = await p.password({
+      message: cur ? `${message} ${pc.dim('(enter to keep current)')}` : message,
+      mask: '•',
+    })
+    if (p.isCancel(v)) {
+      cancel()
+      return
+    }
+    if (typeof v === 'string' && v.length > 0) envUpsert(STACK_ENV, key, v)
+  }
+
+  if (usesProvider('openrouter/')) {
+    p.log.step('OpenRouter API key needed for openrouter/* models')
+    await askSecret('OPENROUTER_API_KEY', 'OpenRouter API key')
+  }
+  if (usesVoyage) {
+    p.log.step('Voyage API key needed for voyage embeddings')
+    await askSecret('VOYAGE_API_KEY', 'Voyage API key')
+  }
+  if (usesProvider('openai/')) {
+    p.log.step('OpenAI API key needed for openai/* models')
+    await askSecret('OPENAI_API_KEY', 'OpenAI API key')
+  }
+  if (usesProvider('anthropic/')) {
+    p.log.step('Anthropic API key needed for anthropic/* models')
+    await askSecret('ANTHROPIC_API_KEY', 'Anthropic API key')
+  }
+  const usesCliproxy = usesProvider('cliproxy/')
+  const projectName = envGet(STACK_ENV, 'COMPOSE_PROJECT_NAME') || 'aitools'
+  if (usesCliproxy) {
+    p.note(
+      [
+        'cliproxy/* models route through CLIProxyAPI, which uses OAuth subscriptions',
+        '(ChatGPT, Claude Code, Codex, Gemini CLI) — no API key required up front.',
+        '',
+        pc.bold('After ./stack-cli start, activate each provider:'),
+        `  1. Open  http://cliproxyapi.${projectName}.orb.local:8317/management.html`,
+        '  2. Sign in with the CLIPROXY_MANAGEMENT_KEY from .stack-node/.env',
+        '  3. For each provider you want to use, click its OAuth button and complete',
+        '     the flow. When the provider redirects to a localhost URL that fails,',
+        '     copy the failed URL from the address bar and paste it into the',
+        "     panel's callback field — that completes the token exchange.",
+      ].join('\n'),
+      'cliproxy OAuth setup',
+    )
+  }
+
+  // -- step 7: block-owned secret generation -------------------------------
   const enabled = new Set<string>([
     ...csv(envGet(STACK_ENV, 'COMPOSE_PROFILES')),
     ...csv(envGet(STACK_ENV, 'STACK_MACHINES')),
@@ -139,6 +278,7 @@ export const runSetup = async (): Promise<void> => {
       p.log.success('generated HERMES_WORKSPACE_PASSWORD')
   }
 
+  // -- step 8: hermes Telegram -------------------------------------------
   if (enabled.has('hermes')) {
     const group = await p.group(
       {
@@ -181,6 +321,9 @@ export const runSetup = async (): Promise<void> => {
     }
   }
 
+  // Surface any deferred manual-config notices.
+  for (const msg of manualMemoryNotice) p.log.warn(msg)
+
   chmodSync(STACK_ENV, 0o600)
 
   // -- summary -------------------------------------------------------------
@@ -190,15 +333,15 @@ export const runSetup = async (): Promise<void> => {
     [
       `Active docker services: ${pc.cyan(profs || '(none)')}`,
       `Active VM services:     ${pc.cyan(machs || '(none)')}`,
+      `Primary model:          ${pc.cyan(primary)}`,
+      `Fast model:             ${pc.cyan(fast)}`,
+      `Embedding model:        ${pc.cyan(embedding)}`,
       `Env file:               ${pc.dim(STACK_ENV)}`,
     ].join('\n'),
     'summary',
   )
 
-  p.outro(
-    pc.green('Setup complete.') +
-      ' Next: ./stack-cli build && ./stack-cli start (not yet ported — for now use `just build && just start`).',
-  )
+  p.outro(pc.green('Setup complete.') + ' Next: ./stack-cli build && ./stack-cli start')
 }
 
 // ---- helpers ------------------------------------------------------------

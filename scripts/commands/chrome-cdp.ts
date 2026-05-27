@@ -1,34 +1,22 @@
 // commands/chrome-cdp.ts — launch Mac-host Chrome with CDP + the
 // localhost-proxy bridge for the isolated hermes VM, and tear them down.
 //
-// Stub for now: forwards to `just chrome-cdp` / `just chrome-cdp-stop`
-// so the new orchestrator's stop pipeline works without re-porting the
-// Chrome launcher recipe yet.
-import { $ } from 'zx'
+// NOT YET PORTED to ./stack-cli. The bash recipes (in the legacy
+// justfile) still own this surface; this stub is a placeholder so the
+// dispatcher table has an entry and `./stack-cli stop` can call
+// runChromeCdpStop(loud=false) without blowing up when chrome-cdp
+// isn't running.
 import { log, warn } from '../lib/log.ts'
 
-const tryJust = async (target: string): Promise<boolean> => {
-  $.verbose = false
-  try {
-    await $`just ${target}`
-    return true
-  } catch {
-    return false
-  }
-}
-
 export const runChromeCdp = async (): Promise<void> => {
-  if (await tryJust('chrome-cdp')) {
-    log('chrome-cdp: delegated to `just chrome-cdp` (port TODO)')
-  } else {
-    warn('chrome-cdp: `just chrome-cdp` failed or `just` not on PATH (TODO: port)')
-  }
+  warn(
+    'chrome-cdp: not yet ported to ./stack-cli. ' +
+      'Run the chrome-cdp recipe from the legacy bash flow if you need it.',
+  )
 }
 
 export const runChromeCdpStop = async (loud: boolean = true): Promise<void> => {
-  const ok = await tryJust('chrome-cdp-stop')
   if (loud) {
-    if (ok) log('chrome-cdp-stop: delegated to `just chrome-cdp-stop` (port TODO)')
-    else warn('chrome-cdp-stop: `just chrome-cdp-stop` failed or `just` not on PATH')
+    log('chrome-cdp-stop: not yet ported to ./stack-cli (no-op).')
   }
 }

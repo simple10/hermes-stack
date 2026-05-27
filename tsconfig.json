@@ -14,5 +14,5 @@
     "types": ["node"]
   },
   "include": ["scripts/**/*.ts", "services/**/*.ts"],
-  "exclude": ["**/node_modules/**", "**/_source/**", ".stack-node/**", ".stack/**"]
+  "exclude": ["**/node_modules/**", "**/_source/**", ".stack-node/**", ".stack-bash/**"]
 }

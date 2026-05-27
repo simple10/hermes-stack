@@ -6,7 +6,7 @@
 // Multi-stack safe: reaches LiteLLM via OrbStack DNS
 // (`litellm.<project>.orb.local:4000`) — no fixed container name, no
 // shared network. The admin master key is read from the project's
-// .stack-node/.env (top-level, owned by `just setup`).
+// .stack-node/.env (top-level, owned by `./stack-cli setup`).
 //
 // Self-heals (gotcha #4): if a stored virtual key isn't valid in THIS DB
 // (fresh pg / rotated / volume recreated) the /key/update probe fails

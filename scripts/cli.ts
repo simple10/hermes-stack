@@ -72,29 +72,70 @@ const main = async (): Promise<void> => {
   await fn(rest)
 }
 
+interface Section {
+  title: string
+  rows: ReadonlyArray<[name: string, args: string, desc: string]>
+}
+
+const HELP_SECTIONS: ReadonlyArray<Section> = [
+  {
+    title: 'Setup',
+    rows: [
+      ['setup', '', 'interactive .stack/.env setup'],
+      ['enable', '<svc>...', 'cascade-enable services'],
+      ['disable', '<svc>...', 'disable (refuses if dependants enabled)'],
+      ['enabled', '', 'list active profiles + machines'],
+      ['reconfigure', '<svc>', 're-render runtime config(s)'],
+    ],
+  },
+  {
+    title: 'Lifecycle',
+    rows: [
+      ['build', '', 'resolve image digests + per-service build.ts'],
+      ['start', '(up)', 'backends → preflight → prestart → up → poststart → VMs'],
+      ['stop', '(down)', 'VMs + dc down --remove-orphans'],
+      ['restart', '', 'stop + start'],
+      ['start-cleanup', '', 'remove exited provisioner containers'],
+    ],
+  },
+  {
+    title: 'Inspect',
+    rows: [
+      ['info', '', "overview: what's enabled + runtime state"],
+      ['logs', '[machine]', 'orb logs'],
+    ],
+  },
+  {
+    title: 'VMs',
+    rows: [
+      ['ssh', '[machine]', 'interactive shell into a VM (single-VM auto-picks)'],
+      ['hermes', '<args...>', 'run a hermes CLI command in the VM'],
+      ['chrome-cdp[-stop]', '', 'Mac-host Chrome with CDP for the hermes VM'],
+    ],
+  },
+]
+
 const printHelp = (): void => {
-  console.log(
-    [
-      pc.bold('stack-cli') + ' — hermes-stack control',
-      '',
-      'Commands:',
-      '  setup                 interactive .stack/.env setup',
-      '  enable <svc>...       cascade-enable services',
-      '  disable <svc>...      disable (refuses if dependants enabled)',
-      '  enabled               list active profiles + machines',
-      "  info                  overview: what's enabled + runtime state",
-      '  build                 resolve image digests + per-service build.ts',
-      '  start (up)            backends -> preflight -> prestart -> up -> poststart -> VMs',
-      '  stop  (down)          VMs + dc down --remove-orphans',
-      '  restart               stop + start',
-      '  ssh [machine]         interactive shell into a VM (single-VM auto-picks)',
-      '  hermes <args...>      run a hermes CLI command in the VM',
-      '  logs [machine]        orb logs',
-      '  reconfigure <svc>     re-render runtime config(s)',
-      '  start-cleanup         remove exited provisioner containers',
-      '  chrome-cdp[-stop]     Mac-host Chrome with CDP for the hermes VM',
-    ].join('\n'),
+  // Width of the "<command> <args>" column, computed once so every
+  // section lines up. picocolors output has no width impact (the ANSI
+  // is invisible) so we measure the plain strings.
+  const colWidth = HELP_SECTIONS.flatMap((s) => s.rows).reduce(
+    (w, [name, args]) => Math.max(w, name.length + (args ? args.length + 1 : 0)),
+    0,
   )
+
+  const lines: string[] = [pc.bold('stack-cli') + pc.dim(' — hermes-stack control'), '']
+  for (const section of HELP_SECTIONS) {
+    lines.push(pc.bold(pc.yellow(section.title)))
+    for (const [name, args, desc] of section.rows) {
+      const head = args ? `${pc.cyan(name)} ${pc.dim(args)}` : pc.cyan(name)
+      const headPlain = args ? `${name} ${args}` : name
+      const pad = ' '.repeat(Math.max(2, colWidth - headPlain.length + 2))
+      lines.push(`  ${head}${pad}${desc}`)
+    }
+    lines.push('')
+  }
+  console.log(lines.join('\n').trimEnd())
 }
 
 main().catch((err) => {

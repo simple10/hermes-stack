@@ -66,16 +66,14 @@ export const runInfo = async (opts: { showSecrets?: boolean } = {}): Promise<voi
     epGroups.push({ service: svc, rows })
   }
   if (epGroups.length) {
-    const lines = [
-      pc.bold('Endpoints'),
-      ...formatEndpointLines(epGroups, opts.showSecrets).map((l) => '  ' + l),
-    ]
+    const lines = [pc.bold('Endpoints')]
     const hasSecrets = epGroups.some((g) =>
       g.rows.some((r) => r.ep.auth.some((c) => isSecretRef(c.raw))),
     )
     if (hasSecrets && !opts.showSecrets) {
       lines.push(pc.dim('  credentials shown as $VAR — run `info --show-pass` to reveal'))
     }
+    lines.push(...formatEndpointLines(epGroups, opts.showSecrets).map((l) => '  ' + l))
     p.log.message(lines.join('\n'))
   }
 

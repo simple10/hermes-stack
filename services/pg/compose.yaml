@@ -21,6 +21,12 @@ services:
     command: ["postgres", "-c", "max_connections=200"]
     volumes:
       - pg-data:/var/lib/postgresql/data/
+    # The image's VOLUME is the PARENT /var/lib/postgresql; we only mount the
+    # /data subpath (pg-data), so the parent would get a NEW anonymous volume
+    # on every container (re)create. tmpfs the parent — the real DB lives in
+    # the named pg-data mount nested under it, so no dangling volumes pile up.
+    tmpfs:
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s

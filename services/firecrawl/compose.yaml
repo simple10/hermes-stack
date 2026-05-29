@@ -18,6 +18,11 @@ services:
       POSTGRES_DB: postgres
     volumes:
       - firecrawl-pg-data:/var/lib/postgresql/data
+    # VOLUME is the PARENT /var/lib/postgresql; we only mount the /data
+    # subpath, so the parent would leak a new anonymous volume per (re)create.
+    # tmpfs the parent — the DB lives in the named firecrawl-pg-data mount.
+    tmpfs:
+      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s

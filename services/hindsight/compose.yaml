@@ -86,6 +86,12 @@ services:
       pg: { condition: service_healthy }
     volumes:
       - ./provision.sql:/provision.sql:ro
+    # pgvector declares VOLUME /var/lib/postgresql; left unmapped the engine
+    # spawns a fresh ANONYMOUS volume on every run — and this one-shot is
+    # recreated on every `start`, so they pile up (dangling). It only runs
+    # psql against the remote pg, so map the VOLUME to throwaway tmpfs.
+    tmpfs:
+      - /var/lib/postgresql
     command:
       - sh
       - -c

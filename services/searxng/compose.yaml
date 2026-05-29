@@ -28,6 +28,12 @@ services:
       # /etc/searxng/settings.yml; we only override formats (add json), the
       # secret_key, and rate-limiter (off; no public exposure).
       - ../../.stack/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    # The image declares VOLUME /var/cache/searxng — pure ephemeral cache, so
+    # map it to tmpfs to avoid leaking an anonymous volume per recreate.
+    # (/etc/searxng is also a VOLUME but holds bound config; left as-is since
+    # this service is recreate-only/rare.)
+    tmpfs:
+      - /var/cache/searxng
     healthcheck:
       # /healthz on searxng returns 200 OK with no body when up.
       test: ["CMD-SHELL", "wget -q -O /dev/null --tries=1 --timeout=3 http://localhost:8080/healthz || exit 1"]

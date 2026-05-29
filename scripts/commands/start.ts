@@ -20,6 +20,7 @@ import { hasPhase, runPhase } from '../lib/svc.ts'
 import { envGet } from '../lib/env.ts'
 import { STACK_ENV } from '../lib/paths.ts'
 import { runStartCleanup } from './start-cleanup.ts'
+import { runInfo } from './info.ts'
 import { die, log } from '../lib/log.ts'
 
 export const runStart = async (): Promise<void> => {
@@ -85,5 +86,7 @@ export const runStart = async (): Promise<void> => {
       'STACK_AUTO_REMOVE_PROVISIONERS=false — leaving exited provisioner containers (rm them with: stack-cli start-cleanup)',
     )
   }
-  console.log(pc.green('\nstart done.'))
+  console.log(pc.green('\nstart done.\n'))
+  // Fresh snapshot + endpoint URLs so the user lands on where everything is.
+  await runInfo()
 }

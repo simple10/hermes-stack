@@ -28,12 +28,11 @@ services:
       # /etc/searxng/settings.yml; we only override formats (add json), the
       # secret_key, and rate-limiter (off; no public exposure).
       - ../../.stack/searxng/settings.yml:/etc/searxng/settings.yml:ro
-    # The image declares VOLUME /var/cache/searxng — pure ephemeral cache, so
-    # map it to tmpfs to avoid leaking an anonymous volume per recreate.
-    # (/etc/searxng is also a VOLUME but holds bound config; left as-is since
-    # this service is recreate-only/rare.)
-    tmpfs:
-      - /var/cache/searxng
+      # The image declares VOLUME /var/cache/searxng. Satisfy it with a stable
+      # NAMED volume so it doesn't mint a fresh anonymous one per recreate
+      # (tmpfs proved unreliable here). /etc/searxng is also a VOLUME but holds
+      # our bound settings + image defaults; left as-is (recreate-only/rare).
+      - searxng-cache:/var/cache/searxng
     healthcheck:
       # /healthz on searxng returns 200 OK with no body when up.
       test: ["CMD-SHELL", "wget -q -O /dev/null --tries=1 --timeout=3 http://localhost:8080/healthz || exit 1"]
@@ -46,3 +45,6 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  searxng-cache: # ephemeral cache; named so the image VOLUME doesn't leak anon volumes

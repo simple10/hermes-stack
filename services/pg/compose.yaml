@@ -20,13 +20,13 @@ services:
     # healthy). max_connections kept via the default-entrypoint command.
     command: ["postgres", "-c", "max_connections=200"]
     volumes:
+      # The image's VOLUME is the PARENT /var/lib/postgresql. We satisfy it
+      # with a stable NAMED volume (pg-sys) so the engine doesn't mint a fresh
+      # ANONYMOUS volume on every (re)create (tmpfs does NOT suppress it when a
+      # mount is nested under the VOLUME path). The real DB stays in pg-data,
+      # nested at the /data subpath — unchanged, non-destructive.
+      - pg-sys:/var/lib/postgresql
       - pg-data:/var/lib/postgresql/data/
-    # The image's VOLUME is the PARENT /var/lib/postgresql; we only mount the
-    # /data subpath (pg-data), so the parent would get a NEW anonymous volume
-    # on every container (re)create. tmpfs the parent — the real DB lives in
-    # the named pg-data mount nested under it, so no dangling volumes pile up.
-    tmpfs:
-      - /var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
@@ -35,3 +35,4 @@ services:
 
 volumes:
   pg-data:
+  pg-sys: # holds only the postgres home dir; satisfies the image VOLUME (see above)

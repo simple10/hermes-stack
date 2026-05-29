@@ -123,7 +123,8 @@ const HELP_SECTIONS: ReadonlyArray<Section> = [
     rows: [
       ['ssh', '[machine]', 'interactive shell into a VM (single-VM auto-picks)'],
       ['hermes', '<args...>', 'run a hermes CLI command in the VM'],
-      ['chrome-cdp[-stop]', '', 'Mac-host Chrome with CDP for the hermes VM'],
+      ['chrome-cdp', '', 'launch Mac-host Chrome with CDP for the hermes VM'],
+      ['chrome-cdp-stop', '', 'stop that Chrome + tear down the bridge'],
     ],
   },
 ]

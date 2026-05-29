@@ -90,10 +90,8 @@ export const formatEndpointLines = (groups: EndpointGroup[], showSecrets = false
       const label = pc.dim(pad(ep.name, labelW))
       out.push(`  ${label}  ${up ? pc.yellow(ep.url) : pc.dim(ep.url)}`)
       for (const cred of ep.auth) {
-        const { value, secret } = resolveCred(cred.raw, showSecrets)
-        // masked ref -> dim; revealed secret / literal -> plain (copyable)
-        const shown = secret && !showSecrets ? pc.dim(value) : value
-        out.push(`${indent}${pc.dim(cred.label + ':')} ${shown}`)
+        const { value } = resolveCred(cred.raw, showSecrets)
+        out.push(`${indent}${pc.gray(cred.label + ':')} ${pc.gray(value)}`)
       }
     }
   }

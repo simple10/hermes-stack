@@ -5,7 +5,7 @@ notes and the upstream project for full documentation.
 
 ## Substrate (auto-pulled by consumers)
 
-These get enabled automatically by `SERVICE_REQUIRES` cascade; you
+These get enabled automatically by the `requires` cascade; you
 rarely select them directly.
 
 - **pg** — `pgvector/pgvector:pg18`. Each consumer (litellm, honcho,
@@ -16,7 +16,7 @@ rarely select them directly.
 ## LLM gateway
 
 - **litellm** — `ghcr.io/berriai/litellm-database`. ISSUES virtual
-  keys for every other consumer (`SERVICE_LITELLM_KEY=true` adds the
+  keys for every other consumer (`litellmKey: true` adds the
   service to `LITELLM_VIRTKEYS`; `preflight.ts` mints one virtual key
   per alias on every start, self-healing across DB rotations).
   Routes everything that's not a direct API to its upstream provider:

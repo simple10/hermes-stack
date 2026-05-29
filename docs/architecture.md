@@ -16,7 +16,7 @@ hermes-stack/
     lib/                       # env, stack, services, dc, compose, orb, …
     test/                      # vitest
   services/<svc>/
-    service.env                # service descriptor (runner/requires/litellm-key/stack-env block)
+    service.yaml               # service descriptor (runner/requires/litellm-key/stack-env block)
     compose.yaml               # for docker services; included by stack-cli's generated compose
     build.ts                   # offline pre-build (gen secrets, render configs, fetch source)
     preflight.ts               # may bring deps up + mint keys (host-side)
@@ -72,31 +72,43 @@ are configured. It's split into:
   `COMPOSE_PROFILES`, `STACK_MACHINES`.
 - **Block sections** delimited by `#>--- <svc> ---` / `#<--- <svc> ---`,
   managed by `./stack-cli enable`/`disable`. Each enabled service's
-  declarations from its `SERVICE_STACK_ENV` get appended here. User
-  edits inside the block survive enable/disable round-trips.
+  declarations from its `env:` block get appended here. User edits
+  inside the block survive enable/disable round-trips.
 
 Block-aware writes mean per-service settings (e.g. `HERMES_MEMORY`,
 `HONCHO_DERIVER_MODEL`) live next to the service they belong to,
 not in a flat top-level dump.
 
-## Service descriptors (`services/<svc>/service.env`)
+## Service descriptors (`services/<svc>/service.yaml`)
 
-Each service is described by a single `service.env`:
+Each service is described by a single `service.yaml`:
 
-```env
-SERVICE_RUNNER=docker          # or "vm"
-SERVICE_DESC="What it does"
-SERVICE_REQUIRES=pg,redis,litellm     # cross-service deps (transitive)
-SERVICE_LITELLM_KEY=true              # mint a litellm virtual key for it
-SERVICE_KIND=backend                  # mark as substrate (hidden from setup list)
-SERVICE_PROFILE=other-name            # override compose profile name (defaults to dir name)
-SERVICE_STACK_ENV='
-HONCHO_DERIVER_MODEL=${STACK_LLM_MODEL_FAST}
-HONCHO_DIALECTIC_MODEL=${STACK_LLM_MODEL}
-'
+```yaml
+runner: docker # or "vm" (default docker)
+desc: "What it does"
+requires: [pg, redis, litellm] # cross-service deps (transitive)
+litellmKey: true # mint a litellm virtual key for it
+kind: backend # mark as substrate (hidden from setup list)
+provides: # user-facing endpoints (rendered by `info` / `start`)
+  api: { port: 8000, service: honcho-api } # service: = orb DNS name (default = dir)
+  dashboard: { port: 4000, proto: https, path: /ui } # https -> bare auto-HTTPS domain
+images: # digest-class build metadata (keyed by the *_VERSION knob prefix)
+  HONCHO: { repo: ghcr.io/example/honcho, default: sha256:… }
+source: { repo: https://github.com/…, default: <sha> } # source-class build metadata
+env: | # literal block injected verbatim into the #>--- <svc> --- section of .stack/.env
+  HONCHO_DERIVER_MODEL=${STACK_LLM_MODEL_FAST}
+  HONCHO_DIALECTIC_MODEL=${STACK_LLM_MODEL}
 ```
 
-`./stack-cli enable <svc>` cascades `SERVICE_REQUIRES` transitively
+All fields are optional except an implied `runner`. `provides` drives the
+URLs shown by `info` and `start`; the render rule is deterministic —
+`proto: https` or port 80/443 → bare `https://<host>[path]`, datastore
+proto (`postgres`/`redis`/`amqp`) → `proto://<host>:<port>`, otherwise
+`http://<host>:<port>[path]`. The host is OrbStack DNS:
+`<service>.<project>.orb.local` for containers, `<project>-<svc>.orb.local`
+for VMs.
+
+`./stack-cli enable <svc>` cascades `requires` transitively
 (leaf-first), so enabling `hermes` auto-enables `litellm`, which
 auto-enables `pg` and `redis`. `disable` refuses if anything still
 depends on the target — no force flag; the user disables dependants
@@ -106,8 +118,8 @@ first.
 
 Two phases:
 
-1. **Image-digest resolution.** Walks every `services/*/service.env`
-   for `*_IMAGE_REPO` + `*_IMAGE_DEFAULT` pairs, resolves each to a
+1. **Image-digest resolution.** Walks every `service.yaml` `images:`
+   entry (`<NAME>: { repo, default }`), resolves each to a
    concrete digest via `docker buildx imagetools inspect`, writes
    `*_IMAGE=repo@digest` + lock state into `.stack/<svc>/.generated.env`.
    Compose's `include:` parses every file regardless of profile, so

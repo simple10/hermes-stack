@@ -33,38 +33,48 @@ that exercise docker today — verification is `./stack-cli build &&
 
 ```
 services/<svc>/
-  service.env         # required: descriptor (see below)
+  service.yaml        # required: descriptor (see below)
   compose.yaml        # required for docker services; included by the generated compose
   build.ts            # optional: pre-build (gen secrets, render configs, fetch source)
   preflight.ts        # optional: host script run before main `up` (may dc up deps, mint keys)
   prestart.ts         # optional: fail-loud validation
   poststart.ts        # optional: rare; for hooks needing serving deps
-  start.ts            # required for SERVICE_RUNNER=vm
+  start.ts            # required for runner: vm
   *.template          # optional: rendered into .stack/<svc>/config.runtime.*
   provision.sql       # optional: one-shot SQL provisioner (referenced from compose.yaml)
   README.md           # one-pager: levers, lifecycle, security caveats
 ```
 
-### `service.env`
+### `service.yaml`
 
-```env
-SERVICE_RUNNER=docker            # or "vm"
-SERVICE_DESC="Short one-liner"
-SERVICE_REQUIRES=pg,litellm      # cross-service deps; transitive (cascade)
-SERVICE_LITELLM_KEY=true         # if true, gets a virtual key in LITELLM_VIRTKEYS
-SERVICE_KIND=backend             # mark as substrate (hidden from setup UI)
-SERVICE_PROFILE=other-name       # override compose profile (defaults to dir name)
+```yaml
+runner: docker # or "vm" (default docker)
+desc: "Short one-liner"
+requires: [pg, litellm] # cross-service deps; transitive (cascade)
+litellmKey: true # if true, gets a virtual key in LITELLM_VIRTKEYS
+kind: backend # mark as substrate (hidden from setup UI)
 
-SERVICE_STACK_ENV='
-# This block gets injected into .stack/.env as #>--- <svc> --- on enable.
-# Reference STACK_* presets via ${...}; they expand at config-render time.
-NEWSVC_MODEL=${STACK_LLM_MODEL}
-NEWSVC_FOO=default-value
-'
+provides: # user-facing endpoints rendered by `info` / `start`
+  # port = container port (orb DNS uses it). proto: https or port 80/443 ->
+  # bare auto-HTTPS domain; datastore proto (postgres/redis/amqp) -> proto://;
+  # otherwise http://host:port. path/service/proto all optional;
+  # service: = orb DNS name (default = dir name).
+  api: { port: 8080 }
+  dashboard: { port: 8080, path: /admin }
 
-# Image-class services (no _source/) declare a repo+default pair:
-NEWSVC_IMAGE_REPO=ghcr.io/example/newsvc
-NEWSVC_IMAGE_DEFAULT=sha256:abc…   # or a tag; `./stack-cli build` resolves to a digest
+# Image-class services (no _source/) declare an images: map. <NAME> is the
+# *_VERSION knob prefix; `./stack-cli build` resolves default -> a digest.
+images:
+  NEWSVC: { repo: ghcr.io/example/newsvc, default: sha256:abc… } # or a tag
+
+# Source-class services (built from a pinned _source/) declare source: instead.
+# source: { repo: https://github.com/example/newsvc, default: <sha-or-ref> }
+
+env: | # literal block injected into .stack/.env as #>--- <svc> --- on enable.
+  # Reference STACK_* presets via ${...}; they expand at config-render time.
+  # The literal block preserves comments + values verbatim (no quote-escaping).
+  NEWSVC_MODEL=${STACK_LLM_MODEL}
+  NEWSVC_FOO=default-value
 ```
 
 ### Phase scripts
@@ -116,8 +126,8 @@ expanded (via dotenv-expand).
 ### Source pinning
 
 For `_source/` clones use `await stackSource("<svc>")`. Reads
-`<SVC_UC>_SOURCE_REPO` + `<SVC_UC>_SOURCE_DEFAULT` from the service.env;
-honors a `<SVC_UC>_VERSION` override in `.stack/.env`. Sets a rebuild
+`source.repo` + `source.default` from the service.yaml; honors a
+`<SVC_UC>_VERSION` override in `.stack/.env`. Sets a rebuild
 flag in `.stack/<svc>/.generated.env`; consume it with
 `consumeRebuildFlag("<svc>")` before calling `dc(["build", "<svc>"])`.
 

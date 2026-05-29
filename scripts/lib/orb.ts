@@ -50,6 +50,26 @@ export const orbExecWithStdin = async (vm: string, cmd: string, stdin: string): 
   return r.stdout.trim()
 }
 
+// Start / stop a machine (best-effort — never throws; returns false if orb
+// returned non-zero, e.g. already in that state or no such VM).
+export const orbStart = async (vm: string): Promise<boolean> => {
+  try {
+    await orb$`orb start ${vm}`
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const orbStop = async (vm: string): Promise<boolean> => {
+  try {
+    await orb$`orb stop ${vm}`
+    return true
+  } catch {
+    return false
+  }
+}
+
 // True if a VM with the exact name `vm` exists in `orb list`.
 export const orbMachineExists = async (vm: string): Promise<boolean> => {
   try {

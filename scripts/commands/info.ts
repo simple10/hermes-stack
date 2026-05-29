@@ -71,7 +71,7 @@ export const runInfo = async (opts: { showSecrets?: boolean } = {}): Promise<voi
       g.rows.some((r) => r.ep.auth.some((c) => isSecretRef(c.raw))),
     )
     if (hasSecrets && !opts.showSecrets) {
-      lines.push(pc.dim('  Credentials shown as $VAR — run `info --show-pass` to reveal'), '')
+      lines.push(pc.dim('  See credentials in .stack/.env or run `info --show-pass` to reveal'), '')
     }
     lines.push(...formatEndpointLines(epGroups, opts.showSecrets).map((l) => '  ' + l))
     p.log.message(lines.join('\n'))

@@ -13,7 +13,10 @@ requires: [hermes]
 provides:
   # OrbStack auto-HTTPS fronts the workspace (listens :3000) at the bare
   # domain — proto: https drops the port from the rendered URL.
-  ui: { port: 3000, proto: https }
+  ui:
+    port: 3000
+    proto: https
+    auth: { pass: "${HERMES_WORKSPACE_PASSWORD}" }
 # Single digest-class image owned by this service. Bump via
 # HERMES_WORKSPACE_VERSION in .stack/.env.
 #

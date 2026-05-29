@@ -5,7 +5,7 @@
 // collapses to whatever fits.
 import pc from 'picocolors'
 import type { HealthState, RunState, ServiceHealth, MachineHealth } from './health.ts'
-import type { Endpoint } from './endpoints.ts'
+import { resolveCred, type Endpoint } from './endpoints.ts'
 
 const ICON_OK = pc.green('●')
 const ICON_WARN = pc.yellow('●')
@@ -74,18 +74,27 @@ export interface EndpointGroup {
 }
 
 // Grouped, dim-when-down endpoint URLs for the `info` Endpoints section.
-export const formatEndpointLines = (groups: EndpointGroup[]): string[] => {
+// Declared credentials render under each URL: literals shown plainly, secret
+// ${VAR} refs masked to $VAR unless `showSecrets` resolves them.
+export const formatEndpointLines = (groups: EndpointGroup[], showSecrets = false): string[] => {
   if (groups.length === 0) return [pc.dim('  (no endpoints)')]
   const labelW = groups.reduce(
     (m, g) => g.rows.reduce((mm, r) => Math.max(mm, r.ep.name.length), m),
     0,
   )
+  const indent = ' '.repeat(labelW + 4) // align cred lines under the URL column
   const out: string[] = []
   for (const g of groups) {
     out.push(pc.cyan(g.service))
     for (const { ep, up } of g.rows) {
       const label = pc.dim(pad(ep.name, labelW))
       out.push(`  ${label}  ${up ? ep.url : pc.dim(ep.url)}`)
+      for (const cred of ep.auth) {
+        const { value, secret } = resolveCred(cred.raw, showSecrets)
+        // masked ref -> dim; revealed secret / literal -> plain (copyable)
+        const shown = secret && !showSecrets ? pc.dim(value) : value
+        out.push(`${indent}${pc.dim(cred.label + ':')} ${shown}`)
+      }
     }
   }
   return out

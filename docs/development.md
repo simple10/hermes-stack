@@ -60,7 +60,13 @@ provides: # user-facing endpoints rendered by `info` / `start`
   # otherwise http://host:port. path/service/proto all optional;
   # service: = orb DNS name (default = dir name).
   api: { port: 8080 }
-  dashboard: { port: 8080, path: /admin }
+  dashboard:
+    port: 8080
+    path: /admin
+    # optional credential hints shown under the URL by `info`. Literals are
+    # public; ${VAR} refs are secrets — masked to $VAR unless `info --show-pass`.
+    # Quote ${VAR} values (the `}` breaks YAML flow maps otherwise).
+    auth: { user: admin, pass: "${SOME_PASSWORD_VAR}" }
 
 # Image-class services (no _source/) declare an images: map. <NAME> is the
 # *_VERSION knob prefix; `./stack-cli build` resolves default -> a digest.

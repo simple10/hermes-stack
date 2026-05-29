@@ -54,7 +54,7 @@ const COMMANDS: Record<string, Handler> = {
   enable: runEnable,
   disable: runDisable,
   enabled: async () => runEnabled(),
-  info: async () => runInfo(),
+  info: async (args) => runInfo({ showSecrets: args.includes('--show-pass') }),
   build: async () => runBuild(),
   start: perSvc('start', startService, runStart),
   up: perSvc('start', startService, runStart),
@@ -114,7 +114,7 @@ const HELP_SECTIONS: ReadonlyArray<Section> = [
   {
     title: 'Inspect',
     rows: [
-      ['info', '', "overview: what's enabled + runtime state"],
+      ['info', '[--show-pass]', 'enabled + runtime state + endpoints (reveal creds)'],
       ['logs', '[machine]', 'orb logs'],
     ],
   },

@@ -15,9 +15,9 @@ import {
   type EndpointGroup,
 } from '../lib/render-health.ts'
 import { loadService } from '../lib/services.ts'
-import { serviceEndpoints } from '../lib/endpoints.ts'
+import { serviceEndpoints, isSecretRef } from '../lib/endpoints.ts'
 
-export const runInfo = async (): Promise<void> => {
+export const runInfo = async (opts: { showSecrets?: boolean } = {}): Promise<void> => {
   const project = stackProject()
   const profiles = envGet(STACK_ENV, 'COMPOSE_PROFILES')
     .split(',')
@@ -66,9 +66,17 @@ export const runInfo = async (): Promise<void> => {
     epGroups.push({ service: svc, rows })
   }
   if (epGroups.length) {
-    p.log.message(
-      [pc.bold('Endpoints'), ...formatEndpointLines(epGroups).map((l) => '  ' + l)].join('\n'),
+    const lines = [
+      pc.bold('Endpoints'),
+      ...formatEndpointLines(epGroups, opts.showSecrets).map((l) => '  ' + l),
+    ]
+    const hasSecrets = epGroups.some((g) =>
+      g.rows.some((r) => r.ep.auth.some((c) => isSecretRef(c.raw))),
     )
+    if (hasSecrets && !opts.showSecrets) {
+      lines.push(pc.dim('  credentials shown as $VAR — run `info --show-pass` to reveal'))
+    }
+    p.log.message(lines.join('\n'))
   }
 
   const allUp =

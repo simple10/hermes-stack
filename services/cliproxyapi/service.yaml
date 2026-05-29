@@ -5,7 +5,10 @@ runner: docker
 desc: "OAuth-subscription proxy (ChatGPT/Gemini/Claude/Grok via cliproxy/*)"
 provides:
   api: { port: 8317 }
-  dashboard: { port: 8317, path: /management.html } # admin SPA (CLIPROXY_MANAGEMENT_KEY)
+  dashboard: # admin SPA — paste the management key into the panel
+    port: 8317
+    path: /management.html
+    auth: { key: "${CLIPROXY_MANAGEMENT_KEY}" }
 env: |
   # Client key (LiteLLM cliproxy/* model_list entries authenticate with this).
   # Management key gates the management/OAuth-login web panel. Both

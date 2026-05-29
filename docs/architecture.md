@@ -91,7 +91,11 @@ litellmKey: true # mint a litellm virtual key for it
 kind: backend # mark as substrate (hidden from setup list)
 provides: # user-facing endpoints (rendered by `info` / `start`)
   api: { port: 8000, service: honcho-api } # service: = orb DNS name (default = dir)
-  dashboard: { port: 4000, proto: https, path: /ui } # https -> bare auto-HTTPS domain
+  dashboard: # https -> bare auto-HTTPS domain; auth shown under the URL by `info`
+    port: 4000
+    proto: https
+    path: /ui
+    auth: { user: admin, pass: "${LITELLM_MASTER_KEY}" } # literals public; ${VAR} masked unless --show-pass
 images: # digest-class build metadata (keyed by the *_VERSION knob prefix)
   HONCHO: { repo: ghcr.io/example/honcho, default: sha256:… }
 source: { repo: https://github.com/…, default: <sha> } # source-class build metadata
@@ -107,6 +111,11 @@ proto (`postgres`/`redis`/`amqp`) → `proto://<host>:<port>`, otherwise
 `http://<host>:<port>[path]`. The host is OrbStack DNS:
 `<service>.<project>.orb.local` for containers, `<project>-<svc>.orb.local`
 for VMs.
+
+An endpoint may also declare an ordered `auth:` map of credential hints that
+`info` renders under the URL. Literal values (`user: admin`) are public;
+`${VAR}` references are secrets — shown as the bare `$VAR` name by default and
+resolved (from `.stack/.env` + generated overlays) only with `info --show-pass`.
 
 `./stack-cli enable <svc>` cascades `requires` transitively
 (leaf-first), so enabling `hermes` auto-enables `litellm`, which

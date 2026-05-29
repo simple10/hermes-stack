@@ -2,7 +2,7 @@
 // the repo parses cleanly (yaml + provides) and the cascade is cycle-safe.
 import { describe, expect, test } from 'vitest'
 import { listServices, expandRequires } from '../lib/services.ts'
-import { serviceEndpoints } from '../lib/endpoints.ts'
+import { serviceEndpoints, resolveCred, isSecretRef } from '../lib/endpoints.ts'
 
 describe('services discovery', () => {
   test('at least the key services are present and well-formed', () => {
@@ -71,5 +71,29 @@ describe('services discovery', () => {
     const hermes = serviceEndpoints('hermes').find((e) => e.name === 'dashboard')
     expect(hermes?.isVm).toBe(true)
     expect(hermes?.url).toMatch(/^http:\/\/.+-hermes\.orb\.local:9119$/)
+  })
+
+  test('endpoint auth: literals public, ${VAR} refs secret + masked by default', () => {
+    const dash = serviceEndpoints('litellm').find((e) => e.name === 'dashboard')
+    const user = dash?.auth.find((c) => c.label === 'user')
+    const pass = dash?.auth.find((c) => c.label === 'pass')
+    expect(user?.raw).toBe('admin')
+    expect(pass?.raw).toBe('${LITELLM_MASTER_KEY}')
+
+    expect(isSecretRef('admin')).toBe(false)
+    expect(isSecretRef('${LITELLM_MASTER_KEY}')).toBe(true)
+
+    // literal -> always shown, not secret
+    expect(resolveCred('admin', false)).toEqual({ value: 'admin', secret: false })
+    expect(resolveCred('admin', true).value).toBe('admin')
+    // secret ref masked to $VAR unless revealed
+    expect(resolveCred('${LITELLM_MASTER_KEY}', false)).toEqual({
+      value: '$LITELLM_MASTER_KEY',
+      secret: true,
+    })
+    // unset var -> explicit (unset) marker, never the literal ${...}
+    expect(resolveCred('${DEFINITELY_UNSET_VAR_XYZ}', true).value).toBe(
+      '(unset: $DEFINITELY_UNSET_VAR_XYZ)',
+    )
   })
 })

@@ -8,7 +8,11 @@ provides:
   # Single container port (4000) -> orb auto-HTTPS fronts the bare domain, so
   # proto: https renders the clean URL. /ui is the admin panel (master key);
   # /v1 is the OpenAI-compatible base an external client points at.
-  dashboard: { port: 4000, proto: https, path: /ui }
+  dashboard:
+    port: 4000
+    proto: https
+    path: /ui
+    auth: { user: admin, pass: "${LITELLM_MASTER_KEY}" }
   api: { port: 4000, proto: https, path: /v1 }
 # Digest-class image (resolved by resolveAllImages at `stack-cli build`).
 # Bump tag/digest via LITELLM_VERSION in .stack/.env.

@@ -34,6 +34,10 @@ export interface EndpointDecl {
   path?: string
   proto?: string
   service?: string // orb DNS name (compose service); default = dir name
+  // Ordered credential hints rendered under the URL by `info`. Values are
+  // either literals (public, e.g. user: admin) or ${VAR} refs (secret —
+  // masked to the bare $VAR name unless `info --show-pass` resolves them).
+  auth?: Record<string, string>
 }
 
 export interface ImageDecl {
@@ -69,18 +73,30 @@ export const loadService = (name: string): ServiceDescriptor | null => {
   if (cache.has(name)) return cache.get(name)!
   const f = resolve(SERVICES_DIR, name, 'service.yaml')
   if (!existsSync(f)) return null
-  const raw = (yamlParse(readFileSync(f, 'utf8')) ?? {}) as Record<string, unknown>
+  let raw: Record<string, unknown>
+  try {
+    raw = (yamlParse(readFileSync(f, 'utf8')) ?? {}) as Record<string, unknown>
+  } catch (e) {
+    throw new Error(`services/${name}/service.yaml: invalid YAML — ${(e as Error).message}`)
+  }
   const runnerStr = String(raw.runner ?? 'docker').toLowerCase()
   const runner: 'docker' | 'vm' = runnerStr === 'vm' ? 'vm' : 'docker'
   const provides: Record<string, EndpointDecl> = {}
   if (raw.provides && typeof raw.provides === 'object') {
     for (const [k, v] of Object.entries(raw.provides as Record<string, unknown>)) {
       const ep = (v ?? {}) as Record<string, unknown>
+      let auth: Record<string, string> | undefined
+      if (ep.auth && typeof ep.auth === 'object') {
+        auth = {}
+        for (const [ak, av] of Object.entries(ep.auth as Record<string, unknown>))
+          auth[ak] = String(av)
+      }
       provides[k] = {
         port: Number(ep.port),
         path: ep.path != null ? String(ep.path) : undefined,
         proto: ep.proto != null ? String(ep.proto).toLowerCase() : undefined,
         service: ep.service != null ? String(ep.service) : undefined,
+        auth,
       }
     }
   }

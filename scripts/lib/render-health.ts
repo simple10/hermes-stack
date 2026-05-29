@@ -88,7 +88,7 @@ export const formatEndpointLines = (groups: EndpointGroup[], showSecrets = false
     out.push(pc.cyan(g.service))
     for (const { ep, up } of g.rows) {
       const label = pc.dim(pad(ep.name, labelW))
-      out.push(`  ${label}  ${up ? ep.url : pc.dim(ep.url)}`)
+      out.push(`  ${label}  ${up ? pc.yellow(ep.url) : pc.dim(ep.url)}`)
       for (const cred of ep.auth) {
         const { value, secret } = resolveCred(cred.raw, showSecrets)
         // masked ref -> dim; revealed secret / literal -> plain (copyable)

@@ -1,0 +1,13 @@
+# honcho-ui depends_on honcho-api (cross-profile -> honcho). Static SPA;
+# no model/runtime levers — all behavior comes from honcho-api.
+runner: docker
+desc: "OpenConcho web UI for Honcho (static SPA + same-origin proxy)"
+requires: [honcho]
+provides:
+  # nginx listens :80; OrbStack fronts it with auto-HTTPS -> bare domain.
+  ui: { port: 80 }
+# Source-class. Bump via HONCHO_UI_VERSION in .stack/.env.
+# v0.8.0-5-ge490d91 (main, 2026-05-15)
+source:
+  repo: https://github.com/offendingcommit/openconcho
+  default: e490d911fcb27ee193558fd9a28856cde2057665

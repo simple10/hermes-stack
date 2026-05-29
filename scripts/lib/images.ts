@@ -1,24 +1,20 @@
-// images.ts — port of stack_image / stack_resolve_images (Phase 1 of
-// `./stack-cli build`). For every services/<svc>/service.env that declares a
-// *_IMAGE_REPO + *_IMAGE_DEFAULT pair, resolve the requested tag (or
-// pass-through digest) to a concrete digest via
-// `docker buildx imagetools inspect` and write *_IMAGE=repo@digest +
-// *_IMAGE_REQUESTED + *_IMAGE_RESOLVED_DIGEST into
+// images.ts — Phase 1 of `./stack-cli build`. For every service.yaml that
+// declares an `images:` map (<NAME>: { repo, default }), resolve the
+// requested tag (or pass-through digest) to a concrete digest via
+// `docker buildx imagetools inspect` and write <NAME>_IMAGE=repo@digest +
+// <NAME>_IMAGE_REQUESTED + <NAME>_IMAGE_RESOLVED_DIGEST into
 // .stack/<svc>/.generated.env.
 //
 // Runs unconditionally because compose `include:` parses + interpolates
 // every entry on every `dc` call; the values must always be resolved.
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { $ } from 'zx'
-import { SERVICES_DIR } from './paths.ts'
-import { parseEnvFile } from './env.ts'
+import { listServices } from './services.ts'
 import { generatedUpsert } from './generated.ts'
 import { stackGet } from './stack.ts'
 import { die, log } from './log.ts'
 
 interface ImageDecl {
-  name: string // e.g. "LITELLM"
+  name: string // e.g. "LITELLM" — the *_VERSION knob prefix
   svc: string // dir name
   repo: string
   defaultPin: string
@@ -26,26 +22,13 @@ interface ImageDecl {
 
 const discoverImages = (): ImageDecl[] => {
   const out: ImageDecl[] = []
-  for (const entry of readdirSync(SERVICES_DIR)) {
-    const dir = resolve(SERVICES_DIR, entry)
-    if (!statSync(dir).isDirectory()) continue
-    const f = resolve(dir, 'service.env')
-    try {
-      const flat = parseEnvFile(f)
-      for (const key of Object.keys(flat)) {
-        const m = key.match(/^([A-Z][A-Z0-9_]*)_IMAGE_REPO$/)
-        if (!m) continue
-        const name = m[1]
-        const repo = flat[`${name}_IMAGE_REPO`]
-        const defaultPin = flat[`${name}_IMAGE_DEFAULT`]
-        if (!repo || !defaultPin) {
-          die(`${f}: missing ${name}_IMAGE_REPO or ${name}_IMAGE_DEFAULT`)
-          continue
-        }
-        out.push({ name, svc: entry, repo, defaultPin })
+  for (const svc of listServices()) {
+    for (const [name, im] of Object.entries(svc.images)) {
+      if (!im.repo || !im.default) {
+        die(`services/${svc.name}/service.yaml: images.${name} needs both repo and default`)
+        continue
       }
-    } catch {
-      /* not a service dir / unreadable */
+      out.push({ name, svc: svc.name, repo: im.repo, defaultPin: im.default })
     }
   }
   return out
@@ -78,27 +61,6 @@ export const resolveImage = async (decl: ImageDecl): Promise<void> => {
 }
 
 export const resolveAllImages = async (): Promise<void> => {
-  // Validate that every declared *_IMAGE_REPO has a matching *_IMAGE_DEFAULT.
-  // discoverImages already does the per-pair check; this is for the
-  // case where someone forgot the REPO key entirely.
-  for (const dir of readdirSync(SERVICES_DIR)) {
-    const f = resolve(SERVICES_DIR, dir, 'service.env')
-    try {
-      const body = readFileSync(f, 'utf8')
-      const repos = (body.match(/^[A-Z][A-Z0-9_]*_IMAGE_REPO=/gm) ?? []).map((s) =>
-        s.replace('_IMAGE_REPO=', ''),
-      )
-      const defs = new Set(
-        (body.match(/^[A-Z][A-Z0-9_]*_IMAGE_DEFAULT=/gm) ?? []).map((s) =>
-          s.replace('_IMAGE_DEFAULT=', ''),
-        ),
-      )
-      for (const name of repos)
-        if (!defs.has(name)) die(`${f}: ${name}_IMAGE_REPO without matching ${name}_IMAGE_DEFAULT`)
-    } catch {
-      /* unreadable */
-    }
-  }
   const decls = discoverImages()
   for (const d of decls) await resolveImage(d)
 }

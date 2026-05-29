@@ -48,8 +48,8 @@ export const blockStatus = (svc: string): BlockStatus => {
 }
 
 // Append a NEW enabled block at the end. Strips leading/trailing blank
-// lines from `body` (SERVICE_STACK_ENV is conventionally wrapped in
-// newlines for readability in service.env).
+// lines from `body` (the service.yaml `env:` literal block conventionally
+// opens with a blank line for readability).
 export const blockAppend = (svc: string, body: string): void => {
   ensureStackDir()
   const lines = body.split('\n')
@@ -279,7 +279,7 @@ const isEnabled = (svc: string): boolean => {
 const enableOne = (svc: string): void => {
   const d = loadService(svc)
   if (!d) {
-    die(`no such service: ${svc} (services/${svc}/service.env not found)`)
+    die(`no such service: ${svc} (services/${svc}/service.yaml not found)`)
     return
   }
   const csvKey = d.runner === 'vm' ? 'STACK_MACHINES' : 'COMPOSE_PROFILES'
@@ -287,13 +287,13 @@ const enableOne = (svc: string): void => {
   if (d.litellmKey) csvAdd('LITELLM_VIRTKEYS', d.profile)
   const status = blockStatus(svc)
   if (status === 'disabled') blockToggle(svc, 'enabled')
-  else if (status === 'missing' && d.stackEnv) blockAppend(svc, d.stackEnv)
-  if (d.stackEnv && blockStatus(svc) === 'enabled') blockSync(svc, d.stackEnv)
+  else if (status === 'missing' && d.env) blockAppend(svc, d.env)
+  if (d.env && blockStatus(svc) === 'enabled') blockSync(svc, d.env)
 }
 
 // csv add for top-level keys (COMPOSE_PROFILES, STACK_MACHINES) — these
 // MUST stay top-level even if a future refactor accidentally lists them
-// in a SERVICE_STACK_ENV. Bypass owner lookup.
+// in a service's env block. Bypass owner lookup.
 const csvAddTopLevel = (key: string, value: string): void => {
   const cur = envGet(STACK_ENV, key)
   const parts = cur

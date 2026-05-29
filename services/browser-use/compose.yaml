@@ -20,7 +20,7 @@
 # Siblings reach LiteLLM as litellm:4000; nothing is published to the host.
 #
 # depends_on litellm (service_healthy), cross-profile. Compose does NOT
-# auto-start a profiled depends_on target — services/browser-use/service.env
+# auto-start a profiled depends_on target — services/browser-use/service.yaml
 # declares SERVICE_REQUIRES=litellm so dc()'s profile expansion pulls litellm
 # (+ pg,redis transitively) whenever browser-use is active.
 

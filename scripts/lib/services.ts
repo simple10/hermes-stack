@@ -1,26 +1,50 @@
-// services.ts — discover service descriptors from services/*/service.env.
+// services.ts — discover service descriptors from services/*/service.yaml.
 //
-// Each service.env is parsed by dotenv (lib/env.ts), which handles
-// quoting, inline `# comment` stripping, and (importantly here)
-// multi-line single-quoted values like:
+// Each service.yaml is parsed by the `yaml` lib. The injected env block is a
+// LITERAL block scalar (`env: |`), so its contents — including comments and
+// `${VAR}` refs — are preserved verbatim and re-parsed by dotenv (lib/env.ts)
+// exactly as the old SERVICE_STACK_ENV value was. The literal block also
+// kills the apostrophe-escaping bug class the single-quoted .env value had.
 //
-//   SERVICE_STACK_ENV='
-//   FOO=bar
-//   BAZ=${SOME_REF}
-//   '
-//
-// Recognized declarations (all optional unless noted):
-//   SERVICE_RUNNER=docker|vm        (default docker)
-//   SERVICE_PROFILE=<name>          (default = dir name)
-//   SERVICE_KIND=backend            (substrate; hidden from setup list)
-//   SERVICE_DESC="…"
-//   SERVICE_REQUIRES=a,b,c          (CSV, transitive)
-//   SERVICE_LITELLM_KEY=true|false
-//   SERVICE_STACK_ENV='multi-line'  (body injected as #>--- svc --- block)
-import { existsSync, readdirSync, statSync } from 'node:fs'
+// Schema (all optional unless noted):
+//   runner: docker|vm                 (default docker)
+//   kind: backend                     (substrate; hidden from setup list)
+//   desc: "…"
+//   requires: [a, b, c]               (transitive, leaf-first via expandRequires)
+//   litellmKey: true|false            (default false)
+//   provides:                         (endpoint map -> info / start URLs)
+//     <name>: { port, path?, proto?, service? }
+//       port    container port (orb DNS uses this)
+//       path    URL path suffix (default "")
+//       proto   http(default) | https | postgres | redis | amqp | …
+//               https forces the bare auto-HTTPS domain (drops the port)
+//       service compose-service / orb DNS name (default = dir name)
+//   source: { repo, default }         (source-class build metadata)
+//   images:                           (digest-class build metadata)
+//     <NAME>: { repo, default }       (<NAME> = the *_VERSION knob prefix)
+//   env: |                            (multi-line body injected as #>--- svc --- block)
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { parse as yamlParse } from 'yaml'
 import { SERVICES_DIR } from './paths.ts'
-import { parseEnvFile, parseEnvBody } from './env.ts'
+import { parseEnvBody } from './env.ts'
+
+export interface EndpointDecl {
+  port: number
+  path?: string
+  proto?: string
+  service?: string // orb DNS name (compose service); default = dir name
+}
+
+export interface ImageDecl {
+  repo: string
+  default: string
+}
+
+export interface SourceDecl {
+  repo: string
+  default: string
+}
 
 export interface ServiceDescriptor {
   name: string
@@ -30,25 +54,61 @@ export interface ServiceDescriptor {
   desc: string
   requires: string[]
   litellmKey: boolean
-  stackEnv: string // multi-line body (no enclosing quotes)
+  provides: Record<string, EndpointDecl>
+  source: SourceDecl | null
+  images: Record<string, ImageDecl>
+  env: string // multi-line body (no enclosing quotes)
 }
 
 const cache = new Map<string, ServiceDescriptor>()
 
+const asArray = (v: unknown): string[] =>
+  Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []
+
 export const loadService = (name: string): ServiceDescriptor | null => {
   if (cache.has(name)) return cache.get(name)!
-  const f = resolve(SERVICES_DIR, name, 'service.env')
+  const f = resolve(SERVICES_DIR, name, 'service.yaml')
   if (!existsSync(f)) return null
-  const flat = parseEnvFile(f)
-  const runnerStr = (flat.SERVICE_RUNNER ?? 'docker').toLowerCase()
+  const raw = (yamlParse(readFileSync(f, 'utf8')) ?? {}) as Record<string, unknown>
+  const runnerStr = String(raw.runner ?? 'docker').toLowerCase()
   const runner: 'docker' | 'vm' = runnerStr === 'vm' ? 'vm' : 'docker'
-  const desc = flat.SERVICE_DESC ?? ''
-  const requires = csv(flat.SERVICE_REQUIRES ?? '')
-  const profile = flat.SERVICE_PROFILE || name
-  const litellmKey = (flat.SERVICE_LITELLM_KEY ?? '').toLowerCase() === 'true'
-  const kind = (flat.SERVICE_KIND ?? '').toLowerCase()
-  const stackEnv = flat.SERVICE_STACK_ENV ?? ''
-  const d: ServiceDescriptor = { name, runner, profile, kind, desc, requires, litellmKey, stackEnv }
+  const provides: Record<string, EndpointDecl> = {}
+  if (raw.provides && typeof raw.provides === 'object') {
+    for (const [k, v] of Object.entries(raw.provides as Record<string, unknown>)) {
+      const ep = (v ?? {}) as Record<string, unknown>
+      provides[k] = {
+        port: Number(ep.port),
+        path: ep.path != null ? String(ep.path) : undefined,
+        proto: ep.proto != null ? String(ep.proto).toLowerCase() : undefined,
+        service: ep.service != null ? String(ep.service) : undefined,
+      }
+    }
+  }
+  const images: Record<string, ImageDecl> = {}
+  if (raw.images && typeof raw.images === 'object') {
+    for (const [k, v] of Object.entries(raw.images as Record<string, unknown>)) {
+      const im = (v ?? {}) as Record<string, unknown>
+      images[k] = { repo: String(im.repo ?? ''), default: String(im.default ?? '') }
+    }
+  }
+  let source: SourceDecl | null = null
+  if (raw.source && typeof raw.source === 'object') {
+    const s = raw.source as Record<string, unknown>
+    source = { repo: String(s.repo ?? ''), default: String(s.default ?? '') }
+  }
+  const d: ServiceDescriptor = {
+    name,
+    runner,
+    profile: String(raw.profile ?? name),
+    kind: String(raw.kind ?? '').toLowerCase(),
+    desc: String(raw.desc ?? ''),
+    requires: asArray(raw.requires),
+    litellmKey: raw.litellmKey === true,
+    provides,
+    source,
+    images,
+    env: typeof raw.env === 'string' ? raw.env : '',
+  }
   cache.set(name, d)
   return d
 }
@@ -64,15 +124,15 @@ export const listServices = (): ServiceDescriptor[] => {
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-// Map of every KEY -> owning service, by parsing each service's
-// SERVICE_STACK_ENV body. Cached after first call.
+// Map of every KEY -> owning service, by parsing each service's env block.
+// Cached after first call.
 let _ownerCache: Map<string, string> | null = null
 export const stackEnvOwnerMap = (): Map<string, string> => {
   if (_ownerCache) return _ownerCache
   const out = new Map<string, string>()
   for (const svc of listServices()) {
-    if (!svc.stackEnv) continue
-    const parsed = parseEnvBody(svc.stackEnv)
+    if (!svc.env) continue
+    const parsed = parseEnvBody(svc.env)
     for (const k of Object.keys(parsed)) out.set(k, svc.name)
   }
   _ownerCache = out
@@ -85,8 +145,8 @@ export const _resetServiceCache = (): void => {
   _ownerCache = null
 }
 
-// Transitive SERVICE_REQUIRES closure. Cycle-safe (visited set). Returns
-// leaf-first order so callers can enable dependencies before consumers.
+// Transitive requires closure. Cycle-safe (visited set). Returns leaf-first
+// order so callers can enable dependencies before consumers.
 export const expandRequires = (seed: readonly string[]): string[] => {
   const visited = new Set<string>()
   const order: string[] = []
@@ -101,9 +161,3 @@ export const expandRequires = (seed: readonly string[]): string[] => {
   for (const s of seed) visit(s)
   return order
 }
-
-const csv = (s: string): string[] =>
-  s
-    .split(',')
-    .map((x) => x.trim())
-    .filter((x) => x.length > 0)

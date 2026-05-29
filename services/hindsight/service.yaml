@@ -1,0 +1,23 @@
+# hindsight: depends_on pg AND litellm (cross-profile; litellm pulls redis).
+runner: docker
+desc: "Alternative memory backend (pgvector + reranker; local/litellm/rrf)"
+litellmKey: true
+requires: [pg, litellm]
+provides:
+  api: { port: 8888 } # health GET /health
+  ui: { port: 9999 } # Control-Plane Web UI
+# Digest-class image. Bump via HINDSIGHT_VERSION in .stack/.env.
+images:
+  HINDSIGHT:
+    repo: ghcr.io/vectorize-io/hindsight
+    default: sha256:f0f9e9a73d6aedde9eaf4010ab604c3e015494e494318b26f1011144856b8112
+env: |
+  HINDSIGHT_MODEL=${STACK_LLM_MODEL}
+  HINDSIGHT_EMBEDDING_MODEL=${STACK_LLM_EMBEDDING_MODEL}
+  # Reranker backend: local | litellm | rrf
+  #   local   - in-process Torch cross-encoder (best quality; ~600 MB RAM)
+  #   litellm - rerank via LiteLLM -> HINDSIGHT_RERANK_MODEL (no Torch;
+  #             ~600 MB saved; observable in SpendLogs)
+  #   rrf     - pure rank-fusion (weakest quality; no model/API/RAM)
+  HINDSIGHT_RERANKER=litellm
+  HINDSIGHT_RERANK_MODEL=rerank-voyage

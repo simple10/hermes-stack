@@ -21,7 +21,7 @@ CAMOFOX_HEAP_MB=128      # MAX_OLD_SPACE_SIZE for the node runtime
 
 ## ⚠ CAMOFOX_AUTH choice
 
-The default in `service.env` is `CAMOFOX_AUTH=disabled` because every
+The default in `service.yaml` is `CAMOFOX_AUTH=disabled` because every
 known client in this stack (Hermes) doesn't send `Authorization: Bearer`.
 The trust boundary is then orb-DNS-only exposure (no host port mapping —
 only services on the project network can reach :9377).

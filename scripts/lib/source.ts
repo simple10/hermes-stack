@@ -13,7 +13,6 @@ import { resolve } from 'node:path'
 import { STACK_ROOT } from './paths.ts'
 import { generatedGet, generatedUpsert } from './generated.ts'
 import { loadService } from './services.ts'
-import { parseEnvFile } from './env.ts'
 import { stackGet } from './stack.ts'
 import { die, log } from './log.ts'
 
@@ -45,19 +44,18 @@ export const stackSource = async (
   $.verbose = false
   const d = loadService(svc)
   if (!d) {
-    die(`stackSource(${svc}): service.env not found`)
+    die(`stackSource(${svc}): service.yaml not found`)
     throw new Error('unreachable')
   }
   const uc = svcUc(svc)
-  const flat = parseEnvFile(resolve(STACK_ROOT, 'services', svc, 'service.env'))
-  const repo = repoArg ?? flat[`${uc}_SOURCE_REPO`]
-  const defaultPin = defaultPinArg ?? flat[`${uc}_SOURCE_DEFAULT`]
+  const repo = repoArg ?? d.source?.repo
+  const defaultPin = defaultPinArg ?? d.source?.default
   if (!repo) {
-    die(`stackSource(${svc}): no ${uc}_SOURCE_REPO in service.env`)
+    die(`stackSource(${svc}): no source.repo in service.yaml`)
     throw new Error('unreachable')
   }
   if (!defaultPin) {
-    die(`stackSource(${svc}): no ${uc}_SOURCE_DEFAULT in service.env`)
+    die(`stackSource(${svc}): no source.default in service.yaml`)
     throw new Error('unreachable')
   }
   // Override precedence mirrors bash ${VAR:-default}: stack-env wins over

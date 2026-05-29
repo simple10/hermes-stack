@@ -1,0 +1,15 @@
+# browser-use: depends_on litellm (cross-profile) + OPENAI_BASE_URL=
+# http://litellm:4000 ; uses BROWSER_USE_VIRTUAL_KEY (minted by
+# litellm/preflight). litellm pulls pg,redis transitively.
+# No provides: — MCP stdio agent, no network endpoint.
+runner: docker
+desc: "LLM-driven browser-automation agent (MCP stdio; fully local)"
+litellmKey: true
+requires: [litellm]
+# Source-class. Bump via BROWSER_USE_VERSION in .stack/.env.
+# main@2026-05-19 (resolve via git describe when _source is checked out)
+source:
+  repo: https://github.com/browser-use/browser-use
+  default: 157779338afdcc03023010ec3c24ad63d820453c
+env: |
+  BROWSER_USE_MODEL=${STACK_LLM_MODEL}

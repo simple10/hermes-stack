@@ -1,0 +1,27 @@
+# litellm-provision -> pg; litellm uses REDIS_URL (no compose depends_on).
+runner: docker
+desc: "LLM proxy gateway + virtual-key issuer (every consumer routes through here)"
+requires: [pg, redis]
+# LiteLLM is the ISSUER of virtual keys (LITELLM_VIRTKEYS); it doesn't
+# consume one itself. So litellmKey stays false here.
+provides:
+  # Single container port (4000) -> orb auto-HTTPS fronts the bare domain, so
+  # proto: https renders the clean URL. /ui is the admin panel (master key);
+  # /v1 is the OpenAI-compatible base an external client points at.
+  dashboard: { port: 4000, proto: https, path: /ui }
+  api: { port: 4000, proto: https, path: /v1 }
+# Digest-class image (resolved by resolveAllImages at `stack-cli build`).
+# Bump tag/digest via LITELLM_VERSION in .stack/.env.
+images:
+  LITELLM:
+    repo: ghcr.io/berriai/litellm-database
+    default: sha256:069da8855c7bf0a39861fcd9884f134670128b79aa930a4af0c9219a0433b83f
+env: |
+  # Admin master key + active virtual-key consumer list. Both gen-once via
+  # `stack-cli setup`; rotating LITELLM_MASTER_KEY invalidates the SpendLogs DB
+  # auth + breaks the gateway, dont touch lightly.
+  LITELLM_MASTER_KEY=
+  # Active consumer list — auto-managed by enable/disable when any service
+  # with litellmKey=true is enabled/disabled. Per-key virtual keys minted by
+  # litellm/preflight.ts into .stack/litellm/.generated.env (<SVC>_VIRTUAL_KEY=sk-...).
+  LITELLM_VIRTKEYS=

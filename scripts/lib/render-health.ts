@@ -5,6 +5,7 @@
 // collapses to whatever fits.
 import pc from 'picocolors'
 import type { HealthState, RunState, ServiceHealth, MachineHealth } from './health.ts'
+import type { Endpoint } from './endpoints.ts'
 
 const ICON_OK = pc.green('●')
 const ICON_WARN = pc.yellow('●')
@@ -65,6 +66,29 @@ export const formatServiceLines = (services: ServiceHealth[]): string[] => {
     const extra = s.containerName ? pc.dim(`  ${s.containerName}`) : ''
     return `${icon}  ${name}  ${badge}${extra}`
   })
+}
+
+export interface EndpointGroup {
+  service: string
+  rows: { ep: Endpoint; up: boolean }[]
+}
+
+// Grouped, dim-when-down endpoint URLs for the `info` Endpoints section.
+export const formatEndpointLines = (groups: EndpointGroup[]): string[] => {
+  if (groups.length === 0) return [pc.dim('  (no endpoints)')]
+  const labelW = groups.reduce(
+    (m, g) => g.rows.reduce((mm, r) => Math.max(mm, r.ep.name.length), m),
+    0,
+  )
+  const out: string[] = []
+  for (const g of groups) {
+    out.push(pc.cyan(g.service))
+    for (const { ep, up } of g.rows) {
+      const label = pc.dim(pad(ep.name, labelW))
+      out.push(`  ${label}  ${up ? ep.url : pc.dim(ep.url)}`)
+    }
+  }
+  return out
 }
 
 export const formatMachineLines = (machines: MachineHealth[]): string[] => {

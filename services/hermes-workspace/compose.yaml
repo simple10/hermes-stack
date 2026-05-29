@@ -2,7 +2,7 @@
 # Project-scoped (no container_name / no shared network — Compose default
 # per-project net; siblings reach each other by service name). Image is
 # digest-pinned (gotcha #6) via HERMES_WORKSPACE_IMAGE resolved at build time
-# from services/hermes-workspace/service.env -> HERMES_WORKSPACE_IMAGE_DEFAULT;
+# from services/hermes-workspace/service.yaml -> HERMES_WORKSPACE_IMAGE_DEFAULT;
 # bump via HERMES_WORKSPACE_VERSION in .stack/.env.
 #
 # Connects to the Hermes Agent gateway over OrbStack DNS at

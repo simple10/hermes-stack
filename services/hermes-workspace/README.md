@@ -4,7 +4,7 @@ The Hermes Workspace web UI (upstream: `ghcr.io/outsourc-e/hermes-workspace`),
 connected to the existing Hermes Agent gateway running on this project's
 `hermes` VM.
 
-- **Image:** digest-pinned in `service.env` (`HERMES_WORKSPACE_IMAGE_DEFAULT`).
+- **Image:** digest-pinned in `service.yaml` (`HERMES_WORKSPACE_IMAGE_DEFAULT`).
 - **Profile:** `hermes-workspace`. `SERVICE_REQUIRES=hermes`, so enabling
   this service keeps `hermes` in `STACK_MACHINES`.
 - **URL after enable:** `https://hermes-workspace.<project>.orb.local`
@@ -53,7 +53,7 @@ stops it cleanly.
 | `HERMES_WORKSPACE_PASSWORD` | Web-UI session password. Auto-minted by `just setup`. |
 | `HERMES_WORKSPACE_COOKIE_SECURE` | Sets `Secure` on session cookies. Default `true` (OrbStack auto-HTTPS terminates TLS). |
 | `HERMES_WORKSPACE_TRUST_PROXY` | Trust `X-Forwarded-*` headers from the orb proxy. Default `true`. |
-| `HERMES_WORKSPACE_VERSION` | Override the digest pinned in `service.env` (set to `sha256:...` of a different upstream image). |
+| `HERMES_WORKSPACE_VERSION` | Override the digest pinned in `service.yaml` (set to `sha256:...` of a different upstream image). |
 
 ## What's NOT here (v1)
 

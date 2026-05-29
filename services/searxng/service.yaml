@@ -1,0 +1,12 @@
+# searxng: standalone metasearch engine (no pg/redis/litellm dep). Reached
+# by sibling services and the hermes VM at searxng.<project>.orb.local:8080;
+# Hermes wires SEARXNG_URL automatically when this profile is active.
+runner: docker
+desc: "Privacy-respecting metasearch (Hermes web.search_backend)"
+provides:
+  web: { port: 8080 } # /healthz liveness; JSON API when format=json
+env: |
+  # Tag-class image (drift OK). Date-formatted tags from upstream are immutable.
+  SEARXNG_VERSION=2026.5.17-d7e8b7cd1
+  SEARXNG_CPU=1
+  SEARXNG_MEM=512m

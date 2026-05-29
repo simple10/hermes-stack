@@ -1,9 +1,9 @@
 // commands/build.ts — `stack-cli build`.
 //
-// Phase 1: resolve every services/*/service.env's *_IMAGE_REPO+_DEFAULT
-//          pair to a concrete digest, written into .stack/<svc>/
-//          .generated.env. Runs UNCONDITIONALLY because Compose include:
-//          parses every file on every dc call.
+// Phase 1: resolve every service.yaml `images:` entry (repo+default) to a
+//          concrete digest, written into .stack/<svc>/.generated.env. Runs
+//          UNCONDITIONALLY because Compose include: parses every file on
+//          every dc call.
 //
 // Phase 2: run each enabled service's build.ts (if present), iterating
 //          over the transitive COMPOSE_PROFILES closure first, then

@@ -1,0 +1,8 @@
+# redis substrate: single-service profile.
+runner: docker
+kind: backend
+desc: "redis substrate (consumers: litellm, honcho, firecrawl)"
+provides:
+  cache: { port: 6379, proto: redis } # backend — hidden from info today
+env: |
+  REDIS_VERSION=8.6.3

@@ -1,0 +1,10 @@
+# pg substrate: single-service profile (dir==service==profile==pg).
+runner: docker
+kind: backend
+desc: "postgres + pgvector substrate (consumers: honcho, hindsight, litellm)"
+provides:
+  db: { port: 5432, proto: postgres } # backend — hidden from info today
+# Image pin — tag-class (drift accepted; bump deliberately). Single source
+# of truth: no fallback in compose.yaml; this block IS the default.
+env: |
+  PG_VERSION=pg18

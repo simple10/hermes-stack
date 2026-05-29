@@ -8,7 +8,14 @@ import { envGet } from '../lib/env.ts'
 import { STACK_ENV } from '../lib/paths.ts'
 import { stackProject } from '../lib/compose-env.ts'
 import { getStackHealth, summarize } from '../lib/health.ts'
-import { formatServiceLines, formatMachineLines } from '../lib/render-health.ts'
+import {
+  formatServiceLines,
+  formatMachineLines,
+  formatEndpointLines,
+  type EndpointGroup,
+} from '../lib/render-health.ts'
+import { loadService } from '../lib/services.ts'
+import { serviceEndpoints } from '../lib/endpoints.ts'
 
 export const runInfo = async (): Promise<void> => {
   const project = stackProject()
@@ -39,6 +46,30 @@ export const runInfo = async (): Promise<void> => {
   )
 
   p.log.message([pc.bold('VMs'), ...formatMachineLines(h.machines).map((l) => '  ' + l)].join('\n'))
+
+  // Endpoints — orb-DNS URLs from each enabled service's `provides:` map.
+  // Backends (pg/redis/rabbitmq) are skipped; dim = the backing container/VM
+  // isn't running right now.
+  const enabledDirs = [...new Set([...profiles, ...machines])]
+  const epGroups: EndpointGroup[] = []
+  for (const svc of enabledDirs) {
+    const d = loadService(svc)
+    if (!d || d.kind === 'backend') continue
+    const eps = serviceEndpoints(svc)
+    if (eps.length === 0) continue
+    const rows = eps.map((ep) => ({
+      ep,
+      up: ep.isVm
+        ? h.machines.some((m) => m.service === ep.service && m.run === 'running')
+        : h.services.some((s) => s.service === ep.dnsName && s.run === 'running'),
+    }))
+    epGroups.push({ service: svc, rows })
+  }
+  if (epGroups.length) {
+    p.log.message(
+      [pc.bold('Endpoints'), ...formatEndpointLines(epGroups).map((l) => '  ' + l)].join('\n'),
+    )
+  }
 
   const allUp =
     s.upServices === s.totalServices && s.runningMachines === s.totalMachines && s.totalServices > 0

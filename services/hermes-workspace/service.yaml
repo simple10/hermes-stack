@@ -1,0 +1,33 @@
+# hermes-workspace — Hermes Workspace web UI (ghcr.io/outsourc-e/hermes-workspace).
+# Connects to the existing Hermes Agent gateway on the project's hermes VM
+# (services/hermes — STACK_MACHINES). requires: [hermes] pulls hermes in
+# automatically on `stack-cli enable`.
+#
+# Reachability prerequisite: the hermes gateway defaults to loopback inside
+# the VM. This service refuses to build (build.ts) until the user opens the
+# gate by setting HERMES_GATEWAY_ALLOW_ACCESS=true in .stack/.env. See
+# services/hermes/service.yaml for the security trade-off.
+runner: docker
+desc: "Hermes Workspace web UI (connects to existing Hermes VM)"
+requires: [hermes]
+provides:
+  # OrbStack auto-HTTPS fronts the workspace (listens :3000) at the bare
+  # domain — proto: https drops the port from the rendered URL.
+  ui: { port: 3000, proto: https }
+# Single digest-class image owned by this service. Bump via
+# HERMES_WORKSPACE_VERSION in .stack/.env.
+#
+# Provenance:
+#   Resolved 2026-05-21 from :latest (upstream ships no semver; digest is
+#   the only stable pin). Bump deliberately: re-resolve + update in one commit.
+images:
+  HERMES_WORKSPACE:
+    repo: ghcr.io/outsourc-e/hermes-workspace
+    default: sha256:2d2ba9aa5b1230766267322817e8e51113541780a5797802a582a47cc34a3df3
+env: |
+  HERMES_WORKSPACE_PASSWORD=
+  # OrbStack auto-HTTPS fronts the workspace at
+  # https://hermes-workspace.<project>.orb.local — set Secure on session
+  # cookies + trust the proxy headers orb injects.
+  HERMES_WORKSPACE_COOKIE_SECURE=true
+  HERMES_WORKSPACE_TRUST_PROXY=true

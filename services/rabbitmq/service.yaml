@@ -1,0 +1,9 @@
+# rabbitmq substrate: single-service profile (was gated by [firecrawl]).
+runner: docker
+kind: backend
+desc: "rabbitmq substrate (consumers: firecrawl nuq queue)"
+provides:
+  amqp: { port: 5672, proto: amqp } # backend — hidden from info today
+  mgmt: { port: 15672 } # management UI (guest/guest, loopback by default)
+env: |
+  RABBITMQ_VERSION=4.3.0-management

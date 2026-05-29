@@ -2,7 +2,7 @@
 
 The [Hermes agent](https://hermes-agent.nousresearch.com/) running as an
 OrbStack Ubuntu VM (NOT a Docker container — `SERVICE_RUNNER=vm` in
-`service.env`). The only VM-runner service in the stack; everything else is
+`service.yaml`). The only VM-runner service in the stack; everything else is
 Dockerized and Hermes reaches them via orb DNS.
 
 Enable: `just enable hermes` (cascades `litellm` + `pg` + `redis`; the rest

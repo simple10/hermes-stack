@@ -1,0 +1,22 @@
+# honcho-api: depends_on pg, redis, AND litellm (cross-profile).
+runner: docker
+desc: "Agentic memory backend (pgvector + LLM-distilled facts)"
+litellmKey: true
+requires: [pg, redis, litellm]
+provides:
+  api: { port: 8000, service: honcho-api } # health GET /health
+# Source-class (built from pinned _source). Bump via HONCHO_VERSION in
+# .stack/.env (tag or commit SHA). Tracked default MUST stay annotated.
+# v3.0.6-51-g8fcbb54 (main, 2026-05-14)
+source:
+  repo: https://github.com/plastic-labs/honcho
+  default: 8fcbb54a49292341dba79d606ee332c50778429b
+env: |
+  # Honcho LLM model levers (per-stage; FAST tier for deriver/summary/dream,
+  # main tier for dialectic). Edit a value to override that stage; bump the
+  # whole stack at once via STACK_LLM_MODEL[_FAST] in the litellm block.
+  HONCHO_DERIVER_MODEL=${STACK_LLM_MODEL_FAST}
+  HONCHO_SUMMARY_MODEL=${STACK_LLM_MODEL_FAST}
+  HONCHO_DREAM_MODEL=${STACK_LLM_MODEL_FAST}
+  HONCHO_DIALECTIC_MODEL=${STACK_LLM_MODEL}
+  HONCHO_EMBEDDING_MODEL=${STACK_LLM_EMBEDDING_MODEL}

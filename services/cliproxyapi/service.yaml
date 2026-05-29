@@ -1,0 +1,17 @@
+# cliproxyapi: standalone OAuth-subscription proxy (ChatGPT Codex / Gemini
+# / Claude / Grok). NOT a LiteLLM consumer — its a sibling api_base that
+# LiteLLMs cliproxy/* model_list entries point at.
+runner: docker
+desc: "OAuth-subscription proxy (ChatGPT/Gemini/Claude/Grok via cliproxy/*)"
+provides:
+  api: { port: 8317 }
+  dashboard: { port: 8317, path: /management.html } # admin SPA (CLIPROXY_MANAGEMENT_KEY)
+env: |
+  # Client key (LiteLLM cliproxy/* model_list entries authenticate with this).
+  # Management key gates the management/OAuth-login web panel. Both
+  # gen-once via `stack-cli setup`; rotating either requires a container
+  # restart and (for CLIPROXY_API_KEY) re-rendering litellms config.runtime.yaml.
+  CLIPROXY_API_KEY=
+  CLIPROXY_MANAGEMENT_KEY=
+  # Pinned image tag — bump deliberately.
+  CLIPROXY_VERSION=v7.1.11

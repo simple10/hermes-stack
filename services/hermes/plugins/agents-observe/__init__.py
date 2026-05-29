@@ -162,7 +162,7 @@ def _redact_large_images(payload: Dict[str, Any], cap: int = 4000) -> None:
 # -- envelope -------------------------------------------------------------
 
 
-def _build_envelope(ts: float, hook_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def _build_envelope(ts: int, hook_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     sanitized = _sanitize(kwargs)
     if isinstance(sanitized, dict):
         _redact_large_images(sanitized)
@@ -184,7 +184,7 @@ def _build_envelope(ts: float, hook_name: str, kwargs: Dict[str, Any]) -> Dict[s
         "agentId": session_id,
         "hookName": hook_name,
         "cwd": cwd,
-        "timestamp": ts,
+        "timestamp": ts,  # epoch milliseconds (int)
         "payload": sanitized,
     }
     if _PROJECT_SLUG:
@@ -271,7 +271,12 @@ def _make_observer(hook_name: str):
         try:
             # Shallow copy so a later mutation of kwargs (Hermes reuses dicts
             # in places) can't change what we eventually serialize.
-            _QUEUE.put_nowait((time.time(), hook_name, dict(kwargs)))  # type: ignore[union-attr]
+            #
+            # Timestamp as integer epoch MILLISECONDS. time.time() returns float
+            # epoch SECONDS (e.g. 2142342342.2342); the envelope contract is ms,
+            # so convert here at the single capture point.
+            ts_ms = int(time.time() * 1000)
+            _QUEUE.put_nowait((ts_ms, hook_name, dict(kwargs)))  # type: ignore[union-attr]
         except queue.Full:
             _DROPPED += 1
             if _DEBUG and _DROPPED % 100 == 1:

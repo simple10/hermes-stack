@@ -139,3 +139,12 @@ export const startService = async (svc: string): Promise<void> => {
   if (r.code !== 0) die(`startService(${svc}): dc up -d failed`)
   await runPhase(svc, 'poststart')
 }
+
+// Restart one service. stopService removes the container, so startService
+// creates a FRESH one — which re-reads .stack/.env. This is how an env-var
+// change (e.g. LOCALHOST_PROXY_PORTS) actually gets picked up: a plain docker
+// restart re-runs the entrypoint but keeps the env baked in at create time.
+export const restartService = async (svc: string): Promise<void> => {
+  await stopService(svc)
+  await startService(svc)
+}

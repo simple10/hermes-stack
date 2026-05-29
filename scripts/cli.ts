@@ -33,8 +33,21 @@ import { runHermes } from './commands/hermes.ts'
 import { runReconfigure } from './commands/reconfigure.ts'
 import { runStartCleanup } from './commands/start-cleanup.ts'
 import { runChromeCdp, runChromeCdpStop } from './commands/chrome-cdp.ts'
+import { startService, stopService, restartService } from './lib/lifecycle.ts'
 
 type Handler = (args: readonly string[]) => Promise<void>
+
+// start/stop/restart take an optional service list. With no args they act on
+// the whole stack (whole); with args, on each named service individually.
+const perSvc =
+  (verb: string, one: (svc: string) => Promise<void>, whole: () => Promise<void>): Handler =>
+  async (args) => {
+    if (args.length === 0) return whole()
+    for (const svc of args) {
+      console.log(pc.cyan(`→ ${verb} ${svc}`))
+      await one(svc)
+    }
+  }
 
 const COMMANDS: Record<string, Handler> = {
   setup: async () => runSetup(),
@@ -43,11 +56,11 @@ const COMMANDS: Record<string, Handler> = {
   enabled: async () => runEnabled(),
   info: async () => runInfo(),
   build: async () => runBuild(),
-  start: async () => runStart(),
-  up: async () => runStart(),
-  stop: async () => runStop(),
-  down: async () => runStop(),
-  restart: async () => runRestart(),
+  start: perSvc('start', startService, runStart),
+  up: perSvc('start', startService, runStart),
+  stop: perSvc('stop', stopService, runStop),
+  down: perSvc('stop', stopService, runStop),
+  restart: perSvc('restart', restartService, runRestart),
   logs: runLogs,
   ssh: runSsh,
   hermes: runHermes,
@@ -92,9 +105,9 @@ const HELP_SECTIONS: ReadonlyArray<Section> = [
     title: 'Lifecycle',
     rows: [
       ['build', '', 'resolve image digests + per-service build.ts'],
-      ['start', '(up)', 'backends → preflight → prestart → up → poststart → VMs'],
-      ['stop', '(down)', 'VMs + dc down --remove-orphans'],
-      ['restart', '', 'stop + start'],
+      ['start', '[svc]... (up)', 'whole stack, or just the named service(s)'],
+      ['stop', '[svc]... (down)', 'whole stack, or stop+remove the named service(s)'],
+      ['restart', '[svc]...', 'stop+start; per-svc recreates (re-reads .stack/.env)'],
       ['start-cleanup', '', 'remove exited provisioner containers'],
     ],
   },

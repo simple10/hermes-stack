@@ -62,7 +62,7 @@ _HOOKS: tuple[str, ...] = (
 
 # Process-wide singleton state. `register()` is called once per plugin load;
 # the worker thread is started exactly once and lives for the process.
-_QUEUE: "queue.Queue[tuple[float, str, Dict[str, Any]]] | None" = None
+_QUEUE: "queue.Queue[tuple[int, str, Dict[str, Any]]] | None" = None
 _BASE_URL: str = ""
 _PROJECT_SLUG: str = ""
 _TIMEOUT_S: float = 2.0

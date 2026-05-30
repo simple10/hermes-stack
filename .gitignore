@@ -1,3 +1,5 @@
+.DS_Store
+
 # --- runtime secrets / generated / build (NEVER committed) ---
 # ALL stack state (generated envs, rendered runtime configs, config hashes,
 # the ChatGPT token) lives under .stack/<svc>/ — gitignored wholesale here.

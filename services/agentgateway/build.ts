@@ -23,14 +23,32 @@ import { die, log } from '../../scripts/lib/log.ts'
 //     DROP if unset, so this must be set.
 //   - clientSampling: requests carrying an inbound traceparent — defaults to
 //     true, but we set it explicitly so "log everything" is self-documenting.
+// The `attributes` map emits OpenInference semantic-convention span attributes
+// so Phoenix renders full LLM traces (prompts + completions), not just metadata.
+// Mirrors agentgateway's own examples/telemetry/tracing/phoenix.yaml, translated
+// to the frontendPolicies form (attributes: vs the deprecated fields.add:).
+// llm.prompt (chat messages) + llm.completion are only buffered because these
+// CEL exprs reference them. flattenRecursive expands them into the indexed
+// OpenInference keys (llm.input_messages.N.message.{role,content}).
 const PHOENIX_TRACING = `# Auto-injected by build.ts because the 'phoenix' service is enabled:
-# export OTLP traces (gen_ai spans) to Arize Phoenix's collector at 100%.
-# Disabling phoenix + re-running 'stack-cli build' removes this block (hot-reloaded).
+# export OTLP traces to Arize Phoenix at 100%, with OpenInference attributes so
+# prompts/completions show in the Phoenix UI. Disabling phoenix + re-running
+# 'stack-cli build' removes this block (hot-reloaded; no restart).
 frontendPolicies:
   tracing:
     host: phoenix:4317
     randomSampling: true   # Bool(true) => always sample (100%), not a rate
     clientSampling: true   # also sample requests with an inbound traceparent
+    attributes:
+      span.name: '"openai.chat"'
+      openinference.span.kind: '"LLM"'
+      llm.system: 'llm.provider'
+      llm.model_name: 'llm.responseModel'
+      llm.input_messages: 'flattenRecursive(llm.prompt.map(c, {"message": c}))'
+      llm.output_messages: 'flattenRecursive(llm.completion.map(c, {"role": "assistant", "content": c}))'
+      llm.token_count.prompt: 'llm.inputTokens'
+      llm.token_count.completion: 'llm.outputTokens'
+      llm.token_count.total: 'llm.totalTokens'
 
 `
 

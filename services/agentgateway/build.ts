@@ -15,15 +15,22 @@ import { substituteTemplate } from '../../scripts/lib/stack-env.ts'
 import { stackProfiles } from '../../scripts/lib/compose-env.ts'
 import { die, log } from '../../scripts/lib/log.ts'
 
-// frontendPolicies.tracing -> Phoenix OTLP gRPC collector. Matches the form in
-// agentgateway's telemetry example (host + randomSampling; gRPC default on 4317).
+// frontendPolicies.tracing -> Phoenix OTLP gRPC collector (gRPC default on 4317).
+// Sampling is a CEL expression (eval_rng): a literal `true` => Bool(true) =>
+// ALWAYS sample (100%), NOT a probability (only a float/int is treated as a
+// rate). We set BOTH knobs to `true` so 100% of traces reach Phoenix:
+//   - randomSampling: root requests (no inbound traceparent) — defaults to
+//     DROP if unset, so this must be set.
+//   - clientSampling: requests carrying an inbound traceparent — defaults to
+//     true, but we set it explicitly so "log everything" is self-documenting.
 const PHOENIX_TRACING = `# Auto-injected by build.ts because the 'phoenix' service is enabled:
-# export OTLP traces (gen_ai spans) to Arize Phoenix's collector. Disabling
-# phoenix + re-running 'stack-cli build' removes this block (hot-reloaded).
+# export OTLP traces (gen_ai spans) to Arize Phoenix's collector at 100%.
+# Disabling phoenix + re-running 'stack-cli build' removes this block (hot-reloaded).
 frontendPolicies:
   tracing:
     host: phoenix:4317
-    randomSampling: true
+    randomSampling: true   # Bool(true) => always sample (100%), not a rate
+    clientSampling: true   # also sample requests with an inbound traceparent
 
 `
 

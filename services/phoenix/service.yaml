@@ -1,0 +1,24 @@
+# phoenix — Arize Phoenix, an open-source LLM/OTEL trace-observability platform
+# with a real UI. Stood up as the observability BACKEND for agentgateway: when
+# phoenix is enabled, agentgateway/build.ts auto-injects a frontendPolicies.tracing
+# block pointing at phoenix:4317 (OTLP gRPC), so gen_ai spans land in Phoenix's UI.
+#
+# Reuses the shared `pg` substrate (own `phoenix` role + db, provisioned like
+# litellm) instead of a dedicated postgres. Phoenix runs its own migrations on
+# that db at startup. Published image (no source build).
+runner: docker
+desc: "Arize Phoenix — LLM/OTEL trace observability UI (agentgateway tracing backend)"
+requires: [pg]
+provides:
+  # Phoenix UI (traces, projects, evals). OTLP gRPC collector is on :4317 but
+  # is an internal ingest endpoint (sibling services only), not a browse URL.
+  dashboard: { port: 6006 }
+images:
+  PHOENIX:
+    repo: arizephoenix/phoenix
+    default: version-16.3.0
+env: |
+  # Image tag knob — resolved to a pinned digest at `stack-cli build`.
+  PHOENIX_VERSION=version-16.3.0
+  # phoenix role password on the shared pg — gen-once + decentralised
+  # (build.ts -> .stack/phoenix/.generated.env). `stack-cli info` reveals it.

@@ -1,0 +1,53 @@
+# phoenix. profile [phoenix]. Project-scoped (no container_name / no shared
+# network). Reuses the shared `pg` (own phoenix role+db, provisioned one-shot).
+# UI :6006, OTLP gRPC collector :4317 — both orb-DNS / sibling-network only
+# (not host-published). agentgateway reaches the collector at phoenix:4317.
+# Image digest-PINNED (resolved at build time -> PHOENIX_IMAGE).
+
+services:
+  phoenix:
+    image: "${PHOENIX_IMAGE:?run 'stack-cli build' to resolve PHOENIX_VERSION}"
+    profiles: [phoenix]
+    restart: unless-stopped
+    environment:
+      # Reuse the shared pg substrate; Phoenix runs its own migrations here.
+      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:${PHOENIX_DB_PASSWORD}@pg:5432/phoenix
+    expose:
+      - "6006"
+      - "4317"
+    depends_on:
+      phoenix-provision: { condition: service_completed_successfully }
+    healthcheck:
+      # Phoenix exposes /healthz; the image is a Python app so use urllib.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:6006/healthz',timeout=3).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      start_period: 30s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # One-shot: create the phoenix role + db on the shared pg (mirrors
+  # litellm-provision). sh -c so the container expands $SVC_DB_PASSWORD.
+  phoenix-provision:
+    image: "pgvector/pgvector:${PG_VERSION}"
+    profiles: [phoenix]
+    restart: "no"
+    labels:
+      com.stack.role: provisioner
+    environment:
+      PGPASSWORD: ${POSTGRES_SUPERPASS}
+      SVC_DB_PASSWORD: ${PHOENIX_DB_PASSWORD}
+    depends_on:
+      pg: { condition: service_healthy }
+    volumes:
+      - ./provision.sql:/provision.sql:ro
+    tmpfs:
+      - /var/lib/postgresql
+    command:
+      - sh
+      - -c
+      - 'for i in $$(seq 1 30); do psql -v ON_ERROR_STOP=1 -h pg -U postgres -d postgres -v pw="$$SVC_DB_PASSWORD" -f /provision.sql && exit 0; echo "pg not ready (attempt $$i/30), retrying"; sleep 2; done; echo "provision: pg unreachable after retries"; exit 1'

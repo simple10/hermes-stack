@@ -45,7 +45,11 @@ frontendPolicies:
       llm.system: 'llm.provider'
       llm.model_name: 'llm.responseModel'
       llm.input_messages: 'flattenRecursive(llm.prompt.map(c, {"message": c}))'
-      llm.output_messages: 'flattenRecursive(llm.completion.map(c, {"role": "assistant", "content": c}))'
+      # NB: wrap output in {"message": ...} too — Phoenix reads
+      # llm.output_messages.N.message.{role,content}. The upstream phoenix.yaml
+      # example omits this wrapper (asymmetric with input), which is why the
+      # output didn't render. flattenRecursive then yields the .message. keys.
+      llm.output_messages: 'flattenRecursive(llm.completion.map(c, {"message": {"role": "assistant", "content": c}}))'
       llm.token_count.prompt: 'llm.inputTokens'
       llm.token_count.completion: 'llm.outputTokens'
       llm.token_count.total: 'llm.totalTokens'

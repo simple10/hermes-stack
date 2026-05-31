@@ -1,0 +1,29 @@
+# agentgateway — Rust LLM/MCP/A2A proxy. STANDALONE evaluation service: a
+# candidate, more memory-efficient replacement for litellm (single static
+# binary vs litellm's Python+gunicorn). NOT yet wired into anything — brought
+# up on its own profile to poke the UI + run tests. Touches no core config.
+#
+# Like cliproxyapi it's standalone: no pg/redis/litellm deps, no virtual key.
+# Its `llm:` block (litellm's model_list analogue) points at the already-
+# running cliproxyapi:8317 via each model's openAI baseUrl — the SAME trick
+# litellm's cliproxy/* entries use — so the custom-model path is exercised too.
+runner: docker
+desc: "Rust LLM/MCP/A2A gateway (litellm-replacement eval; UI + OpenAI API)"
+provides:
+  # Built-in admin/config UI. Binds localhost:15000 by default in-container, so
+  # compose sets ADMIN_ADDR=0.0.0.0:15000 to expose it on orb DNS.
+  dashboard:
+    port: 15000
+    path: /ui
+  # OpenAI-compatible data plane (llm.port in config.runtime.yaml). /v1 is the
+  # base an external client points at — same shape as litellm's api endpoint.
+  api: { port: 4000, path: /v1 }
+# Digest-class image (resolved by resolveAllImages at `stack-cli build`).
+# Bump tag/digest via AGENTGATEWAY_VERSION in .stack/.env.
+images:
+  AGENTGATEWAY:
+    repo: ghcr.io/agentgateway/agentgateway
+    default: v1.3.0-alpha.1
+env: |
+  # Image tag/digest knob — resolved to a pinned digest at build time.
+  AGENTGATEWAY_VERSION=v1.3.0-alpha.1

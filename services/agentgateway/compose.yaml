@@ -1,0 +1,42 @@
+# agentgateway — profile [agentgateway]. Project-scoped (no container_name /
+# no shared net). STANDALONE eval — an ALTERNATIVE LLM gateway, NOT a litellm
+# consumer (no pg/redis/litellm deps, no virtual key). Reaches cliproxyapi by
+# sibling service name on the Compose default network.
+#
+# Image PINNED by digest (gotcha #6) — resolved at build time from
+# services/agentgateway/.generated.env -> AGENTGATEWAY_IMAGE; bump via
+# .stack/.env AGENTGATEWAY_VERSION (tag or sha256 digest). Config is FILE-based
+# -> rendered by build.ts into the gitignored config.runtime.yaml with the
+# cliproxy key injected. API on :4000 (llm.port), admin UI on :15000;
+# reachable at agentgateway.<project>.orb.local (not host-published).
+
+services:
+  agentgateway:
+    image: "${AGENTGATEWAY_IMAGE:?run 'stack-cli build' to resolve AGENTGATEWAY_VERSION}"
+    profiles: [agentgateway]
+    restart: unless-stopped
+    # Default subcommand is `run`; -f loads the local config file.
+    command: ["-f", "/etc/agentgateway/config.yaml"]
+    environment:
+      # Admin UI binds localhost:15000 in-container by default — rebind to the
+      # wildcard so it's reachable over OrbStack DNS. Stats (15020) + readiness
+      # (15021) already bind wildcard.
+      ADMIN_ADDR: 0.0.0.0:15000
+    # No host ports — orb-DNS only (stack convention). UI at
+    # agentgateway.<project>.orb.local:15000, OpenAI API at :4000/v1.
+    expose:
+      - "4000"
+      - "15000"
+    volumes:
+      # rw so the UI's "save config" writes back. NOTE: `stack-cli build`
+      # re-renders this file from the template, overwriting UI edits.
+      - ../../.stack/agentgateway/config.runtime.yaml:/etc/agentgateway/config.yaml
+    # NB: no healthcheck — the runtime image (cgr.dev/chainguard/glibc-dynamic)
+    # is distroless: no shell, wget, or curl to probe with, and the binary has
+    # no health subcommand. Readiness is still queryable at :15021/healthz/ready
+    # for manual checks. restart: unless-stopped covers crash recovery.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

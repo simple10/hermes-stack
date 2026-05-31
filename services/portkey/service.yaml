@@ -1,0 +1,34 @@
+# portkey — Portkey AI gateway (Portkey-AI/gateway). STANDALONE evaluation
+# service: the THIRD OpenAI-compatible router being trialled side-by-side with
+# litellm and agentgateway before picking a primary. Node/Hono gateway with a
+# built-in console + logs UI at /public/ (its differentiator vs agentgateway).
+#
+# Like cliproxyapi/agentgateway it's standalone (no pg/redis/litellm deps, no
+# virtual key). Custom models (cliproxy) route via per-request headers
+# (x-portkey-provider: openai + x-portkey-custom-host: http://cliproxyapi:8317/v1
+# + Authorization: Bearer <CLIPROXY_API_KEY>) — no server-side wiring needed.
+#
+# SOURCE-class: built from pinned _source (the published image bakes conf.json
+# at compile time with NO admin_token, so its UI is unusable — we build our own
+# image with conf.json.admin_token set; see build.ts). Bump via PORTKEY_VERSION.
+runner: docker
+desc: "Portkey AI gateway (OpenAI-compatible router + console/logs UI; litellm/agentgateway eval)"
+provides:
+  # Built-in console + logs UI. Gated by the admin token (entered at login).
+  dashboard:
+    port: 8787
+    path: /public/
+    auth: { token: "${PORTKEY_ADMIN_TOKEN}" }
+  # OpenAI-compatible data plane.
+  api: { port: 8787, path: /v1 }
+# 669825c (main, 2026-05-25; == v1.15.2 line). Tracked default MUST stay annotated.
+source:
+  repo: https://github.com/Portkey-AI/gateway
+  default: 669825cbe89ee51569918b8f78a9db486fd69dd4
+env: |
+  # Source pin (commit SHA or tag). Bump to move the build.
+  PORTKEY_VERSION=669825cbe89ee51569918b8f78a9db486fd69dd4
+  # NOTE: the admin token that gates the console UI is gen-once + decentralised
+  # (build.ts -> .stack/portkey/.generated.env as PORTKEY_ADMIN_TOKEN) because
+  # it's BAKED into the locally-built image at `stack-cli build`; rotating it
+  # requires a rebuild. `stack-cli info` reveals it.

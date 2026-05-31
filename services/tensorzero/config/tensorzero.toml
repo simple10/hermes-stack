@@ -1,0 +1,33 @@
+# TensorZero config — committed source-of-truth (NO secrets). build.ts copies
+# this to .stack/tensorzero/tensorzero.toml (the mounted runtime path).
+#
+# cliproxy models: a TensorZero `openai`-type provider pointed at the running
+# cliproxyapi via api_base, with the API key sourced from the gateway's env
+# (api_key_location = env::CLIPROXY_API_KEY) — so no secret lives in this file.
+# `model_name` is the BARE name cliproxy expects (not the litellm cliproxy/*
+# alias). Call via the OpenAI-compatible endpoint with
+# model = "tensorzero::model_name::<alias>", e.g. tensorzero::model_name::cliproxy_gpt_5_4_mini.
+
+[models.cliproxy_gpt_5_5]
+routing = ["cliproxy"]
+[models.cliproxy_gpt_5_5.providers.cliproxy]
+type = "openai"
+model_name = "gpt-5.5"
+api_base = "http://cliproxyapi:8317/v1"
+api_key_location = "env::CLIPROXY_API_KEY"
+
+[models.cliproxy_gpt_5_4]
+routing = ["cliproxy"]
+[models.cliproxy_gpt_5_4.providers.cliproxy]
+type = "openai"
+model_name = "gpt-5.4"
+api_base = "http://cliproxyapi:8317/v1"
+api_key_location = "env::CLIPROXY_API_KEY"
+
+[models.cliproxy_gpt_5_4_mini]
+routing = ["cliproxy"]
+[models.cliproxy_gpt_5_4_mini.providers.cliproxy]
+type = "openai"
+model_name = "gpt-5.4-mini"
+api_base = "http://cliproxyapi:8317/v1"
+api_key_location = "env::CLIPROXY_API_KEY"

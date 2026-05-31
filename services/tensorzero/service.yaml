@@ -1,0 +1,37 @@
+# tensorzero — TensorZero (Rust LLM gateway + observability UI). STANDALONE
+# evaluation service alongside litellm / agentgateway / portkey. Unlike the
+# others it ships a REAL observability UI (Next.js) backed by its OWN datastore
+# — current TensorZero is Postgres-only (no ClickHouse needed). Brings its own
+# dedicated `tensorzero/postgres` (needs pg_cron, which the stack's pgvector
+# `pg` lacks — so NOT shared), like firecrawl's own postgres.
+#
+# Standalone: no litellm/redis deps, no virtual key. Custom models (cliproxy)
+# route via a tensorzero.toml `openai` provider with api_base -> cliproxyapi
+# + api_key_location = env::CLIPROXY_API_KEY (key passed to the gateway env).
+#
+# Digest-class images (pulled, no Rust/Next build). Bump via *_VERSION knobs.
+runner: docker
+desc: "TensorZero LLM gateway + observability UI (Postgres-backed; litellm eval)"
+provides:
+  # Observability UI (inferences, feedback, experiments). Next.js on :4000.
+  dashboard: { port: 4000, service: tensorzero-ui }
+  # OpenAI-compatible data plane. Gateway on :3000; /openai/v1 is the base.
+  api: { port: 3000, service: tensorzero-gateway, path: /openai/v1 }
+images:
+  TENSORZERO_GATEWAY:
+    repo: tensorzero/gateway
+    default: "2026.5.2"
+  TENSORZERO_UI:
+    repo: tensorzero/ui
+    default: "2026.5.2"
+  # Custom Postgres image (bundles pg_cron); pinned to major 17.
+  TENSORZERO_POSTGRES:
+    repo: tensorzero/postgres
+    default: "17"
+env: |
+  # Image tag knobs — resolved to pinned digests at `stack-cli build`.
+  TENSORZERO_GATEWAY_VERSION=2026.5.2
+  TENSORZERO_UI_VERSION=2026.5.2
+  TENSORZERO_POSTGRES_VERSION=17
+  # DB password for the dedicated tensorzero-postgres — gen-once + decentralised
+  # (build.ts -> .stack/tensorzero/.generated.env). `stack-cli info` reveals it.

@@ -1,0 +1,10 @@
+{
+  "admin_token": "__PORTKEY_ADMIN_TOKEN__",
+  "plugins_enabled": ["default", "portkey"],
+  "credentials": {
+    "portkey": {
+      "apiKey": ""
+    }
+  },
+  "cache": false
+}

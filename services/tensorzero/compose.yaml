@@ -1,0 +1,79 @@
+# tensorzero. profile [tensorzero]. Project-scoped (no container_name / no
+# shared network). STANDALONE eval — gateway + observability UI + a DEDICATED
+# Postgres (tensorzero/postgres, bundles pg_cron; the stack's pgvector `pg`
+# can't host it). Reaches cliproxyapi by sibling name on the default network.
+#
+# Images digest-PINNED (resolved at build time from .generated.env). Config is
+# a non-secret tensorzero.toml rendered by build.ts into .stack/ and mounted
+# read-only; the cliproxy API key is injected via the gateway ENV (the toml
+# references env::CLIPROXY_API_KEY), so no secret lands in the config file.
+# Gateway :3000 (/openai/v1), UI :4000; reachable at
+# tensorzero-{gateway,ui}.<project>.orb.local (not host-published).
+
+services:
+  tensorzero-postgres:
+    image: "${TENSORZERO_POSTGRES_IMAGE:?run 'stack-cli build' to resolve TENSORZERO_POSTGRES_VERSION}"
+    profiles: [tensorzero]
+    restart: unless-stopped
+    command: ["postgres", "-c", "cron.database_name=tensorzero"]
+    environment:
+      POSTGRES_DB: tensorzero
+      POSTGRES_USER: tensorzero
+      POSTGRES_PASSWORD: ${TENSORZERO_DB_PASSWORD}
+    volumes:
+      - tensorzero-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tensorzero -d tensorzero"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
+
+  # One-shot: apply Postgres migrations before the gateway boots.
+  tensorzero-migrations:
+    image: "${TENSORZERO_GATEWAY_IMAGE:?run 'stack-cli build' to resolve TENSORZERO_GATEWAY_VERSION}"
+    profiles: [tensorzero]
+    restart: "no"
+    labels:
+      com.stack.role: provisioner
+    environment:
+      TENSORZERO_POSTGRES_URL: postgres://tensorzero:${TENSORZERO_DB_PASSWORD}@tensorzero-postgres:5432/tensorzero
+    command: ["--run-postgres-migrations"]
+    depends_on:
+      tensorzero-postgres: { condition: service_healthy }
+
+  tensorzero-gateway:
+    image: "${TENSORZERO_GATEWAY_IMAGE:?run 'stack-cli build' to resolve TENSORZERO_GATEWAY_VERSION}"
+    profiles: [tensorzero]
+    restart: unless-stopped
+    command: ["--config-file", "/app/config/tensorzero.toml", "--log-format", "json"]
+    environment:
+      TENSORZERO_POSTGRES_URL: postgres://tensorzero:${TENSORZERO_DB_PASSWORD}@tensorzero-postgres:5432/tensorzero
+      # Consumed by the toml's api_key_location = env::CLIPROXY_API_KEY.
+      CLIPROXY_API_KEY: ${CLIPROXY_API_KEY}
+    volumes:
+      - ../../.stack/tensorzero/tensorzero.toml:/app/config/tensorzero.toml:ro
+    healthcheck:
+      # /status = liveness (gateway up). /health additionally checks Postgres.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/status || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
+    depends_on:
+      tensorzero-postgres: { condition: service_healthy }
+      tensorzero-migrations: { condition: service_completed_successfully }
+
+  tensorzero-ui:
+    image: "${TENSORZERO_UI_IMAGE:?run 'stack-cli build' to resolve TENSORZERO_UI_VERSION}"
+    profiles: [tensorzero]
+    restart: unless-stopped
+    environment:
+      TENSORZERO_GATEWAY_URL: http://tensorzero-gateway:3000
+      # UI reads observability straight from Postgres.
+      TENSORZERO_POSTGRES_URL: postgres://tensorzero:${TENSORZERO_DB_PASSWORD}@tensorzero-postgres:5432/tensorzero
+    depends_on:
+      tensorzero-gateway: { condition: service_healthy }
+
+volumes:
+  tensorzero-pgdata:

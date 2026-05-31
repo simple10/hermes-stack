@@ -1,0 +1,32 @@
+# portkey. profile [portkey]. Project-scoped (no container_name / no shared
+# network). STANDALONE eval — an ALTERNATIVE OpenAI-compatible router, NOT a
+# litellm consumer (no pg/redis/litellm deps, no virtual key).
+#
+# Built from ./_source with the upstream Dockerfile (Node/Hono). build.ts pins
+# the source + renders conf.json (with admin_token) INTO _source so the image
+# bakes it — that's what makes the console/logs UI usable (the published image
+# bakes a token-less conf.json). API + console on :8787; reachable at
+# portkey.<project>.orb.local:8787 (not host-published). /v1 = OpenAI API,
+# /public/ = console + logs UI (login with PORTKEY_ADMIN_TOKEN; `stack-cli info`).
+
+services:
+  portkey:
+    build: { context: ./_source, dockerfile: Dockerfile }
+    profiles: [portkey]
+    restart: unless-stopped
+    # Image CMD is `npm run start:node` (port 8787). The UI is served only when
+    # NODE_ENV is NOT production — so we deliberately leave it unset here.
+    expose:
+      - "8787"
+    healthcheck:
+      # GET / -> 200 "AI Gateway says hey!". node:alpine has busybox wget.
+      test: ["CMD-SHELL", "wget -q -O /dev/null -T3 http://127.0.0.1:8787/ 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

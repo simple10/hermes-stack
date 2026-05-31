@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+#
+# agentgateway config TEMPLATE (committed). build.ts renders this ->
+# .stack/agentgateway/config.runtime.yaml (gitignored, bind-mounted) and
+# substitutes __CLIPROXY_API_KEY__ with the value from .stack/.env.
+#
+# EXPLICIT `binds:` form (NOT the `llm:` shorthand). The admin UI is built
+# around binds[] and reads the raw config file via GET /config, so the `llm:`
+# shorthand makes the UI throw `e.binds.forEach is undefined`. This form keeps
+# the UI loadable + editable.
+#
+# Single PASSTHROUGH route to the already-running cliproxyapi:8317 — the openAI
+# provider has no `model` override, so the request's model passes straight
+# through to cliproxy (which does its own model routing). Send the BARE cliproxy
+# name as the model (e.g. "gpt-5.4-mini"), not "cliproxy/gpt-5.4-mini".
+# openAI defaults (base path /v1 + /chat/completions, /embeddings) line up with
+# cliproxy's /v1 API, so no path override is needed. http upstream -> no TLS.
+#
+# Add more backends/routes/policies live in the UI (it writes back to this
+# file); remember `stack-cli build` re-renders it from this template.
+
+binds:
+  - port: 4000
+    listeners:
+      - name: llm
+        protocol: HTTP
+        routes:
+          - backends:
+              - ai:
+                  name: cliproxy
+                  provider:
+                    openAI: {}
+                  hostOverride: cliproxyapi:8317
+                  policies:
+                    backendAuth:
+                      key: "__CLIPROXY_API_KEY__"

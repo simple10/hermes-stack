@@ -19,7 +19,9 @@ services:
       phoenix-provision: { condition: service_completed_successfully }
     healthcheck:
       # Phoenix exposes /healthz; the image is a Python app so use urllib.
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:6006/healthz',timeout=3).status==200 else 1)\""]
+      # Exec form (CMD, not CMD-SHELL): the distroless image has no /bin/sh,
+      # so a shell-wrapped probe can never run (exec: "/bin/sh": no such file).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:6006/healthz',timeout=3).status==200 else 1)"]
       interval: 15s
       timeout: 6s
       start_period: 30s

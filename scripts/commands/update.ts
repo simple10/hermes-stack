@@ -1,9 +1,9 @@
-// commands/update.ts — discover (and later apply) upstream version bumps.
+// commands/update.ts — discover and apply upstream version bumps.
 //
-// P3 surface: read-only "outdated" report. `stack-cli update` reports every
-// enabled service's current -> latest-available; `stack-cli update <svc>`
-// reports one. Apply (snapshot -> bump -> resolve -> build -> restart ->
-// health-gate) lands in P4.
+// Read-only: `stack-cli update [svc]` reports current -> latest-available.
+// Apply: `stack-cli update <svc> [--to V|--latest|--channel C|--dry-run]`
+// snapshots .stack/.env -> bumps the knob -> build (resolve) -> restart ->
+// out-of-band health-gate -> rolls back with remediation on failure.
 import pc from 'picocolors'
 import { copyFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'

@@ -226,6 +226,16 @@ Deferred (not this branch): whole-stack `--latest`, hermes-VM `update`, agentmem
 - Out-of-band probe-spec resolution (HTTP path/port defaults vs `tcp:`); probe against a local stub server.
 - Reuse the existing `scripts/test/stack.test.ts` harness (`setup()` temp `.stack/.env`).
 
+## Status (branch `feat/stack-cli-update`)
+
+- **P1 universal knobs — DONE** (`07aca63`): `serviceVersionKnobs`/`serviceEnvSchema`, owner-map registration, seeding.
+- **P2 version display — DONE** (`5f710c5`): `versions.ts`, `ServiceHealth.version`, render column.
+- **P2.5 out-of-band health — DONE**: `service.yaml health:`, `health-probe.ts`, info/start `reachable` column.
+- **P3 discovery + read-only update — DONE**: `version-sources.ts` (Docker Hub/GHCR/GitHub), `serviceTagKnobs` (plain-tag coverage), `stack-cli update [svc]`.
+- **P4 apply + channel policy — DONE**: `commands/update.ts` apply pipeline (snapshot → bump → build → restart → out-of-band gate → rollback-with-remediation), `update:` block, `<SVC_UC>_UPDATE_CHANNEL`, `--to/--latest/--channel/--dry-run`. 87 tests green.
+- **5b in-container healthcheck auto-INJECTION — DEFERRED.** The runtime safety it targets (a bump's broken probe causing a false rollback) is already handled by the out-of-band gate (P2.5+P4). The remaining piece — moving healthchecks into a build-generated compose override, `docker inspect`/`docker run` verify-runnable, and load-bearing fail-loud — is a compose-rendering refactor touching every service; left as a follow-up to land after live testing rather than rushed into the live stack. Detection/fail-loud at build can be added without the full override mechanism.
+- **P5 service.yaml cleanup — DEFERRED.** Moving digest defaults → tags and dropping redundant hand-declared `*_VERSION` env lines is behaviour-affecting (changes substrate pinning); do deliberately after testing.
+
 ## Risks
 
 - Owner-map change touches `stackGet`/`stackUpsert` for *all* keys — guard with tests; ensure no collision between an `images:` key and an existing `env:` key.

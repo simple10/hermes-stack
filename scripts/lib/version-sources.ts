@@ -140,11 +140,27 @@ const listGhcr = async (repo: string): Promise<string[]> => {
     token?: string
   } | null
   if (!tok?.token) return []
-  return parseGhcrTags(
-    await safeJson(`https://ghcr.io/v2/${name}/tags/list?n=200`, {
-      Authorization: `Bearer ${tok.token}`,
-    }),
-  )
+  const headers = { Authorization: `Bearer ${tok.token}` }
+  // tags/list returns at most `n` tags UNSORTED; follow RFC5988 `Link: rel=next`
+  // so big repos (litellm, agentgateway) surface their newest tags. Capped.
+  const all: string[] = []
+  let url: string | null = `https://ghcr.io/v2/${name}/tags/list?n=200`
+  for (let page = 0; page < 25 && url; page++) {
+    const ac = new AbortController()
+    const t = setTimeout(() => ac.abort(), 8000)
+    try {
+      const r = await fetch(url, { headers, signal: ac.signal })
+      if (!r.ok) break
+      all.push(...parseGhcrTags(await r.json()))
+      const next = r.headers.get('link')?.match(/<([^>]+)>;\s*rel="next"/)
+      url = next ? new URL(next[1], 'https://ghcr.io').toString() : null
+    } catch {
+      break
+    } finally {
+      clearTimeout(t)
+    }
+  }
+  return all
 }
 
 const ghPath = (repo: string): string =>

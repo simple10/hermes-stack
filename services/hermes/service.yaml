@@ -23,6 +23,12 @@ env: |
   # until they get recreated. systemd/* + bin/* are templated with this value
   # at install time.
   HERMES_REMOTE_USER=hermes
+  # Major version of the Hermes-managed Node installed at ~/.hermes/node by
+  # services/hermes/build.ts (ensureNode). Upstream install.sh hardcodes Node
+  # 22; the latest dashboard web/ deps need >=24, so we provision it ourselves
+  # before the hermes install. Idempotent: a rebuild upgrades an existing VM in
+  # place and is a no-op once the managed Node already satisfies this major.
+  HERMES_NODE_MAJOR=24
   HERMES_MODEL=${STACK_LLM_MODEL}
   # Memory backend (applied to the VM by services/hermes/build.ts):
   #   default     - leave Hermes own default untouched (no override)

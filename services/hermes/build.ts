@@ -180,6 +180,69 @@ const hardenVm = async (ctx: Ctx): Promise<void> => {
   }
 }
 
+// Hermes-managed Node lives at ~/.hermes/node (the single source of truth:
+// upstream install.sh adopts it verbatim with NO version check, and
+// ~/.local/bin/{node,npm,npx} + the hermes-dashboard PATH drop-in all resolve
+// through it). Upstream install.sh HARDCODES Node 22 (NODE_VERSION="22", not
+// env-overridable) and build.ts only runs the installer when hermes is absent,
+// so nothing ever moves Node past 22. The latest dashboard web/ deps need
+// >=24. We provision Node `HERMES_NODE_MAJOR` ourselves BEFORE installHermes:
+// fresh VMs then adopt it (installer skips its own download); existing VMs
+// upgrade in place. Idempotent — skips when the managed Node already satisfies
+// the target major. Replicates upstream _nb_install_bundled_node's layout so
+// the symlinks/PATH the rest of the stack expects keep working. ~/.hermes is
+// the Mac bind-mount, so the binary lands on the Mac side automatically.
+const DEFAULT_NODE_MAJOR = '24'
+
+const ensureNode = async (ctx: Ctx): Promise<void> => {
+  const major = stackGet('HERMES_NODE_MAJOR') || DEFAULT_NODE_MAJOR
+  log(`2c. ensure Hermes-managed Node >= ${major} (~/.hermes/node)`)
+  if (!/^\d+$/.test(major)) die(`HERMES_NODE_MAJOR must be a major number, got '${major}'`)
+  // NB: NO 'set -e'. orbExec runs 'bash -lc', and a lingering '-e' poisons the
+  // login shell's exit status via ~/.bash_logout (returns 1 even after a clean
+  // run) — which would make this step throw on every successful build. Each
+  // fallible step is guarded explicitly and the script ends with an explicit
+  // exit code instead.
+  const script = `MAJOR='${major}'
+HH="$HOME/.hermes"
+cur=0
+if [ -x "$HH/node/bin/node" ]; then
+  cur=$("$HH/node/bin/node" --version 2>/dev/null | sed 's/^v//; s/[.].*//')
+fi
+case "$cur" in ''|*[!0-9]*) cur=0 ;; esac
+if [ "$cur" -ge "$MAJOR" ]; then
+  echo "hermes node: managed Node v$cur already >= $MAJOR — skip"
+  exit 0
+fi
+arch=$(uname -m)
+case "$arch" in
+  x86_64) na=x64 ;;
+  aarch64|arm64) na=arm64 ;;
+  armv7l) na=armv7l ;;
+  *) echo "hermes node: unsupported arch $arch" >&2; exit 1 ;;
+esac
+idx="https://nodejs.org/dist/latest-v\${MAJOR}.x/"
+tb=$(curl -fsSL "$idx" | grep -oE "node-v\${MAJOR}[.][0-9]+[.][0-9]+-linux-\${na}[.]tar[.]xz" | head -1)
+[ -n "$tb" ] || { echo "hermes node: cannot resolve Node v$MAJOR for linux-$na" >&2; exit 1; }
+tmp=$(mktemp -d) || { echo "hermes node: mktemp failed" >&2; exit 1; }
+echo "hermes node: downloading $tb"
+curl -fsSL "\${idx}\${tb}" -o "$tmp/$tb" || { echo "hermes node: download failed" >&2; rm -rf "$tmp"; exit 1; }
+tar xf "$tmp/$tb" -C "$tmp" || { echo "hermes node: extract failed" >&2; rm -rf "$tmp"; exit 1; }
+ex=$(find "$tmp" -maxdepth 1 -type d -name 'node-v*' | head -1)
+[ -d "$ex" ] || { echo "hermes node: no node-v* dir after extract" >&2; rm -rf "$tmp"; exit 1; }
+mkdir -p "$HH"
+rm -rf "$HH/node"
+mv "$ex" "$HH/node" || { echo "hermes node: install move failed" >&2; rm -rf "$tmp"; exit 1; }
+rm -rf "$tmp"
+mkdir -p "$HOME/.local/bin"
+ln -sf "$HH/node/bin/node" "$HOME/.local/bin/node"
+ln -sf "$HH/node/bin/npm"  "$HOME/.local/bin/npm"
+ln -sf "$HH/node/bin/npx"  "$HOME/.local/bin/npx"
+echo "hermes node: installed $("$HH/node/bin/node" --version) at $HH/node"
+exit 0`
+  await orbExec(ctx.vm, script, { stdio: 'inherit' })
+}
+
 const installHermes = async (ctx: Ctx): Promise<void> => {
   log('3. install Hermes (HERMES_INSTALL_DIR=/opt/hermes-agent)')
   // The installer's git clone runs as the invoking user (not root). It
@@ -437,6 +500,7 @@ export default async function build(): Promise<void> {
   await ensureOrbMachine(ctx)
   await installSystemPackages(ctx)
   await hardenVm(ctx)
+  await ensureNode(ctx)
   await installHermes(ctx)
 
   // Accumulate the managed-block content across the conditional sections.

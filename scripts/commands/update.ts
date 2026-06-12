@@ -17,6 +17,7 @@ import { stackProfiles, stackMachines } from '../lib/compose-env.ts'
 import { STACK_ENV, STACK_ROOT } from '../lib/paths.ts'
 import { healthProbeSpec, probeOnce } from '../lib/health-probe.ts'
 import { getStackHealth } from '../lib/health.ts'
+import { loadBearingServices } from '../lib/load-bearing.ts'
 import { restartService } from '../lib/lifecycle.ts'
 import { runBuild } from './build.ts'
 
@@ -164,6 +165,29 @@ const healthGate = async (svc: string, tries = 12, delayMs = 2500): Promise<bool
   return false
 }
 
+// After a bump, if a LOAD-BEARING service is out-of-band reachable but Docker
+// reports its container unhealthy, the new image likely broke the in-container
+// healthcheck — which gates `service_healthy` dependents. Warn loudly (5b: the
+// auto-injecting fix that swaps in a /proc probe is a follow-up).
+const warnIfLoadBearingProbeBroken = async (svc: string): Promise<void> => {
+  if (!loadBearingServices().has(svc)) return
+  const s = (await getStackHealth()).services.find((x) => x.service === svc)
+  if (!s || s.health !== 'unhealthy') return
+  console.error(
+    pc.yellow(`\n⚠ ${svc} is reachable, but Docker reports the container UNHEALTHY.`) +
+      pc.yellow(
+        `\n  ${svc} is load-bearing — services that gate on it (condition: service_healthy)`,
+      ) +
+      pc.yellow(
+        `\n  may HANG at the next start. The new image likely broke its in-container probe.`,
+      ) +
+      pc.dim(
+        `\n  Fix the healthcheck in services/${svc}/compose.yaml (a /proc-based probe needs no` +
+          `\n  image tooling — see services/cliproxyapi), or revert: stack-cli update ${svc} --to <prev>.`,
+      ),
+  )
+}
+
 const snapshot = (svc: string): string => {
   const dir = resolve(STACK_ROOT, '_bak')
   mkdirSync(dir, { recursive: true })
@@ -220,6 +244,7 @@ export const applyUpdate = async (svc: string, opts: ApplyOpts): Promise<void> =
 
   console.log(pc.bold(`health-gating ${svc} (out-of-band)…`))
   if (await healthGate(svc)) {
+    await warnIfLoadBearingProbeBroken(svc)
     console.log(pc.green(`\n✓ ${svc} updated and healthy`))
     return
   }

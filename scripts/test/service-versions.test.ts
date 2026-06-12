@@ -75,6 +75,31 @@ describe('serviceVersionKnobs', () => {
   })
 })
 
+describe('serviceTagKnobs (plain-tag services, repo from compose image:)', () => {
+  test('extracts knob + repo from image: repo:${X_VERSION}', async () => {
+    const { serviceTagKnobs } = await fresh()
+    expect(serviceTagKnobs('cliproxyapi')).toEqual([
+      {
+        key: 'CLIPROXY_VERSION',
+        default: '',
+        repo: 'eceasy/cli-proxy-api',
+        kind: 'image',
+        imageName: undefined,
+      },
+    ])
+  })
+
+  test('official image (no slash)', async () => {
+    const { serviceTagKnobs } = await fresh()
+    expect(serviceTagKnobs('redis')[0]).toMatchObject({ key: 'REDIS_VERSION', repo: 'redis' })
+  })
+
+  test('digest-pinned service (image: ${X_IMAGE}) yields no tag knob', async () => {
+    const { serviceTagKnobs } = await fresh()
+    expect(serviceTagKnobs('phoenix')).toEqual([])
+  })
+})
+
 describe('serviceEnvSchema seeds version knobs', () => {
   const occurrences = (body: string, key: string): number =>
     (body.match(new RegExp(`^${key}=`, 'gm')) ?? []).length

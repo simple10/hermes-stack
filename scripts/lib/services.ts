@@ -200,6 +200,38 @@ export const serviceVersionKnobs = (svc: string): VersionKnob[] => {
   return out
 }
 
+// Plain-tag services pin their version in the compose `image: repo:${X_VERSION}`
+// line (knob in env:, no images:/source: block). serviceTagKnobs recovers the
+// repo + knob from compose so `update` can discover them too. Returns [] for
+// digest-pinned (`image: ${X_IMAGE}`) or source-built services.
+export const serviceTagKnobs = (svc: string): VersionKnob[] => {
+  const f = resolve(SERVICES_DIR, svc, 'compose.yaml')
+  if (!existsSync(f)) return []
+  let doc: { services?: Record<string, { image?: unknown }> }
+  try {
+    doc = (yamlParse(readFileSync(f, 'utf8')) ?? {}) as typeof doc
+  } catch {
+    return []
+  }
+  const out: VersionKnob[] = []
+  const seen = new Set<string>()
+  for (const s of Object.values(doc.services ?? {})) {
+    const img = s?.image
+    if (typeof img !== 'string') continue
+    // repo:${X_VERSION} or repo:${X_VERSION:-default}
+    const m = img.match(/^([^:${}]+):\$\{([A-Za-z_][A-Za-z0-9_]*_VERSION)(?::-[^}]*)?\}$/)
+    if (!m || seen.has(m[2])) continue
+    // Skip a knob owned by ANOTHER service — provisioner one-shots reference a
+    // sibling's image (e.g. *-provision uses pgvector:${PG_VERSION}); that knob
+    // belongs to pg, not this service.
+    const owner = stackEnvOwnerMap().get(m[2])
+    if (owner && owner !== svc) continue
+    seen.add(m[2])
+    out.push({ key: m[2], default: '', repo: m[1], kind: 'image', imageName: undefined })
+  }
+  return out
+}
+
 // The full .stack/.env block schema for a service: its env: body plus a seeded
 // `<KEY>=<default>` line for every version knob the maintainer did NOT already
 // hand-declare in env:. blockSync/blockAppend consume this so every versioned

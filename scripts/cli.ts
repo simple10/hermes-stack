@@ -31,7 +31,7 @@ import { runLogs } from './commands/logs.ts'
 import { runSsh } from './commands/ssh.ts'
 import { runHermes } from './commands/hermes.ts'
 import { runReconfigure } from './commands/reconfigure.ts'
-import { updateService, updateAll } from './commands/update.ts'
+import { runUpdate } from './commands/update.ts'
 import { runStartCleanup } from './commands/start-cleanup.ts'
 import { runChromeCdp, runChromeCdpStop } from './commands/chrome-cdp.ts'
 import { startService, stopService, restartService } from './lib/lifecycle.ts'
@@ -62,7 +62,7 @@ const COMMANDS: Record<string, Handler> = {
   stop: perSvc('stop', stopService, runStop),
   down: perSvc('stop', stopService, runStop),
   restart: perSvc('restart', restartService, runRestart),
-  update: perSvc('update', updateService, updateAll),
+  update: runUpdate,
   logs: runLogs,
   ssh: runSsh,
   hermes: runHermes,
@@ -110,7 +110,11 @@ const HELP_SECTIONS: ReadonlyArray<Section> = [
       ['start', '[svc]... (up)', 'whole stack, or just the named service(s)'],
       ['stop', '[svc]... (down)', 'whole stack, or stop+remove the named service(s)'],
       ['restart', '[svc]...', 'stop+start; per-svc recreates (re-reads .stack/.env)'],
-      ['update', '[svc]...', 'check upstream for newer versions (read-only)'],
+      [
+        'update',
+        '[svc] [--to V|--latest|--channel C|--dry-run]',
+        'check/apply upstream version bumps',
+      ],
       ['start-cleanup', '', 'remove exited provisioner containers'],
     ],
   },

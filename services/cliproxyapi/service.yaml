@@ -2,18 +2,25 @@
 # / Claude / Grok). NOT a LiteLLM consumer — its a sibling api_base that
 # LiteLLMs cliproxy/* model_list entries point at.
 runner: docker
-desc: "OAuth-subscription proxy (ChatGPT/Gemini/Claude/Grok via cliproxy/*)"
+desc: 'OAuth-subscription proxy (ChatGPT/Gemini/Claude/Grok via cliproxy/*)'
 provides:
   api: { port: 8317 }
   dashboard: # admin SPA — paste the management key into the panel
     port: 8317
     path: /management.html
-    auth: { key: "${CLIPROXY_MANAGEMENT_KEY}" }
+    auth: { key: '${CLIPROXY_MANAGEMENT_KEY}' }
 # Out-of-band health probe (stack-authoritative; image-tooling-independent).
 # /healthz is the dedicated unauthenticated route -> 200 {"status":"ok"}.
 health:
   path: /healthz
   port: 8317
+# Update policy (declarative). Active channel override lives in .stack/.env as
+# CLIPROXYAPI_UPDATE_CHANNEL; absent => `default`.
+update:
+  channels:
+    stable: '^v\d+\.\d+\.\d+$'
+  default: stable
+  sort: semver
 env: |
   # Client key (LiteLLM cliproxy/* model_list entries authenticate with this).
   # Management key gates the management/OAuth-login web panel. Both

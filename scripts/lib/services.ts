@@ -140,16 +140,79 @@ export const listServices = (): ServiceDescriptor[] => {
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-// Map of every KEY -> owning service, by parsing each service's env block.
-// Cached after first call.
+const svcUc = (svc: string): string => svc.toUpperCase().replace(/-/g, '_')
+
+export interface VersionKnob {
+  key: string // the *_VERSION env knob (e.g. PHOENIX_VERSION, FIRECRAWL_API_VERSION)
+  default: string // images.default or source.default
+  repo: string // upstream repo for discovery
+  kind: 'image' | 'source'
+  imageName?: string // the images: map key (image kind only)
+}
+
+// The version knob(s) a service exposes, derived from its images:/source:
+// blocks. Single source of truth for seeding, display, and update. The knob
+// name mirrors the build resolvers: images use `<NAME>_VERSION` (images.ts),
+// source uses `<SVC_UC>_VERSION` (source.ts).
+export const serviceVersionKnobs = (svc: string): VersionKnob[] => {
+  const d = loadService(svc)
+  if (!d) return []
+  const out: VersionKnob[] = []
+  for (const [name, im] of Object.entries(d.images)) {
+    out.push({
+      key: `${name}_VERSION`,
+      default: im.default,
+      repo: im.repo,
+      kind: 'image',
+      imageName: name,
+    })
+  }
+  if (d.source) {
+    out.push({
+      key: `${svcUc(svc)}_VERSION`,
+      default: d.source.default,
+      repo: d.source.repo,
+      kind: 'source',
+    })
+  }
+  return out
+}
+
+// The full .stack/.env block schema for a service: its env: body plus a seeded
+// `<KEY>=<default>` line for every version knob the maintainer did NOT already
+// hand-declare in env:. blockSync/blockAppend consume this so every versioned
+// service surfaces an editable knob; additive semantics make it idempotent.
+export const serviceEnvSchema = (svc: string): string => {
+  const d = loadService(svc)
+  if (!d) return ''
+  const knobs = serviceVersionKnobs(svc)
+  if (knobs.length === 0) return d.env
+  const present = new Set(Object.keys(parseEnvBody(d.env)))
+  const missing = knobs.filter((k) => !present.has(k.key))
+  if (missing.length === 0) return d.env
+  const base = d.env.replace(/\n*$/, '')
+  const seeded = [
+    '# image/source version knob — bump then `stack-cli build && stack-cli restart`',
+    ...missing.map((k) => `${k.key}=${k.default}`),
+  ].join('\n')
+  return (base ? base + '\n' : '') + seeded + '\n'
+}
+
+// Map of every KEY -> owning service: each service's env: block keys PLUS its
+// derived version knobs (so digest-pinned services whose knob is not hand-
+// declared in env: still resolve as block-owned). Cached after first call.
 let _ownerCache: Map<string, string> | null = null
 export const stackEnvOwnerMap = (): Map<string, string> => {
   if (_ownerCache) return _ownerCache
   const out = new Map<string, string>()
   for (const svc of listServices()) {
-    if (!svc.env) continue
-    const parsed = parseEnvBody(svc.env)
-    for (const k of Object.keys(parsed)) out.set(k, svc.name)
+    if (svc.env) {
+      const parsed = parseEnvBody(svc.env)
+      for (const k of Object.keys(parsed)) out.set(k, svc.name)
+    }
+    for (const knob of serviceVersionKnobs(svc.name)) {
+      if (!out.has(knob.key)) out.set(knob.key, svc.name)
+    }
   }
   _ownerCache = out
   return out

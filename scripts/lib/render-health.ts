@@ -63,8 +63,9 @@ export const formatServiceLines = (services: ServiceHealth[]): string[] => {
     const icon = stateIcon(s.run, s.health)
     const name = pad(s.service, w)
     const badge = stateBadge(s.run, s.health)
+    const ver = s.version ? pc.cyan(`  ${s.version}`) : ''
     const extra = s.containerName ? pc.dim(`  ${s.containerName}`) : ''
-    return `${icon}  ${name}  ${badge}${extra}`
+    return `${icon}  ${name}  ${badge}${ver}${extra}`
   })
 }
 

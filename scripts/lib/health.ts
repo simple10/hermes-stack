@@ -13,6 +13,20 @@
 // resolved through stackVmName().
 import { $ } from 'zx'
 import { stackProject, stackMachines, stackVmName, stackProfiles } from './compose-env.ts'
+import { serviceVersionKnobs } from './services.ts'
+import { generatedGet } from './generated.ts'
+import { humanVersion, requestedKey } from './versions.ts'
+
+// Human-readable running version for a compose service: the image tag if the
+// container exposes one, else the requested tag from .generated.env, else a
+// short digest. Plain-tag services (no images:/source: knob) still resolve via
+// the image ref. Returns '' when nothing is known.
+const serviceVersion = (svc: string, image: string): string => {
+  let requested = ''
+  const knobs = serviceVersionKnobs(svc)
+  if (knobs.length > 0) requested = generatedGet(svc, requestedKey(knobs[0], svc))
+  return humanVersion(image, requested)
+}
 
 export type RunState = 'running' | 'restarting' | 'paused' | 'exited' | 'created' | 'missing'
 export type HealthState = 'healthy' | 'unhealthy' | 'starting' | 'none'
@@ -25,6 +39,7 @@ export interface ServiceHealth {
   run: RunState
   health: HealthState
   enabled: boolean // is this service in the active COMPOSE_PROFILES closure?
+  version?: string // human-readable running version (tag, or short digest/sha)
 }
 
 export interface MachineHealth {
@@ -93,6 +108,7 @@ export const getStackHealth = async (): Promise<StackHealth> => {
       status,
       run,
       health,
+      version: serviceVersion(service, image),
       enabled:
         enabledServices.has(service.replace(/-(api|deriver|ui)$/, () => '')) ||
         enabledServices.has(service),
@@ -109,6 +125,7 @@ export const getStackHealth = async (): Promise<StackHealth> => {
         status: '(no container)',
         run: 'missing',
         health: 'none',
+        version: serviceVersion(svc, ''),
         enabled: true,
       })
     }

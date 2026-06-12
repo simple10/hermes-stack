@@ -22,7 +22,7 @@ images:
     repo: arizephoenix/phoenix
     default: version-16.3.0
 env: |
-  # Image tag knob — resolved to a pinned digest at `stack-cli build`.
-  PHOENIX_VERSION=version-16.3.0
+  # PHOENIX_VERSION is auto-seeded from images.PHOENIX.default (owner-map);
+  # no need to hand-declare it here.
   # phoenix role password on the shared pg — gen-once + decentralised
   # (build.ts -> .stack/phoenix/.generated.env). `stack-cli info` reveals it.

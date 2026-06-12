@@ -111,9 +111,10 @@ describe('serviceEnvSchema seeds version knobs', () => {
     expect(schema).toMatch(/^LITELLM_MASTER_KEY=/m) // original env: line preserved
   })
 
-  test('hand-declared knob is not duplicated', async () => {
+  test('image knob is seeded exactly once (no duplication)', async () => {
     const { serviceEnvSchema } = await fresh()
-    // phoenix declares PHOENIX_VERSION in its env: block today
+    // phoenix's PHOENIX_VERSION is auto-seeded from images.default (not hand-
+    // declared in env:); it must appear exactly once.
     expect(occurrences(serviceEnvSchema('phoenix'), 'PHOENIX_VERSION')).toBe(1)
   })
 

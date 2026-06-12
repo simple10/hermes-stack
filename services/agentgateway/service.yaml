@@ -25,5 +25,5 @@ images:
     repo: ghcr.io/agentgateway/agentgateway
     default: v1.3.0-alpha.1
 env: |
-  # Image tag/digest knob — resolved to a pinned digest at build time.
-  AGENTGATEWAY_VERSION=v1.3.0-alpha.1
+  # AGENTGATEWAY_VERSION is auto-seeded from images.AGENTGATEWAY.default
+  # (owner-map); no need to hand-declare it here.

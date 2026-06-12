@@ -23,10 +23,15 @@ update:
   sort: semver
 env: |
   # Client key (LiteLLM cliproxy/* model_list entries authenticate with this).
-  # Management key gates the management/OAuth-login web panel. Both
-  # gen-once via `stack-cli setup`; rotating either requires a container
-  # restart and (for CLIPROXY_API_KEY) re-rendering litellms config.runtime.yaml.
+  # Management key gates the management/OAuth-login web panel. Both gen-once via
+  # `stack-cli setup`. These are STACK-OWNED keys in config.runtime.yaml —
+  # build.ts force-syncs them on every build (rotating just needs a restart; no
+  # manual config edit), so edit them HERE, not in the dashboard.
   CLIPROXY_API_KEY=
   CLIPROXY_MANAGEMENT_KEY=
-  # Pinned image tag — bump deliberately.
-  CLIPROXY_VERSION=v7.1.11
+  # Enable CLIProxyAPI's plugin system (plugins.enabled). The dashboard has no
+  # toggle for it, so it's a stack-owned key synced into config.runtime.yaml.
+  # plugins live in the ./plugins bind mount (.stack/cliproxyapi/plugins).
+  CLIPROXY_PLUGINS_ENABLED=false
+  # Pinned image tag — bump deliberately. (v7.1.71 is newest as of 2026-06-12.)
+  CLIPROXY_VERSION=v7.1.70

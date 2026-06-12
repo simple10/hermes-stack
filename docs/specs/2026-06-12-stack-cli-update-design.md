@@ -168,13 +168,52 @@ Precedence (mirrors version resolution): `stackGet('<NAME>_UPDATE_CHANNEL') || u
 
 ---
 
+## Part 5 — Health: out-of-band signal + auto-healing compose probes
+
+**Motivation:** twice (phoenix lost `/bin/sh`, cliproxy lost `wget`) a version bump silently broke a *compose* healthcheck while the app was fine — `unhealthy` despite `/healthz` 200. A naive update health-gate would falsely roll back a working bump. Two layers, decided here:
+
+### 5a. Out-of-band probe (stack-authoritative) — drives info/start AND the update gate
+
+The stack runs its OWN probe of the service's declared endpoint, independent of in-container tooling. Source of truth for `info`/`start` health and the P4 health-gate.
+
+- `service.yaml` gains an optional `health:` block:
+  ```yaml
+  health:
+    path: /healthz   # HTTP GET on the provides endpoint; success = 2xx (default if a web provides exists)
+    port: 8317       # default: primary provides port
+    expect: 200      # default: any 2xx
+    # non-HTTP services instead declare:
+    tcp: true        # success = TCP connect to port (pg/redis)
+  ```
+  Absent ⇒ default to HTTP `/healthz` when the service has an HTTP `provides`, else TCP-connect on the primary provides port.
+- Probe runs from the host via orb DNS (`<svc>.<project>.orb.local:<port>`). Used as `ServiceHealth.version`'s sibling — info shows a stack-derived health, not just Docker's `(healthy)`. This also gives services with NO image healthcheck (agentgateway) a real signal.
+
+### 5b. Auto-healing in-container healthcheck (generated, build-time, folded into P4 apply)
+
+Docker's native healthcheck still matters for `depends_on: condition: service_healthy` ordering — **pg, redis, litellm are depended on this way** by honcho/hindsight/firecrawl/browser-use/phoenix-provision, so their probe is load-bearing (a broken one HANGS dependents at startup). The in-container probe is RESOLVED at build (re-evaluated every build, and by the P4 apply pipeline after a bump), by this precedence:
+
+1. **Image ships its own HEALTHCHECK** (`docker inspect <resolved-image> --format '{{json .Config.Healthcheck}}'` ≠ null, inspect the IMAGE not the container) → inherit it; emit nothing. *Official.*
+2. **`service.yaml health.exec`** (author-vouched in-container CMD, e.g. `pg_isready`) → emit it.
+3. **Neither** → emit the **universal `/proc/net/tcp` LISTEN probe** on the primary provides port (needs only `/bin/sh`+`grep`; no HTTP client; no `$` — compose interpolates `$`/`${}`). NOT tool-sniffing (no wget/curl/nc matrix) — one robust probe.
+4. **Nothing runnable** (scratch/static image) → omit the healthcheck; out-of-band (5a) covers it.
+
+**Build-time verification = the auto-heal:** after pulling the resolved image, run the candidate probe in a throwaway `docker run` and check for **exit 127/126 / "not found"** (a listen-probe on a not-yet-listening port returns 1 = fine; 127 = tooling missing). If the chosen probe would 127, fall to the next tier automatically — this is exactly what would have caught cliproxy's `wget` removal before it ever went unhealthy.
+
+**Load-bearing guard (decision):** if a service that is a `service_healthy` dependency target reaches tier 4 (no runnable probe), **FAIL THE BUILD LOUDLY** — but with actionable remediation, not a bare error:
+- name the service + the dependents that would hang;
+- if the failure followed a version bump, print the **last-known-good version** (from the `_bak/` snapshot / prior `.generated.env` `*_IMAGE_REQUESTED`) and the exact revert command (`stack-cli update <svc> --to <old>` or the manual `*_VERSION=` edit);
+- print how to declare a working `health.exec` override in `service.yaml`.
+
+**Mechanism:** healthchecks move out of the static per-service `compose.yaml` into a build-generated override (e.g. `.stack/<svc>/healthcheck.gen.yaml` layered into the rendered compose, or written by `build.ts`), so the resolved probe is what runs. Services nobody waits on (cliproxy, agentgateway) may legitimately end at tier 4 (no compose healthcheck) and rely on out-of-band only.
+
 ## Implementation phases (this branch)
 
 1. **P1 — Universal knobs** (`services.ts` owner-map + `serviceVersionKnobs` + `stack.ts` seeding). Tests in `scripts/test/`. No network. *Highest value, lowest risk — land first.*
 2. **P2 — Version display** (`health.ts` field + enrich + `render-health.ts` column; `start` inherits via `runInfo`). Tests.
-3. **P3 — Discovery adapters** (`version-sources/`) + **read-only `stack-cli update`**. Tests with mocked HTTP/`gh`.
-4. **P4 — Targeted apply** (`commands/update.ts`: snapshot → resolve → build → restart → health-gate → rollback) + `update:` block + `<NAME>_UPDATE_CHANNEL`. Tests.
-5. **P5 — service.yaml cleanup**: move digest defaults to tags where sensible; drop redundant hand-declared `*_VERSION` env lines.
+3. **P2.5 — Out-of-band health (5a)**: `service.yaml health:` schema + host-side probe; `info`/`start` show stack-derived health (not just Docker `(healthy)`). Foundation reused by the P4 gate. Tests (pure probe-spec resolution; probe with a stub server).
+4. **P3 — Discovery adapters** (`version-sources/`) + **read-only `stack-cli update`**. Tests with mocked HTTP/`gh`.
+5. **P4 — Targeted apply** (`commands/update.ts`: snapshot → resolve → **healthcheck auto-heal (5b)** → build → restart → out-of-band health-gate → rollback) + `update:` block + `<NAME>_UPDATE_CHANNEL`. The 5b resolution also runs at plain `build`. Tests incl. tier-selection + verify-runnable + load-bearing fail-loud-with-remediation.
+6. **P5 — service.yaml cleanup**: move digest defaults to tags where sensible; drop redundant hand-declared `*_VERSION` env lines.
 
 Deferred (not this branch): whole-stack `--latest`, hermes-VM `update`, agentmemory `update`.
 
@@ -183,6 +222,8 @@ Deferred (not this branch): whole-stack `--latest`, hermes-VM `update`, agentmem
 - Unit: owner-map registration for images/source knobs; `serviceVersionKnobs` for single/multi-image/source/none; `blockSync` seeding idempotency; channel precedence; version-string humanization (tag vs digest vs SHA); semver/date sort + channel-regex filter.
 - Adapter tests with fixture payloads (no live network).
 - Apply-pipeline test with a stubbed resolve/restart/health to assert snapshot + rollback-on-unhealthy.
+- Healthcheck resolution: tier selection (image-HC present / `health.exec` / `/proc` fallback / none), the `$`-free `/proc` probe string, verify-runnable 127-detection, and the load-bearing fail-loud path emits last-known-good + revert command.
+- Out-of-band probe-spec resolution (HTTP path/port defaults vs `tcp:`); probe against a local stub server.
 - Reuse the existing `scripts/test/stack.test.ts` harness (`setup()` temp `.stack/.env`).
 
 ## Risks
@@ -190,3 +231,6 @@ Deferred (not this branch): whole-stack `--latest`, hermes-VM `update`, agentmem
 - Owner-map change touches `stackGet`/`stackUpsert` for *all* keys — guard with tests; ensure no collision between an `images:` key and an existing `env:` key.
 - Discovery flakiness/rate-limits (GH/registry) — adapters must fail soft (report "unknown", never block `info`).
 - Seeding must never reorder/clobber existing user lines (rely on `blockSync` additive semantics; test).
+- Healthcheck strings in compose are subject to `$`/`${}` interpolation — the `/proc` probe and any `health.exec` must be `$`-free or `$$`-escaped (test the rendered compose).
+- A bumped substrate image (pg/redis/litellm) with a broken probe can hang every `service_healthy` dependent — the build-time verify + fail-loud guard (5b) is the backstop; never silently drop a load-bearing probe.
+- Build-time `docker run` probe adds latency/needs the image pulled — gate it to images that reached tier 3, cache by digest.

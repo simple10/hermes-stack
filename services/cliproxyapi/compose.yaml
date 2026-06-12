@@ -28,13 +28,26 @@ services:
     expose:
       - "8317"
     volumes:
-      - ../../.stack/cliproxyapi/config.runtime.yaml:/CLIProxyAPI/config.yaml:ro
+      # config.yaml is RW + DASHBOARD-AUTHORITATIVE: the management panel writes
+      # settings (file logging, plugins, providers) back to it. build.ts seeds
+      # it once then never clobbers it (reset: rm the file + stack-cli build).
+      - ../../.stack/cliproxyapi/config.runtime.yaml:/CLIProxyAPI/config.yaml
+      # Persist file logs (logging-to-file) + plugins (plugins.dir: "plugins")
+      # via bind mounts so they survive recreates — same .stack/<svc>/ pattern
+      # as litellm/chatgpt + hermes mounts. Pre-created by build.ts.
+      - ../../.stack/cliproxyapi/logs:/CLIProxyAPI/logs
+      - ../../.stack/cliproxyapi/plugins:/CLIProxyAPI/plugins
       - cliproxyapi-auth:/root/.cli-proxy-api
     healthcheck:
-      # /healthz is the dedicated unauthenticated health route -> 200
-      # {"status":"ok"} when up. busybox wget (alpine; no curl) exits 0 on
-      # 200, non-zero only on connect failure -> correct liveness.
-      test: ["CMD-SHELL", "wget -q -O /dev/null -T3 http://127.0.0.1:8317/healthz 2>/dev/null"]
+      # Liveness = the server is LISTENing on 8317 (hex 207D, state 0A). The
+      # published image is now a slim Debian base (dash + coreutils + grep) with
+      # NO HTTP client — v7.1.69 dropped the alpine busybox wget the old probe
+      # used, so a wget/curl probe exits 127 (command not found) even though
+      # /healthz serves 200. This /proc check needs only grep, no networking
+      # tools, and no `$` (compose interpolates `$`/`${}` in healthcheck args).
+      # Note: port-listen, not HTTP 200 — see the stack-level out-of-band probe
+      # for richer health (docs/specs/2026-06-12-stack-cli-update-design.md).
+      test: ["CMD-SHELL", "grep -qE ':207D [0-9A-F]+:0000 0A' /proc/net/tcp /proc/net/tcp6"]
       interval: 15s
       timeout: 5s
       start_period: 30s

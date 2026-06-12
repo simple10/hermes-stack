@@ -50,6 +50,27 @@ export interface SourceDecl {
   default: string
 }
 
+// Per-service update policy (declarative; user's *active* channel lives in
+// .stack/.env as <SVC_UC>_UPDATE_CHANNEL, never here). `channels` maps a name
+// to a tag-matching regex source; `default` is tracked when the user picks
+// none; `sort` orders candidates. Absent => derive a "same shape" channel from
+// the current pin.
+export interface UpdateDecl {
+  channels: Record<string, string>
+  default: string
+  sort: 'semver' | 'date'
+}
+
+// Out-of-band health probe spec. `path` => HTTP GET on the provides endpoint
+// (success = `expect` or any 2xx/3xx); `tcp` or no path => TCP connect. `port`
+// defaults to the primary provides port.
+export interface HealthDecl {
+  path?: string
+  port?: number
+  expect?: number
+  tcp?: boolean
+}
+
 export interface ServiceDescriptor {
   name: string
   runner: 'docker' | 'vm'
@@ -61,6 +82,8 @@ export interface ServiceDescriptor {
   provides: Record<string, EndpointDecl>
   source: SourceDecl | null
   images: Record<string, ImageDecl>
+  health: HealthDecl | null
+  update: UpdateDecl | null
   env: string // multi-line body (no enclosing quotes)
 }
 
@@ -112,6 +135,30 @@ export const loadService = (name: string): ServiceDescriptor | null => {
     const s = raw.source as Record<string, unknown>
     source = { repo: String(s.repo ?? ''), default: String(s.default ?? '') }
   }
+  let update: UpdateDecl | null = null
+  if (raw.update && typeof raw.update === 'object') {
+    const u = raw.update as Record<string, unknown>
+    const channels: Record<string, string> = {}
+    if (u.channels && typeof u.channels === 'object') {
+      for (const [k, v] of Object.entries(u.channels as Record<string, unknown>))
+        channels[k] = String(v)
+    }
+    update = {
+      channels,
+      default: u.default != null ? String(u.default) : 'stable',
+      sort: u.sort === 'date' ? 'date' : 'semver',
+    }
+  }
+  let health: HealthDecl | null = null
+  if (raw.health && typeof raw.health === 'object') {
+    const hh = raw.health as Record<string, unknown>
+    health = {
+      path: hh.path != null ? String(hh.path) : undefined,
+      port: hh.port != null ? Number(hh.port) : undefined,
+      expect: hh.expect != null ? Number(hh.expect) : undefined,
+      tcp: hh.tcp === true,
+    }
+  }
   const d: ServiceDescriptor = {
     name,
     runner,
@@ -123,6 +170,8 @@ export const loadService = (name: string): ServiceDescriptor | null => {
     provides,
     source,
     images,
+    health,
+    update,
     env: typeof raw.env === 'string' ? raw.env : '',
   }
   cache.set(name, d)
@@ -140,16 +189,115 @@ export const listServices = (): ServiceDescriptor[] => {
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-// Map of every KEY -> owning service, by parsing each service's env block.
-// Cached after first call.
+const svcUc = (svc: string): string => svc.toUpperCase().replace(/-/g, '_')
+
+export interface VersionKnob {
+  key: string // the *_VERSION env knob (e.g. PHOENIX_VERSION, FIRECRAWL_API_VERSION)
+  default: string // images.default or source.default
+  repo: string // upstream repo for discovery
+  kind: 'image' | 'source'
+  imageName?: string // the images: map key (image kind only)
+}
+
+// The version knob(s) a service exposes, derived from its images:/source:
+// blocks. Single source of truth for seeding, display, and update. The knob
+// name mirrors the build resolvers: images use `<NAME>_VERSION` (images.ts),
+// source uses `<SVC_UC>_VERSION` (source.ts).
+export const serviceVersionKnobs = (svc: string): VersionKnob[] => {
+  const d = loadService(svc)
+  if (!d) return []
+  const out: VersionKnob[] = []
+  for (const [name, im] of Object.entries(d.images)) {
+    out.push({
+      key: `${name}_VERSION`,
+      default: im.default,
+      repo: im.repo,
+      kind: 'image',
+      imageName: name,
+    })
+  }
+  if (d.source) {
+    out.push({
+      key: `${svcUc(svc)}_VERSION`,
+      default: d.source.default,
+      repo: d.source.repo,
+      kind: 'source',
+    })
+  }
+  return out
+}
+
+// Plain-tag services pin their version in the compose `image: repo:${X_VERSION}`
+// line (knob in env:, no images:/source: block). serviceTagKnobs recovers the
+// repo + knob from compose so `update` can discover them too. Returns [] for
+// digest-pinned (`image: ${X_IMAGE}`) or source-built services.
+export const serviceTagKnobs = (svc: string): VersionKnob[] => {
+  const f = resolve(SERVICES_DIR, svc, 'compose.yaml')
+  if (!existsSync(f)) return []
+  let doc: { services?: Record<string, { image?: unknown }> }
+  try {
+    doc = (yamlParse(readFileSync(f, 'utf8')) ?? {}) as typeof doc
+  } catch {
+    return []
+  }
+  const out: VersionKnob[] = []
+  const seen = new Set<string>()
+  for (const s of Object.values(doc.services ?? {})) {
+    const img = s?.image
+    if (typeof img !== 'string') continue
+    // repo:${X_VERSION} or repo:${X_VERSION:-default}
+    const m = img.match(/^([^:${}]+):\$\{([A-Za-z_][A-Za-z0-9_]*_VERSION)(?::-[^}]*)?\}$/)
+    if (!m || seen.has(m[2])) continue
+    // Skip a knob owned by ANOTHER service — provisioner one-shots reference a
+    // sibling's image (e.g. *-provision uses pgvector:${PG_VERSION}); that knob
+    // belongs to pg, not this service.
+    const owner = stackEnvOwnerMap().get(m[2])
+    if (owner && owner !== svc) continue
+    seen.add(m[2])
+    out.push({ key: m[2], default: '', repo: m[1], kind: 'image', imageName: undefined })
+  }
+  return out
+}
+
+// The full .stack/.env block schema for a service: its env: body plus a seeded
+// `<KEY>=<default>` line for every version knob the maintainer did NOT already
+// hand-declare in env:. blockSync/blockAppend consume this so every versioned
+// service surfaces an editable knob; additive semantics make it idempotent.
+export const serviceEnvSchema = (svc: string): string => {
+  const d = loadService(svc)
+  if (!d) return ''
+  const knobs = serviceVersionKnobs(svc)
+  if (knobs.length === 0) return d.env
+  const present = new Set(Object.keys(parseEnvBody(d.env)))
+  const missing = knobs.filter((k) => !present.has(k.key))
+  if (missing.length === 0) return d.env
+  const base = d.env.replace(/\n*$/, '')
+  const seeded = [
+    '# image/source version knob — bump then `stack-cli build && stack-cli restart`',
+    ...missing.map((k) => `${k.key}=${k.default}`),
+  ].join('\n')
+  return (base ? base + '\n' : '') + seeded + '\n'
+}
+
+// Map of every KEY -> owning service: each service's env: block keys PLUS its
+// derived version knobs (so digest-pinned services whose knob is not hand-
+// declared in env: still resolve as block-owned). Cached after first call.
 let _ownerCache: Map<string, string> | null = null
 export const stackEnvOwnerMap = (): Map<string, string> => {
   if (_ownerCache) return _ownerCache
   const out = new Map<string, string>()
   for (const svc of listServices()) {
-    if (!svc.env) continue
-    const parsed = parseEnvBody(svc.env)
-    for (const k of Object.keys(parsed)) out.set(k, svc.name)
+    if (svc.env) {
+      const parsed = parseEnvBody(svc.env)
+      for (const k of Object.keys(parsed)) out.set(k, svc.name)
+    }
+    for (const knob of serviceVersionKnobs(svc.name)) {
+      if (!out.has(knob.key)) out.set(knob.key, svc.name)
+    }
+    // The user's update-channel override is block-owned too, so `update` can
+    // write it inside the service's .stack/.env block.
+    const ck = `${svc.name.toUpperCase().replace(/-/g, '_')}_UPDATE_CHANNEL`
+    if (!out.has(ck)) out.set(ck, svc.name)
   }
   _ownerCache = out
   return out

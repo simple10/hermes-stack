@@ -24,7 +24,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs'
 import { STACK_DIR, STACK_ENV } from './paths.ts'
 import { envGet, envUpsert } from './env.ts'
-import { stackEnvOwnerMap, loadService } from './services.ts'
+import { stackEnvOwnerMap, loadService, serviceEnvSchema } from './services.ts'
 import { die } from './log.ts'
 
 export type BlockStatus = 'enabled' | 'disabled' | 'missing'
@@ -285,10 +285,14 @@ const enableOne = (svc: string): void => {
   const csvKey = d.runner === 'vm' ? 'STACK_MACHINES' : 'COMPOSE_PROFILES'
   csvAddTopLevel(csvKey, d.profile)
   if (d.litellmKey) csvAdd('LITELLM_VIRTKEYS', d.profile)
+  // Schema = env: body + seeded version knobs (serviceEnvSchema), so digest-
+  // pinned services surface an editable *_VERSION line and existing blocks
+  // gain it via blockSync's additive merge.
+  const schema = serviceEnvSchema(svc)
   const status = blockStatus(svc)
   if (status === 'disabled') blockToggle(svc, 'enabled')
-  else if (status === 'missing' && d.env) blockAppend(svc, d.env)
-  if (d.env && blockStatus(svc) === 'enabled') blockSync(svc, d.env)
+  else if (status === 'missing' && schema) blockAppend(svc, schema)
+  if (schema && blockStatus(svc) === 'enabled') blockSync(svc, schema)
 }
 
 // csv add for top-level keys (COMPOSE_PROFILES, STACK_MACHINES) — these

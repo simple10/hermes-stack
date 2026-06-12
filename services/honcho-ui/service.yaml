@@ -10,4 +10,7 @@ provides:
 # v0.8.0-5-ge490d91 (main, 2026-05-15)
 source:
   repo: https://github.com/offendingcommit/openconcho
-  default: e490d911fcb27ee193558fd9a28856cde2057665
+  # Release tag (was commit e490d911, 125 commits behind v0.16.0) so `stack-cli
+  # update` can track releases. NOTE: this is a sizable upgrade — test before
+  # merging. stackSource resolves the ref -> commit SHA.
+  default: v0.16.0

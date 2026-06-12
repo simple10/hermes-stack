@@ -143,6 +143,11 @@ export const stackSource = async (
     throw new Error('unreachable')
   }
 
+  // Drop our generated (untracked) .dockerignore before checkout: if the target
+  // ref now TRACKS a .dockerignore (upstream added one between pins), git
+  // refuses to overwrite our untracked file and aborts the checkout.
+  // ensureDockerignore re-applies it (merging `.git/` into upstream's) below.
+  rmSync(resolve(srcDir, '.dockerignore'), { force: true })
   await $`git -C ${srcDir} checkout --detach ${sha}`
   ensureDockerignore(srcDir)
 

@@ -13,6 +13,10 @@ provides:
   # Phoenix UI (traces, projects, evals). OTLP gRPC collector is on :4317 but
   # is an internal ingest endpoint (sibling services only), not a browse URL.
   dashboard: { port: 6006 }
+# Out-of-band health probe (stack-authoritative). Phoenix exposes /healthz.
+health:
+  path: /healthz
+  port: 6006
 images:
   PHOENIX:
     repo: arizephoenix/phoenix

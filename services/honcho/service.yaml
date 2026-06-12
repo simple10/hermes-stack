@@ -10,7 +10,9 @@ provides:
 # v3.0.6-51-g8fcbb54 (main, 2026-05-14)
 source:
   repo: https://github.com/plastic-labs/honcho
-  default: 8fcbb54a49292341dba79d606ee332c50778429b
+  # Release tag (was commit 8fcbb54, 11 commits behind v3.0.9) so `stack-cli
+  # update` can track releases. stackSource resolves the ref -> commit SHA.
+  default: v3.0.9
 env: |
   # Honcho LLM model levers (per-stage; FAST tier for deriver/summary/dream,
   # main tier for dialectic). Edit a value to override that stage; bump the

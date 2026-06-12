@@ -19,7 +19,18 @@ provides:
 images:
   LITELLM:
     repo: ghcr.io/berriai/litellm-database
-    default: sha256:069da8855c7bf0a39861fcd9884f134670128b79aa930a4af0c9219a0433b83f
+    # Tag (was sha256:069da8… == v1.85.0) so `stack-cli update` can track it —
+    # build re-pins to a digest in .generated.env.
+    default: v1.87.2
+# `release` tracks vX.Y.Z (matches the current pin); `stable` tracks the
+# stability-tested main-vX.Y.Z-stable channel (lags). Override per-machine with
+# LITELLM_UPDATE_CHANNEL in .stack/.env.
+update:
+  channels:
+    release: '^v\d+\.\d+\.\d+$'
+    stable: '^main-v\d+\.\d+\.\d+-stable$'
+  default: release
+  sort: semver
 env: |
   # Admin master key + active virtual-key consumer list. Both gen-once via
   # `stack-cli setup`; rotating LITELLM_MASTER_KEY invalidates the SpendLogs DB

@@ -49,6 +49,21 @@ describe('formatServiceLines version column', () => {
     const [line] = formatServiceLines([svcHealth({ version: undefined })])
     expect(strip(line)).toContain('phoenix')
   })
+
+  test('flags an out-of-band unreachable service', () => {
+    const [line] = formatServiceLines([svcHealth({ reachable: false })])
+    expect(strip(line)).toContain('unreachable')
+  })
+
+  test('shows reachable when the container has no docker healthcheck', () => {
+    const [line] = formatServiceLines([svcHealth({ health: 'none', reachable: true })])
+    expect(strip(line)).toContain('reachable')
+  })
+
+  test('does not add a reachability token when probe agrees with docker health', () => {
+    const [line] = formatServiceLines([svcHealth({ health: 'healthy', reachable: true })])
+    expect(strip(line)).not.toContain('reachable')
+  })
 })
 
 describe('parseImageRef', () => {

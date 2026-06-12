@@ -64,8 +64,16 @@ export const formatServiceLines = (services: ServiceHealth[]): string[] => {
     const name = pad(s.service, w)
     const badge = stateBadge(s.run, s.health)
     const ver = s.version ? pc.cyan(`  ${s.version}`) : ''
+    // Out-of-band probe: flag a stack-unreachable service, and surface "reachable"
+    // for containers Docker can't health-check itself (health: none).
+    const reach =
+      s.reachable === false
+        ? pc.red('  unreachable')
+        : s.reachable === true && s.health === 'none'
+          ? pc.green('  reachable')
+          : ''
     const extra = s.containerName ? pc.dim(`  ${s.containerName}`) : ''
-    return `${icon}  ${name}  ${badge}${ver}${extra}`
+    return `${icon}  ${name}  ${badge}${ver}${reach}${extra}`
   })
 }
 

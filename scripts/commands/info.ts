@@ -8,6 +8,7 @@ import { envGet } from '../lib/env.ts'
 import { STACK_ENV } from '../lib/paths.ts'
 import { stackProject } from '../lib/compose-env.ts'
 import { getStackHealth, summarize } from '../lib/health.ts'
+import { enrichReachability } from '../lib/health-probe.ts'
 import {
   formatServiceLines,
   formatMachineLines,
@@ -39,6 +40,8 @@ export const runInfo = async (opts: { showSecrets?: boolean } = {}): Promise<voi
   )
 
   const h = await getStackHealth()
+  // Out-of-band, stack-authoritative reachability (service.yaml health: probes).
+  await enrichReachability(h)
   const s = summarize(h)
 
   p.log.message(

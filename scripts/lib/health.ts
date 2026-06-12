@@ -40,6 +40,7 @@ export interface ServiceHealth {
   health: HealthState
   enabled: boolean // is this service in the active COMPOSE_PROFILES closure?
   version?: string // human-readable running version (tag, or short digest/sha)
+  reachable?: boolean // out-of-band probe result (undefined = not probed)
 }
 
 export interface MachineHealth {

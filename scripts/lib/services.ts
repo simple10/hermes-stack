@@ -50,6 +50,16 @@ export interface SourceDecl {
   default: string
 }
 
+// Out-of-band health probe spec. `path` => HTTP GET on the provides endpoint
+// (success = `expect` or any 2xx/3xx); `tcp` or no path => TCP connect. `port`
+// defaults to the primary provides port.
+export interface HealthDecl {
+  path?: string
+  port?: number
+  expect?: number
+  tcp?: boolean
+}
+
 export interface ServiceDescriptor {
   name: string
   runner: 'docker' | 'vm'
@@ -61,6 +71,7 @@ export interface ServiceDescriptor {
   provides: Record<string, EndpointDecl>
   source: SourceDecl | null
   images: Record<string, ImageDecl>
+  health: HealthDecl | null
   env: string // multi-line body (no enclosing quotes)
 }
 
@@ -112,6 +123,16 @@ export const loadService = (name: string): ServiceDescriptor | null => {
     const s = raw.source as Record<string, unknown>
     source = { repo: String(s.repo ?? ''), default: String(s.default ?? '') }
   }
+  let health: HealthDecl | null = null
+  if (raw.health && typeof raw.health === 'object') {
+    const hh = raw.health as Record<string, unknown>
+    health = {
+      path: hh.path != null ? String(hh.path) : undefined,
+      port: hh.port != null ? Number(hh.port) : undefined,
+      expect: hh.expect != null ? Number(hh.expect) : undefined,
+      tcp: hh.tcp === true,
+    }
+  }
   const d: ServiceDescriptor = {
     name,
     runner,
@@ -123,6 +144,7 @@ export const loadService = (name: string): ServiceDescriptor | null => {
     provides,
     source,
     images,
+    health,
     env: typeof raw.env === 'string' ? raw.env : '',
   }
   cache.set(name, d)

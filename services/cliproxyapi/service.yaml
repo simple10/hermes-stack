@@ -9,6 +9,11 @@ provides:
     port: 8317
     path: /management.html
     auth: { key: "${CLIPROXY_MANAGEMENT_KEY}" }
+# Out-of-band health probe (stack-authoritative; image-tooling-independent).
+# /healthz is the dedicated unauthenticated route -> 200 {"status":"ok"}.
+health:
+  path: /healthz
+  port: 8317
 env: |
   # Client key (LiteLLM cliproxy/* model_list entries authenticate with this).
   # Management key gates the management/OAuth-login web panel. Both

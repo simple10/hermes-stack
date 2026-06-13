@@ -16,6 +16,27 @@ import { stackProject, stackMachines, stackVmName, stackProfiles } from './compo
 import { serviceVersionKnobs } from './services.ts'
 import { generatedGet } from './generated.ts'
 import { humanVersion, requestedKey } from './versions.ts'
+import { composeServiceNames } from './lifecycle.ts'
+import { hasVersionHook, serviceVersionHook } from './svc.ts'
+
+// Map every owned compose-service back to its enabling PROFILE. A "rollup"
+// profile (firecrawl, honcho) owns several compose services (firecrawl-{api,
+// postgres,playwright}); a single-service profile owns just itself. Provisioner
+// one-shots are excluded. Generalizes the old honcho special-case + the fragile
+// `-(api|deriver|ui)` suffix-stripping.
+export const composeOwners = (
+  profiles: string[],
+): { ownerOf: Map<string, string>; ownedByProfile: Map<string, string[]> } => {
+  const ownerOf = new Map<string, string>()
+  const ownedByProfile = new Map<string, string[]>()
+  for (const p of profiles) {
+    const names = composeServiceNames(p).filter((n) => !/(provision|schema)/.test(n))
+    const owned = names.length > 0 ? names : [p]
+    ownedByProfile.set(p, owned)
+    for (const n of owned) if (!ownerOf.has(n)) ownerOf.set(n, p)
+  }
+  return { ownerOf, ownedByProfile }
+}
 
 // Human-readable running version for a compose service: the image tag if the
 // container exposes one, else the requested tag from .generated.env, else a
@@ -47,6 +68,7 @@ export interface MachineHealth {
   service: string // STACK_MACHINES entry, e.g. "hermes"
   vm: string // resolved VM name, e.g. "hermes-node-test-hermes"
   run: 'running' | 'stopped' | 'missing'
+  version?: string // from a services/<svc>/version.ts hook (e.g. hermes API)
 }
 
 export interface StackHealth {
@@ -93,6 +115,9 @@ export const getStackHealth = async (): Promise<StackHealth> => {
     /* docker missing */
   }
 
+  // Resolve which compose services each enabled profile owns (rollup-aware).
+  const { ownerOf, ownedByProfile } = composeOwners([...enabledServices])
+
   const byService = new Map<string, ServiceHealth>()
   for (const line of dockerLines) {
     const [name, status, image, service] = line.split('|')
@@ -109,33 +134,29 @@ export const getStackHealth = async (): Promise<StackHealth> => {
       status,
       run,
       health,
-      version: serviceVersion(service, image),
-      enabled:
-        enabledServices.has(service.replace(/-(api|deriver|ui)$/, () => '')) ||
-        enabledServices.has(service),
+      // Resolve the version via the OWNING PROFILE (firecrawl-api -> firecrawl)
+      // so rollup sub-services inherit the profile's knob/source version. Their
+      // own image is a local build tag with no version.
+      version: serviceVersion(ownerOf.get(service) ?? service, image),
+      enabled: ownerOf.has(service) || enabledServices.has(service),
     })
   }
 
-  // Surface enabled services that have NO container yet (missing).
-  for (const svc of enabledServices) {
-    if (!byService.has(svc)) {
-      byService.set(svc, {
-        service: svc,
-        containerName: '',
-        image: '',
-        status: '(no container)',
-        run: 'missing',
-        health: 'none',
-        version: serviceVersion(svc, ''),
-        enabled: true,
-      })
-    }
-  }
-  // Honcho splits into honcho-api + honcho-deriver inside compose, but
-  // COMPOSE_PROFILES lists "honcho". Drop the synthetic missing row when
-  // either real container exists.
-  if (byService.has('honcho-api') || byService.has('honcho-deriver')) {
-    byService.delete('honcho')
+  // Surface enabled services that are fully DOWN as one synthetic "missing" row
+  // per profile. A rollup whose sub-services are running adds NO row (its
+  // sub-service rows are already present) — this replaces the honcho hardcode.
+  for (const [profile, owned] of ownedByProfile) {
+    if (owned.some((n) => byService.has(n))) continue
+    byService.set(profile, {
+      service: profile,
+      containerName: '',
+      image: '',
+      status: '(no container)',
+      run: 'missing',
+      health: 'none',
+      version: serviceVersion(profile, ''),
+      enabled: true,
+    })
   }
 
   const services = [...byService.values()].sort((a, b) => a.service.localeCompare(b.service))
@@ -165,6 +186,16 @@ export const getStackHealth = async (): Promise<StackHealth> => {
     if (m) run = m.state === 'running' ? 'running' : 'stopped'
     machines.push({ service, vm: vmName, run })
   }
+
+  // Per-service version hooks (services/<svc>/version.ts) for VMs whose version
+  // can't be read generically (hermes -> dashboard API). Only query a running
+  // VM; otherwise N/A without a wasted fetch. Best-effort, parallel.
+  await Promise.all(
+    machines.map(async (m) => {
+      if (!hasVersionHook(m.service)) return
+      m.version = m.run === 'running' ? (await serviceVersionHook(m.service)) || 'N/A' : 'N/A'
+    }),
+  )
 
   return { project, services, machines }
 }

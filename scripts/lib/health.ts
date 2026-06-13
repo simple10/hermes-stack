@@ -16,6 +16,26 @@ import { stackProject, stackMachines, stackVmName, stackProfiles } from './compo
 import { serviceVersionKnobs } from './services.ts'
 import { generatedGet } from './generated.ts'
 import { humanVersion, requestedKey } from './versions.ts'
+import { composeServiceNames } from './lifecycle.ts'
+
+// Map every owned compose-service back to its enabling PROFILE. A "rollup"
+// profile (firecrawl, honcho) owns several compose services (firecrawl-{api,
+// postgres,playwright}); a single-service profile owns just itself. Provisioner
+// one-shots are excluded. Generalizes the old honcho special-case + the fragile
+// `-(api|deriver|ui)` suffix-stripping.
+export const composeOwners = (
+  profiles: string[],
+): { ownerOf: Map<string, string>; ownedByProfile: Map<string, string[]> } => {
+  const ownerOf = new Map<string, string>()
+  const ownedByProfile = new Map<string, string[]>()
+  for (const p of profiles) {
+    const names = composeServiceNames(p).filter((n) => !/(provision|schema)/.test(n))
+    const owned = names.length > 0 ? names : [p]
+    ownedByProfile.set(p, owned)
+    for (const n of owned) if (!ownerOf.has(n)) ownerOf.set(n, p)
+  }
+  return { ownerOf, ownedByProfile }
+}
 
 // Human-readable running version for a compose service: the image tag if the
 // container exposes one, else the requested tag from .generated.env, else a
@@ -93,6 +113,9 @@ export const getStackHealth = async (): Promise<StackHealth> => {
     /* docker missing */
   }
 
+  // Resolve which compose services each enabled profile owns (rollup-aware).
+  const { ownerOf, ownedByProfile } = composeOwners([...enabledServices])
+
   const byService = new Map<string, ServiceHealth>()
   for (const line of dockerLines) {
     const [name, status, image, service] = line.split('|')
@@ -110,32 +133,25 @@ export const getStackHealth = async (): Promise<StackHealth> => {
       run,
       health,
       version: serviceVersion(service, image),
-      enabled:
-        enabledServices.has(service.replace(/-(api|deriver|ui)$/, () => '')) ||
-        enabledServices.has(service),
+      enabled: ownerOf.has(service) || enabledServices.has(service),
     })
   }
 
-  // Surface enabled services that have NO container yet (missing).
-  for (const svc of enabledServices) {
-    if (!byService.has(svc)) {
-      byService.set(svc, {
-        service: svc,
-        containerName: '',
-        image: '',
-        status: '(no container)',
-        run: 'missing',
-        health: 'none',
-        version: serviceVersion(svc, ''),
-        enabled: true,
-      })
-    }
-  }
-  // Honcho splits into honcho-api + honcho-deriver inside compose, but
-  // COMPOSE_PROFILES lists "honcho". Drop the synthetic missing row when
-  // either real container exists.
-  if (byService.has('honcho-api') || byService.has('honcho-deriver')) {
-    byService.delete('honcho')
+  // Surface enabled services that are fully DOWN as one synthetic "missing" row
+  // per profile. A rollup whose sub-services are running adds NO row (its
+  // sub-service rows are already present) — this replaces the honcho hardcode.
+  for (const [profile, owned] of ownedByProfile) {
+    if (owned.some((n) => byService.has(n))) continue
+    byService.set(profile, {
+      service: profile,
+      containerName: '',
+      image: '',
+      status: '(no container)',
+      run: 'missing',
+      health: 'none',
+      version: serviceVersion(profile, ''),
+      enabled: true,
+    })
   }
 
   const services = [...byService.values()].sort((a, b) => a.service.localeCompare(b.service))

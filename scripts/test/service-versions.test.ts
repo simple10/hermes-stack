@@ -51,12 +51,12 @@ describe('serviceVersionKnobs', () => {
 
   test('multi-image service yields one knob per image', async () => {
     const { serviceVersionKnobs } = await fresh()
-    const keys = serviceVersionKnobs('firecrawl').map((k) => k.key)
+    const keys = serviceVersionKnobs('tensorzero').map((k) => k.key)
     expect(keys).toEqual(
       expect.arrayContaining([
-        'FIRECRAWL_API_VERSION',
-        'FIRECRAWL_PLAYWRIGHT_VERSION',
-        'FIRECRAWL_POSTGRES_VERSION',
+        'TENSORZERO_GATEWAY_VERSION',
+        'TENSORZERO_UI_VERSION',
+        'TENSORZERO_POSTGRES_VERSION',
       ]),
     )
   })
@@ -120,10 +120,10 @@ describe('serviceEnvSchema seeds version knobs', () => {
 
   test('multi-image service seeds every knob', async () => {
     const { serviceEnvSchema } = await fresh()
-    const schema = serviceEnvSchema('firecrawl')
-    expect(occurrences(schema, 'FIRECRAWL_API_VERSION')).toBe(1)
-    expect(occurrences(schema, 'FIRECRAWL_PLAYWRIGHT_VERSION')).toBe(1)
-    expect(occurrences(schema, 'FIRECRAWL_POSTGRES_VERSION')).toBe(1)
+    const schema = serviceEnvSchema('tensorzero')
+    expect(occurrences(schema, 'TENSORZERO_GATEWAY_VERSION')).toBe(1)
+    expect(occurrences(schema, 'TENSORZERO_UI_VERSION')).toBe(1)
+    expect(occurrences(schema, 'TENSORZERO_POSTGRES_VERSION')).toBe(1)
   })
 
   test('service with no knobs returns its env: body unchanged', async () => {

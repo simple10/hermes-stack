@@ -27,6 +27,29 @@ export const phasePath = (svc: string, phase: Phase): string =>
 
 export const hasPhase = (svc: string, phase: Phase): boolean => existsSync(phasePath(svc, phase))
 
+// services/<svc>/version.ts — OPTIONAL per-service version hook. Exports a
+// default async function returning the running version string (or '' when
+// unavailable). Used by `info` to override the generic version resolution for
+// services whose version can't be read from an image tag / source pin — e.g.
+// hermes (a self-updating VM; its version is queried from its dashboard API).
+// Returns null when no version.ts exists; '' when the hook errors.
+export const hasVersionHook = (svc: string): boolean =>
+  existsSync(resolve(SERVICES_DIR, svc, 'version.ts'))
+
+export const serviceVersionHook = async (svc: string): Promise<string | null> => {
+  const path = resolve(SERVICES_DIR, svc, 'version.ts')
+  if (!existsSync(path)) return null
+  try {
+    const mod = await import(pathToFileURL(path).href)
+    const fn = (mod.default ?? mod.run) as (() => Promise<unknown>) | undefined
+    if (typeof fn !== 'function') return ''
+    const v = await fn()
+    return typeof v === 'string' ? v : ''
+  } catch {
+    return ''
+  }
+}
+
 // Run services/<svc>/<phase>.ts if it exists. Returns true if it ran,
 // false if no such file. Re-throws any error from the phase.
 export const runPhase = async (svc: string, phase: Phase): Promise<boolean> => {

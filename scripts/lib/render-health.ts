@@ -119,6 +119,7 @@ export const formatMachineLines = (machines: MachineHealth[]): string[] => {
         : m.run === 'stopped'
           ? pc.dim('stopped')
           : pc.red('missing')
-    return `${icon}  ${name}  ${state}  ${pc.dim(`(${m.vm})`)}`
+    const ver = m.version ? pc.cyan(`  ${m.version}`) : ''
+    return `${icon}  ${name}  ${state}${ver}  ${pc.dim(`(${m.vm})`)}`
   })
 }

@@ -17,6 +17,7 @@ import { serviceVersionKnobs } from './services.ts'
 import { generatedGet } from './generated.ts'
 import { humanVersion, requestedKey } from './versions.ts'
 import { composeServiceNames } from './lifecycle.ts'
+import { hasVersionHook, serviceVersionHook } from './svc.ts'
 
 // Map every owned compose-service back to its enabling PROFILE. A "rollup"
 // profile (firecrawl, honcho) owns several compose services (firecrawl-{api,
@@ -67,6 +68,7 @@ export interface MachineHealth {
   service: string // STACK_MACHINES entry, e.g. "hermes"
   vm: string // resolved VM name, e.g. "hermes-node-test-hermes"
   run: 'running' | 'stopped' | 'missing'
+  version?: string // from a services/<svc>/version.ts hook (e.g. hermes API)
 }
 
 export interface StackHealth {
@@ -184,6 +186,16 @@ export const getStackHealth = async (): Promise<StackHealth> => {
     if (m) run = m.state === 'running' ? 'running' : 'stopped'
     machines.push({ service, vm: vmName, run })
   }
+
+  // Per-service version hooks (services/<svc>/version.ts) for VMs whose version
+  // can't be read generically (hermes -> dashboard API). Only query a running
+  // VM; otherwise N/A without a wasted fetch. Best-effort, parallel.
+  await Promise.all(
+    machines.map(async (m) => {
+      if (!hasVersionHook(m.service)) return
+      m.version = m.run === 'running' ? (await serviceVersionHook(m.service)) || 'N/A' : 'N/A'
+    }),
+  )
 
   return { project, services, machines }
 }

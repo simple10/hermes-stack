@@ -13,12 +13,14 @@ import { generatedGet } from '../lib/generated.ts'
 import { requestedKey } from '../lib/versions.ts'
 import { listVersions, pickCandidates } from '../lib/version-sources.ts'
 import { resolveChannel, resolveTarget, channelKey } from '../lib/update-policy.ts'
-import { stackProfiles, stackMachines } from '../lib/compose-env.ts'
+import { stackProfiles, stackMachines, stackVmName } from '../lib/compose-env.ts'
 import { STACK_ENV, STACK_ROOT } from '../lib/paths.ts'
 import { healthProbeSpec, probeOnce } from '../lib/health-probe.ts'
 import { getStackHealth } from '../lib/health.ts'
 import { loadBearingServices } from '../lib/load-bearing.ts'
 import { restartService } from '../lib/lifecycle.ts'
+import { orbExec } from '../lib/orb.ts'
+import { parseHermesVersion } from '../../services/hermes/hermes-version.ts'
 import { runBuild } from './build.ts'
 
 export interface KnobStatus {
@@ -78,6 +80,41 @@ export const discoverableKnobs = (svc: string): VersionKnob[] => {
 export const discoverService = async (svc: string): Promise<KnobStatus[]> =>
   Promise.all(discoverableKnobs(svc).map((k) => discoverKnob(svc, k)))
 
+// ---- self-updating VMs ---------------------------------------------------
+// hermes has no image/source knob: it's a VM that tracks an upstream git repo
+// and updates IN PLACE via `hermes update`. The canonical `hermes --version`
+// reports both the running version and how far behind upstream it is, so we
+// surface that in the same report and apply via `hermes update` in the VM.
+const SELF_UPDATING_VMS = new Set(['hermes'])
+
+export interface VmStatus {
+  svc: string
+  version: string // running semver ('' when unreachable/unparseable)
+  behind: number | null // commits behind upstream (null = up to date / unknown)
+  reachable: boolean
+}
+
+export const discoverVm = async (svc: string): Promise<VmStatus> => {
+  try {
+    const out = await orbExec(stackVmName(svc), 'hermes --version')
+    const { version, behind } = parseHermesVersion(out)
+    return { svc, version, behind, reachable: version !== '' }
+  } catch {
+    return { svc, version: '', behind: null, reachable: false }
+  }
+}
+
+const vmHasUpdate = (v: VmStatus): boolean => v.reachable && (v.behind ?? 0) > 0
+
+const renderVmRow = (v: VmStatus, name: string): string => {
+  if (!v.reachable)
+    return `  ${pc.dim('○')} ${name}  ${pc.dim('unreachable')}  ${pc.dim('(VM stopped?)')}`
+  const ver = pc.dim(`v${v.version}`)
+  if (vmHasUpdate(v))
+    return `  ${pc.yellow('▲')} ${name}  ${ver}  ${pc.yellow(`${v.behind} commit${v.behind! > 1 ? 's' : ''} behind`)} ${pc.dim("— run 'hermes update'")}`
+  return `  ${pc.green('●')} ${name}  ${ver}  ${pc.dim('up to date')}`
+}
+
 const enabledServices = (): string[] => [
   ...stackProfiles()
     .split(',')
@@ -99,17 +136,22 @@ const renderRow = (s: KnobStatus, name: string): string => {
   return `  ${pc.green('●')} ${name}  ${pc.dim(s.current)}  ${pc.dim('up to date')}`
 }
 
-const report = (rows: KnobStatus[]): void => {
-  if (rows.length === 0) {
+const report = (rows: KnobStatus[], vms: VmStatus[] = []): void => {
+  if (rows.length === 0 && vms.length === 0) {
     console.log(pc.dim('  (no versioned services)'))
     return
   }
   const perSvc = new Map<string, number>()
   for (const r of rows) perSvc.set(r.svc, (perSvc.get(r.svc) ?? 0) + 1)
   const labels = new Map(rows.map((r) => [r, rowLabel(r, perSvc)]))
-  const w = [...labels.values()].reduce((m, l) => Math.max(m, l.length), 0)
+  // Shared column width across knob + VM rows so both sections align.
+  const w = [...labels.values(), ...vms.map((v) => v.svc)].reduce(
+    (m, l) => Math.max(m, l.length),
+    0,
+  )
   for (const r of rows) console.log(renderRow(r, labels.get(r)!.padEnd(w)))
-  const n = rows.filter((r) => r.newer).length
+  for (const v of vms) console.log(renderVmRow(v, v.svc.padEnd(w)))
+  const n = rows.filter((r) => r.newer).length + vms.filter(vmHasUpdate).length
   console.log(
     '\n' +
       (n
@@ -120,6 +162,10 @@ const report = (rows: KnobStatus[]): void => {
 }
 
 export const updateService = async (svc: string): Promise<void> => {
+  if (SELF_UPDATING_VMS.has(svc)) {
+    report([], [await discoverVm(svc)])
+    return
+  }
   if (discoverableKnobs(svc).length === 0) {
     console.log(pc.dim(`  ${svc}: no version knob (not a versioned service)`))
     return
@@ -128,10 +174,15 @@ export const updateService = async (svc: string): Promise<void> => {
 }
 
 export const updateAll = async (): Promise<void> => {
-  const svcs = enabledServices().filter((s) => discoverableKnobs(s).length > 0)
-  console.log(pc.bold(`Checking ${svcs.length} services for updates…\n`))
-  const all = (await Promise.all(svcs.map((s) => discoverService(s)))).flat()
-  report(all)
+  const enabled = enabledServices()
+  const svcs = enabled.filter((s) => discoverableKnobs(s).length > 0)
+  const vmSvcs = enabled.filter((s) => SELF_UPDATING_VMS.has(s))
+  console.log(pc.bold(`Checking ${svcs.length + vmSvcs.length} services for updates…\n`))
+  const [all, vms] = await Promise.all([
+    Promise.all(svcs.map((s) => discoverService(s))).then((r) => r.flat()),
+    Promise.all(vmSvcs.map((s) => discoverVm(s))),
+  ])
+  report(all, vms)
 }
 
 // ---- apply pipeline (P4) -------------------------------------------------
@@ -196,7 +247,44 @@ const snapshot = (svc: string): string => {
   return bak
 }
 
+// Apply a self-updating VM bump: run the canonical `hermes update` IN the VM
+// (live output so any prompt is visible), then re-read the version. No knob /
+// rebuild / .stack/.env churn — the VM owns its own update.
+const applyVmUpdate = async (svc: string, opts: ApplyOpts): Promise<void> => {
+  const before = await discoverVm(svc)
+  if (!before.reachable) {
+    console.error(pc.red(`  ${svc}: VM unreachable — is it running?  (stack-cli start ${svc})`))
+    return
+  }
+  if (!vmHasUpdate(before)) {
+    console.log(pc.green(`  ${svc}: already up to date (v${before.version})`))
+    return
+  }
+  console.log(
+    pc.yellow(
+      `  ▲ ${svc}: ${before.behind} commit${before.behind! > 1 ? 's' : ''} behind → \`hermes update\``,
+    ),
+  )
+  if (opts.dryRun) {
+    console.log(pc.dim('\n  --dry-run: no changes applied'))
+    return
+  }
+  console.log(pc.bold(`\nrunning \`hermes update\` in ${stackVmName(svc)}…`))
+  try {
+    await orbExec(stackVmName(svc), 'hermes update', { stdio: 'inherit' })
+  } catch (e) {
+    console.error(pc.red(`\n✗ \`hermes update\` failed: ${(e as Error).message}`))
+    return
+  }
+  const after = await discoverVm(svc)
+  console.log(
+    pc.green(`\n✓ ${svc} now v${after.version}`) +
+      (vmHasUpdate(after) ? pc.yellow(` (still ${after.behind} behind)`) : ''),
+  )
+}
+
 export const applyUpdate = async (svc: string, opts: ApplyOpts): Promise<void> => {
+  if (SELF_UPDATING_VMS.has(svc)) return applyVmUpdate(svc, opts)
   const knobs = discoverableKnobs(svc)
   if (knobs.length === 0) {
     console.log(pc.dim(`  ${svc}: no version knob (not a versioned service)`))

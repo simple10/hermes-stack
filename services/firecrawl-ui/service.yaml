@@ -1,0 +1,18 @@
+# firecrawl-ui — 3rd-party web UI (obeone/firecrawl-ui) for the self-hosted
+# Firecrawl API. Firecrawl ships no UI; this Vue 3 SPA talks DIRECTLY to the
+# Firecrawl API from the browser. We'll likely fork + improve it before
+# officially adopting it; for now it's a source-built service so we can poke
+# around the live API.
+runner: docker
+desc: "Web UI for the self-hosted Firecrawl API (3rd-party, obeone/firecrawl-ui)"
+requires: [firecrawl]
+provides:
+  # nginx (unprivileged) listens :8080; OrbStack fronts it with auto-HTTPS ->
+  # https://firecrawl-ui.<project>.orb.local
+  ui: { port: 8080 }
+# Source-built (no published versioned image we want to depend on). Bump via
+# FIRECRAWL_UI_VERSION in .stack/.env. The repo publishes NO tags, so the pin
+# is a commit SHA (HEAD of main, 2026-06-12). stackSource resolves it locally.
+source:
+  repo: https://github.com/obeone/firecrawl-ui
+  default: 29fcda50b53923b62db258a07b91478596d15927

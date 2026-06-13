@@ -1,0 +1,48 @@
+# firecrawl-ui (obeone/firecrawl-ui) — OPTIONAL web UI for the Firecrawl API.
+# profile [firecrawl-ui]. Project-scoped (no container_name / no shared net).
+# SOURCE-BUILT from the pinned _source tree (services/firecrawl-ui/build.ts ->
+# _source/) via the local Dockerfile; no published image we depend on.
+#
+# Stateless static SPA: NO database, NO secrets, NO model levers. The Firecrawl
+# API base URL is baked at build time (FIRECRAWL_API_BASE_URL arg, see
+# Dockerfile) so the UI opens pre-wired to THIS stack's firecrawl-api over
+# OrbStack auto-HTTPS. The browser hits the API directly (CORS:* + same https
+# scheme — no proxy needed). API key / base URL remain overridable in-app.
+#
+# depends_on firecrawl-api so COMPOSE_PROFILES=firecrawl-ui pulls the API in
+# (the firecrawl pattern). Plain list = service_started only: the static server
+# must not block on (or crash-loop with) firecrawl-api health — nginx serves
+# the bundle regardless; the browser reaches the API at request time.
+#
+# nginx (unprivileged) listens :8080; OrbStack fronts it with auto-HTTPS, so the
+# canonical URL is https (no port):
+#   https://firecrawl-ui.<project>.orb.local
+services:
+  firecrawl-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Project-scoped so multi-stack stays correct; default keeps a plain
+        # `docker compose build` working outside `just`. OrbStack auto-HTTPS
+        # endpoint for firecrawl-api (443 -> container :3002).
+        FIRECRAWL_API_BASE_URL: https://firecrawl-api.${COMPOSE_PROJECT_NAME}.orb.local
+    profiles: [firecrawl-ui]
+    restart: unless-stopped
+    expose:
+      - "8080"
+    depends_on:
+      - firecrawl-api
+    healthcheck:
+      # 127.0.0.1 (not localhost): BusyBox wget resolves localhost to ::1 first
+      # and nginx only listens on IPv4 :8080 -> false "unhealthy".
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 6s
+      start_period: 10s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

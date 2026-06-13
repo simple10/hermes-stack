@@ -31,6 +31,51 @@ Same `https` scheme as the page (no mixed content) and the Firecrawl API returns
 (stored in `localStorage`). The self-hosted API runs with `USE_DB_AUTHENTICATION=false`,
 so the key can be left blank.
 
+## Feature coverage vs. the self-hosted Firecrawl v3 API
+
+The UI has five sections — **Scrape, Crawl, Extract, Map, Search** — and they're deep,
+not just stubs. In particular the **Scrape** view exposes nearly every per-request option:
+`formats`, `actions` (click/scroll/type/JS before scrape), `screenshot`, `changeTracking`,
+inline `json`+`schema` extraction, `location`/`country`, `proxy`, `stealth`, `mobile`,
+`waitFor`, `headers`, include/exclude tags, `maxAge` caching, `parsePDF`, `blockAds`.
+**Crawl** covers limit/depth/path filters/sitemap plus full webhook config.
+
+### Missing from the UI (endpoints with no view)
+
+- **Batch Scrape** (`POST /batch/scrape`) — scrape an explicit *list* of URLs in one async
+  job (distinct from Crawl, which discovers URLs). **The clearest high-value gap** — no UI
+  at all, and it reuses the same async-job + format machinery the Crawl/Extract views
+  already have. Top candidate if we fork.
+- **Monitor** (`/monitor/*`) — scheduled/recurring scrapes + change-detection checks.
+- **Browser sessions** (`/browser/*`, `/scrape/:id/interact`) — persistent live browser.
+  Niche; Scrape's inline `actions` already covers most interactive needs.
+- **Parse** (`POST /parse`) — document/PDF → markdown without a full scrape. Minor.
+- No global "active/ongoing jobs" view (`/crawl/active`, `/crawl/ongoing`).
+
+Not worth building (cloud/billing, irrelevant to self-host): `team/*` (credit/token usage,
+queue-status), `x402/*` (payments), `support/*` (Firecrawl's own docs bot),
+`concurrency-check`.
+
+### Agentic features — NOT functional on self-host
+
+Firecrawl's agentic capabilities are present in the code but **do not work on a vanilla
+self-host**, so the absent **Agent** UI is moot here — don't build one:
+
+- **FIRE-1 Agent** (`/v2/agent`, the "v3-beta" agent) is hard-gated on
+  `EXTRACT_V3_BETA_URL` and proxies to a **closed Firecrawl-hosted backend**
+  (`/internal/extracts`). Unset here (and unsettable without their service). Verified live:
+  `POST /v2/agent` errors with the wrapped *"Agent beta is not enabled."*; `/extract` with
+  `agent.model=v3-beta` is rejected too.
+- The in-scrape **`smartScrape`** agent (`v1Agent` prompt, `useAgent`/`fire-1` extract) is
+  hardcoded to proprietary/external models (`firecrawl/smart-scrape`, `gemini-2.5-pro/flash`)
+  that our litellm→cliproxy can't serve, so it errors in practice.
+
+**What *does* work** is LLM-powered (not autonomous): **structured extraction** via the
+scrape `json`/`schema` format and `/extract` route through **our litellm**
+(`FIRECRAWL_MODEL`) — verified live. Plus scripted scrape `actions`. Real agentic mode
+would require Firecrawl's cloud (`api.firecrawl.dev`); it can't be lit up by configuring
+this stack.
+
 ## Source / version
 
 Source-built from the pinned `_source/` tree. The repo publishes no tags, so the pin is a

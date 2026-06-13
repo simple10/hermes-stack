@@ -160,9 +160,14 @@ const installSystemPackages = async (ctx: Ctx): Promise<void> => {
   // git: required by the hermes installer's clone step. Some upstream
   // versions of install.sh refuse to proceed without it (newer than the
   // the installer requires git for its clone step.
+  // polkitd: lets the unprivileged VM user manage the hermes-* SYSTEM units
+  // without root. `hermes update` drains the gateway via bare `systemctl
+  // restart` (no sudo); without polkit that fails with "Access denied" and a
+  // missing-pkttyagent error. Paired with installPolkitRule() below, which
+  // grants the sudo group passwordless manage-units for hermes-* units only.
   await orbExec(
     ctx.vm,
-    'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates git',
+    'sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils curl ca-certificates git polkitd',
     { stdio: 'inherit' },
   )
 }
@@ -431,6 +436,21 @@ const installUnits = async (ctx: Ctx): Promise<void> => {
     )
     await orbExecWithStdin(ctx.vm, `sudo tee /etc/systemd/system/${unit}.service >/dev/null`, tpl)
   }
+  await installPolkitRule(ctx)
+}
+
+// Grant the sudo group passwordless management of hermes-* SYSTEM units so
+// `hermes update`'s bare `systemctl restart hermes-gateway` works as the
+// unprivileged VM user. Idempotent (tee overwrites). polkitd reads rules.d
+// live, so no daemon restart is needed for new/changed rules.
+const installPolkitRule = async (ctx: Ctx): Promise<void> => {
+  log('6b. polkit rule — sudo group may manage hermes-* units (for `hermes update`)')
+  const rule = readFileSync(resolve(D, 'systemd/49-hermes-systemctl.rules'), 'utf8')
+  await orbExecWithStdin(
+    ctx.vm,
+    'sudo tee /etc/polkit-1/rules.d/49-hermes-systemctl.rules >/dev/null',
+    rule,
+  )
 }
 
 const applyGatewayGate = async (ctx: Ctx): Promise<void> => {

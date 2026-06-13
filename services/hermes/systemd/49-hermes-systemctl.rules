@@ -1,0 +1,22 @@
+// Allow the sudo group to manage hermes-* system units without an interactive
+// auth prompt. Installed by the hermes-stack (services/hermes/build.ts).
+//
+// Why: hermes-agent's `hermes update` drains/restarts the gateway by calling
+// bare `systemctl restart hermes-gateway` (system scope, NO sudo — see
+// hermes_cli/gateway.py). For an unprivileged VM user managing a *system* unit,
+// polkit requires auth_admin and tries to spawn pkttyagent, which HANGS a
+// non-interactive update. This rule grants the grant directly.
+//
+// Scope: narrowed to the `sudo` group AND units whose name starts with
+// "hermes-" — a non-hermes unit (cron, ssh, …) still requires authentication.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id == 'org.freedesktop.systemd1.manage-units' &&
+    subject.isInGroup('sudo')
+  ) {
+    var unit = action.lookup('unit')
+    if (unit && unit.indexOf('hermes-') === 0) {
+      return polkit.Result.YES
+    }
+  }
+})

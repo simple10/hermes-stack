@@ -132,7 +132,10 @@ export const getStackHealth = async (): Promise<StackHealth> => {
       status,
       run,
       health,
-      version: serviceVersion(service, image),
+      // Resolve the version via the OWNING PROFILE (firecrawl-api -> firecrawl)
+      // so rollup sub-services inherit the profile's knob/source version. Their
+      // own image is a local build tag with no version.
+      version: serviceVersion(ownerOf.get(service) ?? service, image),
       enabled: ownerOf.has(service) || enabledServices.has(service),
     })
   }

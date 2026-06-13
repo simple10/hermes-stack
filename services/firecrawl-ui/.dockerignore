@@ -1,0 +1,6 @@
+# Build context is this service dir (COPY _source/...). Keep the heavy/irrelevant
+# bits of the cloned source out of the context tar.
+_source/.git
+_source/node_modules
+_source/dist
+_source/screenshots
